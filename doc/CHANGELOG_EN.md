@@ -76,6 +76,15 @@ Releases by CI.
   refused, not queued. The confirmation shows the risk class, the ordered actions and the stop boundary.
 - In the console Ctrl+C during an operation is STOP (a second Ctrl+C within 3 s forces exit);
   outside an operation and in the UART terminal nothing changed.
+- **Spec stage 2: TUI** (`--tui`, Bubble Tea + Lip Gloss): the console's menus; the UART and event log
+  always on screen (≈35 %, filter, scroll, wrapping); §13 confirmation dialogs with the risk class,
+  actions and stop boundary; port choice and connection; STOP with `s` / Ctrl+C labelled by the core;
+  the UART terminal and Shell full screen with a return to the TUI; the 80×24 layout is covered by tests.
+  Without `--tui` the old console menu starts.
+- The Porting menu items report through the application layer; the console prints the same as before,
+  and the literal `\n` in the UBI attach text is now a line break.
+- Go 1.24 (required by the Charm modules); `probe`: `Info` calls no longer use a non-constant format
+  (a `go vet` requirement).
 - Stage 1 (application layer, STOP, Ctrl+C) passed the hardware check in `doc/HW_SMOKE_STAGE1_RU.md`:
   **HW smoke PASS**.
 - UI spec v3.1 and mockup: STOP states, port chooser, IDs on screen, Porting banners, BootROM wait

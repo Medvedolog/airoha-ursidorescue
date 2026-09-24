@@ -807,6 +807,11 @@ ui/web/  ui/tui/   интерфейсы; hardware-логики здесь нет
 Bubble Tea + Lip Gloss; выбор порта, connect/disconnect; статус; лог UART; навигация Recovery/Probe; полный
 probe; прогресс и подтверждения по §13; 80×24; Linux x86_64 и ARM64; корректная работа по SSH.
 
+*Статус:* реализован (`--tui`, `tui.go`, `tui_model.go`); раскладка 80×24 покрыта тестами; HW и SSH — на
+проверке. Автовыбор §5.5 пока не включён: без флага запускается консоль, пока нет Web-GUI (иначе Windows
+desktop получил бы режим, которого ещё нет). Операции с собственным терминалом (UART-терминал, Shell,
+RAM U-Boot) временно получают консоль целиком через `tea.Exec`.
+
 ### Этап 2б — Детектор «кто на том конце» (§9a)
 Только чтение: BootROM / persistent UrsusBoot (UART, Web) / RAM RECOVERY_SAFE / чужой U-Boot / Linux,
 версия и возможности; в диагностику, Porting и `ursus-profile-v1`.

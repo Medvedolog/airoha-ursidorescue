@@ -139,8 +139,8 @@ https://github.com/Medvedolog/airoha-ursidorescue · этот репозитор
 
 ## Почему UrsidoRescue написан на Go
 
-Остальные ПК-инструменты семейства написаны на Python. Для UrsidoRescue выбран Go (1.23, только
-стандартная библиотека, `CGO_ENABLED=0`). Причины:
+Остальные ПК-инструменты семейства написаны на Python. Для UrsidoRescue выбран Go (1.24, `CGO_ENABLED=0`;
+ядро — только стандартная библиотека). Причины:
 
 1. **Один статический файл на платформу.** `UrsidoRescue.exe` для Windows x64 и
    `UrsidoRescue-linux-amd64` / `-arm64` для Linux — без установщика, без runtime, без DLL. Тот,
@@ -152,7 +152,8 @@ https://github.com/Medvedolog/airoha-ursidorescue · этот репозитор
    `compress/gzip` (сжатые бэкапы), `crypto/sha256`, `hash/crc32`, `encoding/binary`, `flag`.
    COM-порт и консоль реализованы прямо через системные вызовы: termios на Linux, `kernel32.dll`
    (`CreateFileW`, `SetCommState`, `ReadConsoleInputW`, `QueryDosDeviceW` …) на Windows — через
-   `syscall`, без cgo и сторонних пакетов. Поэтому в `go.mod` нет ни одной зависимости.
+   `syscall`, без cgo и сторонних пакетов. Единственные зависимости — pure-Go библиотеки Charm
+   (Bubble Tea, Lip Gloss, Bubbles) для полноэкранного `--tui`, версии закреплены в `go.mod` / `go.sum`.
 4. **Параллельность без боли.** UART-терминал одновременно читает порт, клавиатуру и пишет лог;
    TFTP-сервер крутится рядом с диалогом U-Boot. Горутины и каналы делают это простым и надёжным.
 5. **Строгость и проверяемость.** Статическая типизация, `go vet`, `gofmt` в CI и быстрые тесты,

@@ -118,4 +118,4 @@ Porting Collector работает и с другими устройствами
 ./build.sh    # vet, тесты, Windows x64 + Linux x86_64/arm64 в dist/, selftest
 ```
 
-Нужен только Go ≥ 1.23. Подробности — в [архитектуре](doc/ARCHITECTURE_RU.md#сборка).
+Нужен только Go ≥ 1.24. Подробности — в [архитектуре](doc/ARCHITECTURE_RU.md#сборка).

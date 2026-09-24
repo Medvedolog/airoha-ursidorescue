@@ -139,8 +139,7 @@ when nothing in the router works except the BootROM.
 
 ## Why UrsidoRescue is written in Go
 
-The other PC tools of the family are Python. UrsidoRescue uses Go (1.23, standard library only,
-`CGO_ENABLED=0`). Reasons:
+The other PC tools of the family are Python. UrsidoRescue uses Go (1.24, `CGO_ENABLED=0`; the core uses the standard library only). Reasons:
 
 1. **One static file per platform.** `UrsidoRescue.exe` for Windows x64 and
    `UrsidoRescue-linux-amd64` / `-arm64` for Linux, with no installer, runtime or DLLs. Someone
@@ -152,7 +151,8 @@ The other PC tools of the family are Python. UrsidoRescue uses Go (1.23, standar
    `compress/gzip` (compressed backups), `crypto/sha256`, `hash/crc32`, `encoding/binary`, `flag`.
    The serial port and console are implemented directly with system calls: termios on Linux,
    `kernel32.dll` (`CreateFileW`, `SetCommState`, `ReadConsoleInputW`, `QueryDosDeviceW` …) on
-   Windows, through `syscall`, without cgo or third-party packages. `go.mod` has zero dependencies.
+   Windows, through `syscall`, without cgo or third-party packages. The only dependencies are the pure-Go Charm libraries
+   (Bubble Tea, Lip Gloss, Bubbles) for the full-screen `--tui`, pinned in `go.mod` / `go.sum`.
 4. **Concurrency without pain.** The UART terminal reads the port and the keyboard and writes the
    log at the same time; the TFTP server runs next to the U-Boot dialogue. Goroutines and channels
    make that simple and reliable.

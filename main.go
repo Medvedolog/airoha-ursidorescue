@@ -118,6 +118,11 @@ func main() { os.Exit(realMain()) }
 
 func realMain() int {
 	args, langSet := langFromArgs(os.Args[1:])
+	mode := "console"
+	if len(args) > 0 && (args[0] == "--tui" || args[0] == "--console") {
+		mode = strings.TrimPrefix(args[0], "--")
+		args = args[1:]
+	}
 	interactive := len(args) == 0
 	if !langSet && !interactive {
 		langFromLocale()
@@ -153,6 +158,23 @@ func realMain() int {
 		}
 		fmt.Fprintln(os.Stderr, probeUsage())
 		return 1
+	}
+	if mode == "tui" {
+		if !langSet {
+			langFromLocale()
+		}
+		a.lang = uiLang
+		err := a.runTUI()
+		if err == nil {
+			return 0
+		}
+		if !errors.Is(err, errTUIUnavailable) {
+			fmt.Fprintln(os.Stderr, "[TUI]", err)
+			return 1
+		}
+		fmt.Fprintln(os.Stderr, L("[TUI] полноэкранный режим недоступен (TERM=dumb) — открываю консольное меню", "[TUI] full-screen mode unavailable (TERM=dumb); opening the console menu"))
+		a.front = newConsoleUI(a.reader)
+		a.ui, a.frontEnd = a.front, "console"
 	}
 	if !langSet {
 		a.chooseLanguage()

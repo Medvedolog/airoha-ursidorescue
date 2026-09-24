@@ -179,6 +179,7 @@ func probeUsage() string {
                      [--linux-user U] [--linux-password P] [--stock-lan-assist] [--stop-key S] [--redact] [--no-export] [--unsafe]
                      [--wake] [--ubi-attach]
   ursidorescue export [--input КАТАЛОГ] [--output КАТАЛОГ] [--redact]
+  ursidorescue --tui       полноэкранный интерфейс (без флага — консольное меню)
   общий флаг: --lang ru|en (или переменная URSIDO_LANG)
 
 probe строго только читает: erase/write/saveenv/ubi part не отправляются. Неизвестному загрузчику
@@ -191,6 +192,7 @@ probe строго только читает: erase/write/saveenv/ubi part не 
                      [--linux-user U] [--linux-password P] [--stock-lan-assist] [--stop-key S] [--redact] [--no-export] [--unsafe]
                      [--wake] [--ubi-attach]
   ursidorescue export [--input DIR] [--output DIR] [--redact]
+  ursidorescue --tui       full-screen interface (without it: the console menu)
   common flag: --lang ru|en (or the URSIDO_LANG variable)
 
 probe is strictly read-only: no erase/write/saveenv/ubi part is sent. An unknown bootloader gets
@@ -418,35 +420,10 @@ func (a *App) portingMenu() error {
 		fmt.Println(L("  N. Начать новую probe-сессию (текущая: ", "  N. Start a new probe session (current: ") + displayDir(a.probeDir) + ")")
 		fmt.Println(L("  0. Назад", "  0. Back"))
 		v := strings.ToUpper(a.ask(L("Выбор: ", "Choice: ")))
-		var err error
-		switch v {
-		case "1":
-			err = a.menuProbe(probe.Options{Layers: probe.AllLayers()}, true)
-		case "2":
-			err = a.menuBootROM()
-		case "3":
-			err = a.menuProbe(probe.Options{Layers: probe.Layers{UBoot: true}, UBootOnly: true}, false)
-		case "4":
-			err = a.menuProbe(probe.Options{Layers: probe.Layers{Linux: true}, LinuxOnly: true}, false)
-		case "5":
-			err = a.menuProbe(probe.Options{Layers: probe.Layers{Flash: true}, FirstReachable: true}, false)
-		case "6":
-			err = a.menuProbe(probe.Options{Layers: probe.Layers{DT: true}, FirstReachable: true}, false)
-		case "7":
-			err = a.menuProbe(probe.Options{Layers: probe.Layers{Network: true}, FirstReachable: true}, false)
-		case "8":
-			err = a.menuExport()
-		case "9":
-			err = a.menuView()
-		case "A":
-			err = a.menuUBIAttach()
-		case "N":
-			fmt.Println(L("Новая сессия:", "New session:"), a.newProbeDir())
-		case "0":
+		if v == "0" {
 			return nil
-		default:
-			fmt.Println(L("Неверный выбор.", "Invalid choice."))
 		}
+		err := a.portingItem(v)
 		if err != nil {
 			a.showProbeErr(err)
 		}
@@ -465,6 +442,38 @@ func (a *App) showProbeErr(err error) {
 	fmt.Println(L("Команд записи во flash не отправлялось.", "No flash write commands were sent."))
 }
 
+// portingItem runs one item of the Porting menu (1-9, A, N). It reports only
+// through a.ui, so the console and the TUI share it.
+func (a *App) portingItem(v string) error {
+	switch strings.ToUpper(v) {
+	case "1":
+		return a.menuProbe(probe.Options{Layers: probe.AllLayers()}, true)
+	case "2":
+		return a.menuBootROM()
+	case "3":
+		return a.menuProbe(probe.Options{Layers: probe.Layers{UBoot: true}, UBootOnly: true}, false)
+	case "4":
+		return a.menuProbe(probe.Options{Layers: probe.Layers{Linux: true}, LinuxOnly: true}, false)
+	case "5":
+		return a.menuProbe(probe.Options{Layers: probe.Layers{Flash: true}, FirstReachable: true}, false)
+	case "6":
+		return a.menuProbe(probe.Options{Layers: probe.Layers{DT: true}, FirstReachable: true}, false)
+	case "7":
+		return a.menuProbe(probe.Options{Layers: probe.Layers{Network: true}, FirstReachable: true}, false)
+	case "8":
+		return a.menuExport()
+	case "9":
+		return a.menuView()
+	case "A":
+		return a.menuUBIAttach()
+	case "N":
+		a.noteln(L("Новая сессия:", "New session:"), a.newProbeDir())
+		return nil
+	}
+	a.note(L("Неверный выбор.", "Invalid choice."))
+	return nil
+}
+
 func (a *App) probeAsk(prompt string) string { return a.ask(prompt) }
 
 func (a *App) menuProbe(o probe.Options, export bool) error {
@@ -474,9 +483,9 @@ func (a *App) menuProbe(o probe.Options, export bool) error {
 		o.Wake = true
 	}
 	o.Timeout = 5 * time.Minute
-	fmt.Println(L("\nProbe flash-команды остаются read-only. Stock LAN assist сначала только читает Web-реквизиты; если понадобится включить FTP, будет отдельное y/N с предупреждением об изменении stock-настройки.", "\nProbe flash commands remain read-only. Stock LAN assist first only reads Web credentials; if FTP must be enabled, a separate y/N warns that a stock setting will change."))
-	fmt.Println(L("Подключите UART (GND/TX/RX, 3.3V; VCC не подключать).", "Connect the UART (GND/TX/RX, 3.3V; never connect VCC)."))
-	fmt.Println(L("После запуска включите устройство. Если нужна Linux-часть, probe попросит перезагрузить его после U-Boot.", "After starting, power the device on. For the Linux part the probe will ask you to power-cycle it after U-Boot."))
+	a.note(L("\nProbe flash-команды остаются read-only. Stock LAN assist сначала только читает Web-реквизиты; если понадобится включить FTP, будет отдельное y/N с предупреждением об изменении stock-настройки.", "\nProbe flash commands remain read-only. Stock LAN assist first only reads Web credentials; if FTP must be enabled, a separate y/N warns that a stock setting will change."))
+	a.note(L("Подключите UART (GND/TX/RX, 3.3V; VCC не подключать).", "Connect the UART (GND/TX/RX, 3.3V; never connect VCC)."))
+	a.note(L("После запуска включите устройство. Если нужна Linux-часть, probe попросит перезагрузить его после U-Boot.", "After starting, power the device on. For the Linux part the probe will ask you to power-cycle it after U-Boot."))
 	risk := app.ReadOnly
 	if o.UBIAttach {
 		risk = app.UBIMetadata
@@ -485,21 +494,23 @@ func (a *App) menuProbe(o probe.Options, export bool) error {
 	if err != nil {
 		return err
 	}
-	printProbeSummary(res.profile)
+	a.noteProbeSummary(res.profile)
 	if res.bundle != "" {
-		fmt.Println("Porting bundle:", res.bundle)
+		a.noteln("Porting bundle:", res.bundle)
 	}
-	fmt.Printf(L("Результат probe: код %d (%s)\n", "Probe result: code %d (%s)\n"), res.code, exitText(res.code))
+	a.notef(L("Результат probe: код %d (%s)\n", "Probe result: code %d (%s)\n"), res.code, exitText(res.code))
 	return nil
 }
 
 func (a *App) menuBootROM() error {
-	fmt.Println(L("\nПрофиль BootROM:", "\nBootROM profile:"))
-	fmt.Println(L("  1. Только наблюдать (ничего не отправлять)", "  1. Observe only (send nothing)"))
-	fmt.Println(L("  2. Ответить x на 'Press x' и проверить XMODEM 'C'", "  2. Answer 'Press x' with x and check the XMODEM 'C'"))
-	fmt.Println(L("  3. Загрузить RAM U-Boot UrsidoRescue (только Nokia MD/MF) и собрать U-Boot/flash профиль", "  3. Load UrsidoRescue's RAM U-Boot (Nokia MD/MF only) and collect the U-Boot/flash profile"))
-	v := a.ask(L("Выбор [1]: ", "Choice [1]: "))
-	switch v {
+	v, _ := a.ui.Ask(app.AskRequest{Kind: app.AskChoice, Title: L("\nПрофиль BootROM:", "\nBootROM profile:"),
+		Choices: []app.Choice{
+			{Key: "1", Label: L("Только наблюдать (ничего не отправлять)", "Observe only (send nothing)")},
+			{Key: "2", Label: L("Ответить x на 'Press x' и проверить XMODEM 'C'", "Answer 'Press x' with x and check the XMODEM 'C'")},
+			{Key: "3", Label: L("Загрузить RAM U-Boot UrsidoRescue (только Nokia MD/MF) и собрать U-Boot/flash профиль", "Load UrsidoRescue's RAM U-Boot (Nokia MD/MF only) and collect the U-Boot/flash profile")},
+		},
+		Prompt: L("Выбор [1]: ", "Choice [1]: ")})
+	switch strings.TrimSpace(v) {
 	case "", "1":
 		return a.menuProbe(probe.Options{Layers: probe.Layers{BootROM: true}, LinuxOnly: true, NoLinux: true, Timeout: 3 * time.Minute}, false)
 	case "2":
@@ -517,8 +528,8 @@ func (a *App) menuBootROM() error {
 		if err != nil {
 			return err
 		}
-		printProbeSummary(res.profile)
-		fmt.Printf(L("Результат probe: код %d (%s)\n", "Probe result: code %d (%s)\n"), res.code, exitText(res.code))
+		a.noteProbeSummary(res.profile)
+		a.notef(L("Результат probe: код %d (%s)\n", "Probe result: code %d (%s)\n"), res.code, exitText(res.code))
 		return nil
 	}
 	return errors.New(L("неверный выбор", "invalid choice"))
@@ -526,9 +537,9 @@ func (a *App) menuBootROM() error {
 
 // menuUBIAttach is the only way to let U-Boot attach UBI from the menu.
 func (a *App) menuUBIAttach() error {
-	fmt.Println(L("\\nADVANCED: U-Boot выполнит ubi part для раздела с UBI-заголовком, чтобы прочитать список томов и хеш FIP.", "\\nADVANCED: U-Boot will run ubi part on the partition with a UBI header to read the volume list and the FIP hash."))
-	fmt.Println(L("Это НЕ read-only: при attach UBI может изменить volume table (auto-resize), записать fastmap или перенести блоки.", "This is NOT read-only: attaching UBI may change the volume table (auto-resize), write a fastmap or move blocks."))
-	fmt.Println(L("Для списка томов без записи лучше загрузить Linux и взять ubinfo -a (обычный probe делает это сам).", "For the volume list without writes, boot Linux and use ubinfo -a (the normal probe does that)."))
+	a.note(L("\nADVANCED: U-Boot выполнит ubi part для раздела с UBI-заголовком, чтобы прочитать список томов и хеш FIP.", "\nADVANCED: U-Boot will run ubi part on the partition with a UBI header to read the volume list and the FIP hash."))
+	a.note(L("Это НЕ read-only: при attach UBI может изменить volume table (auto-resize), записать fastmap или перенести блоки.", "This is NOT read-only: attaching UBI may change the volume table (auto-resize), write a fastmap or move blocks."))
+	a.note(L("Для списка томов без записи лучше загрузить Linux и взять ubinfo -a (обычный probe делает это сам).", "For the volume list without writes, boot Linux and use ubinfo -a (the normal probe does that)."))
 	if err := a.confirm(app.UBIMetadata, "UBI ATTACH"); err != nil {
 		return err
 	}
@@ -552,7 +563,7 @@ func (a *App) menuExport() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("Porting bundle:", z)
+	a.noteln("Porting bundle:", z)
 	return nil
 }
 
@@ -568,9 +579,9 @@ func (a *App) menuView() error {
 	if err != nil {
 		return err
 	}
-	printProbeSummary(p)
-	fmt.Println(L("Полный профиль:", "Full profile:"), filepath.Join(dir, "profile.json"))
-	fmt.Println(L("Отчёт UrsusBoot:", "UrsusBoot report:"), filepath.Join(dir, "ursusboot-porting-report.md"))
+	a.noteProbeSummary(p)
+	a.noteln(L("Полный профиль:", "Full profile:"), filepath.Join(dir, "profile.json"))
+	a.noteln(L("Отчёт UrsusBoot:", "UrsusBoot report:"), filepath.Join(dir, "ursusboot-porting-report.md"))
 	return nil
 }
 
@@ -597,27 +608,43 @@ func fv(f *probe.Fact) string {
 	return fmt.Sprintf("%v [%s]", f.Value, f.Confidence)
 }
 
+// printProbeSummary is the CLI's rendering of the profile summary.
 func printProbeSummary(p *probe.Profile) {
-	if p == nil {
-		return
+	for _, l := range probeSummaryLines(p) {
+		fmt.Println(l)
 	}
-	fmt.Println("\n=== ursus-profile-v1 ===")
-	fmt.Println("SoC:         ", fv(&p.SoC.Fact))
-	fmt.Println(L("Модель:      ", "Model:       "), fv(p.Device["model"]))
-	fmt.Println("Compatible:  ", fv(p.Device["compatible"]))
+}
+
+// noteProbeSummary reports the profile summary through the UI.
+func (a *App) noteProbeSummary(p *probe.Profile) {
+	for _, l := range probeSummaryLines(p) {
+		a.note(l)
+	}
+}
+
+func probeSummaryLines(p *probe.Profile) []string {
+	if p == nil {
+		return nil
+	}
+	var out []string
+	ln := func(args ...any) { out = append(out, strings.TrimSuffix(fmt.Sprintln(args...), "\n")) }
+	ln("\n=== ursus-profile-v1 ===")
+	ln("SoC:         ", fv(&p.SoC.Fact))
+	ln(L("Модель:      ", "Model:       "), fv(p.Device["model"]))
+	ln("Compatible:  ", fv(p.Device["compatible"]))
 	ram := L("неизвестно", "unknown")
 	if f := p.Device["ram_mib"]; f != nil && f.Value != nil {
 		ram = fmt.Sprintf("%v MiB [%s]", f.Value, f.Confidence)
 	} else if f != nil && f.Note == "conflict" {
 		ram = L("КОНФЛИКТ", "CONFLICT")
 	}
-	fmt.Println("RAM:         ", ram)
-	fmt.Println("Flash:       ", fv(p.Flash.Type), "/", fv(p.Flash.Manufacturer), L("/ размер", "/ size"), fv(p.Flash.TotalSize), L("/ блок", "/ erase"), fv(p.Flash.EraseSize), L("/ страница", "/ page"), fv(p.Flash.PageSize))
-	fmt.Println("U-Boot:      ", p.UBoot["detected"], p.UBoot["version"], p.UBoot["source"])
-	fmt.Println("Linux:       ", p.Linux["detected"], p.Linux["os"])
-	fmt.Println("BootROM:     ", p.BootROM["detected"], "xmodem:", p.BootROM["xmodem"])
+	ln("RAM:         ", ram)
+	ln("Flash:       ", fv(p.Flash.Type), "/", fv(p.Flash.Manufacturer), L("/ размер", "/ size"), fv(p.Flash.TotalSize), L("/ блок", "/ erase"), fv(p.Flash.EraseSize), L("/ страница", "/ page"), fv(p.Flash.PageSize))
+	ln("U-Boot:      ", p.UBoot["detected"], p.UBoot["version"], p.UBoot["source"])
+	ln("Linux:       ", p.Linux["detected"], p.Linux["os"])
+	ln("BootROM:     ", p.BootROM["detected"], "xmodem:", p.BootROM["xmodem"])
 	if len(p.MTD) > 0 {
-		fmt.Println("MTD:")
+		ln("MTD:")
 		for _, e := range p.MTD {
 			off, sz := "?", "?"
 			if e.Offset != nil {
@@ -633,16 +660,17 @@ func printProbeSummary(p *probe.Profile) {
 			if e.DeviceSpecific {
 				flag += " device-specific"
 			}
-			fmt.Printf("  %-16s off=%s size=%s [%s]%s\n", e.Name, off, sz, e.Confidence, flag)
+			out = append(out, fmt.Sprintf("  %-16s off=%s size=%s [%s]%s", e.Name, off, sz, e.Confidence, flag))
 		}
 	}
 	for _, c := range p.Conflicts {
-		fmt.Println(L("КОНФЛИКТ:", "CONFLICT:"), c.Field)
+		ln(L("КОНФЛИКТ:", "CONFLICT:"), c.Field)
 	}
 	if m, ok := p.Completeness["missing"].([]string); ok && len(m) > 0 {
-		fmt.Println(L("Не хватает:", "Missing:"), strings.Join(m, ", "))
+		ln(L("Не хватает:", "Missing:"), strings.Join(m, ", "))
 	}
 	for _, w := range p.Warnings {
-		fmt.Println(L("ВНИМАНИЕ:", "WARN:"), w)
+		ln(L("ВНИМАНИЕ:", "WARN:"), w)
 	}
+	return out
 }

@@ -116,4 +116,4 @@ Everything else, step by step, is in the [operator guide](doc/GUIDE_EN.md) and t
 ./build.sh    # vet, tests, Windows x64 + Linux x86_64/arm64 into dist/, selftest
 ```
 
-Only Go ≥ 1.23 is required. Details: [architecture](doc/ARCHITECTURE_EN.md#build).
+Only Go ≥ 1.24 is required. Details: [architecture](doc/ARCHITECTURE_EN.md#build).

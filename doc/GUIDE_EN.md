@@ -210,6 +210,31 @@ On an interactive terminal the program's messages are coloured (the UrsusBoot/Ur
 palette). `NO_COLOR=1`, `TERM=dumb` or redirecting output to a file gives plain text. The router's own
 output and the UART logs are never coloured.
 
+**Full-screen mode (TUI):** `--tui` opens a full-terminal interface: the same menus as the console
+(Main, Porting, Expert), the UART and event log always at the bottom, confirmations in their own
+window. Handy over SSH, on a Raspberry Pi and on other Linux systems without a desktop; the terminal
+must be at least 80×24.
+
+```
+./UrsidoRescue-linux-arm64 --tui
+UrsidoRescue.exe --tui --lang en
+```
+
+| key | action |
+|---|---|
+| ↑ ↓, ← → / Tab | pick an item and a section |
+| Enter | run the item; answer a dialog |
+| p | choose and connect the UART port (or disconnect) |
+| s, Ctrl+C | STOP during an operation; the core decides (a second Ctrl+C within 3 s forces exit) |
+| PgUp / PgDn, End | scroll the log, jump to new lines |
+| f | log filter: all / UART / events |
+| m | large log |
+| q | quit (when no operation runs) |
+
+The UART terminal, UART Shell and "RAM U-Boot and prompt" open full screen as in the console; the TUI
+comes back when you leave them. Without `--tui` the console menu starts as before. With `TERM=dumb`
+the TUI is unavailable: the program says so and opens the console menu. `NO_COLOR` turns colours off.
+
 **Command line:**
 
 | command | does |

@@ -139,7 +139,7 @@ func Collect(s *Session, o Options) Outcome {
 	}
 	c.wantBR = ly.BootROM && o.BootROMHandshake
 	if o.Unsafe {
-		s.Info(L("--unsafe принят, но probe mode остаётся строго read-only (guard не отключается).", "--unsafe accepted, but probe mode stays strictly read-only (the guard is not disabled)."))
+		s.Info("%s", L("--unsafe принят, но probe mode остаётся строго read-only (guard не отключается).", "--unsafe accepted, but probe mode stays strictly read-only (the guard is not disabled)."))
 		c.res.Notes = append(c.res.Notes, "--unsafe was given; probe mode ignores it and stays read-only")
 	}
 	c.loadSampled()
@@ -259,7 +259,7 @@ func (c *collector) step() {
 			// Passive by default: nothing is sent to a device whose firmware
 			// has not identified itself.
 			if s.RxBytes() == 0 {
-				s.Info(L("С UART ничего не приходит. Включите устройство; проверьте GND/TX/RX (TX↔RX) и 115200. Если устройство уже работает и стоит в prompt — запустите с --wake.", "Nothing arrives on the UART. Power the device on; check GND/TX/RX (TX↔RX) and 115200 baud. If it is already running at a prompt, run with --wake."))
+				s.Info("%s", L("С UART ничего не приходит. Включите устройство; проверьте GND/TX/RX (TX↔RX) и 115200. Если устройство уже работает и стоит в prompt — запустите с --wake.", "Nothing arrives on the UART. Power the device on; check GND/TX/RX (TX↔RX) and 115200 baud. If it is already running at a prompt, run with --wake."))
 			} else {
 				c.tryPrompt(true)
 			}
@@ -269,7 +269,7 @@ func (c *collector) step() {
 		_ = s.sendKeys("Ctrl-C (--wake: look for a prompt)", []byte{0x03})
 		_, _ = s.Drain(s.T.Quiet, 3*time.Second)
 		if !c.tryPrompt(true) && s.RxBytes() == 0 {
-			s.Info(L("С UART ничего не приходит. Проверьте GND/TX/RX (TX↔RX), 115200, и питание устройства.", "Nothing arrives on the UART. Check GND/TX/RX (TX↔RX), 115200 baud and device power."))
+			s.Info("%s", L("С UART ничего не приходит. Проверьте GND/TX/RX (TX↔RX), 115200, и питание устройства.", "Nothing arrives on the UART. Check GND/TX/RX (TX↔RX), 115200 baud and device power."))
 		}
 	}
 }
@@ -345,7 +345,7 @@ func (c *collector) tryPrompt(idle bool) bool {
 
 func (c *collector) interruptAutoboot() {
 	s := c.s
-	s.Info(L("Обнаружен U-Boot autoboot — прерываю (Ctrl-C/Esc, без Enter).", "U-Boot autoboot detected — interrupting (Ctrl-C/Esc, no Enter)."))
+	s.Info("%s", L("Обнаружен U-Boot autoboot — прерываю (Ctrl-C/Esc, без Enter).", "U-Boot autoboot detected — interrupting (Ctrl-C/Esc, no Enter)."))
 	end := s.now().Add(10 * time.Second)
 	for s.now().Before(end) {
 		keys := []byte{0x03}
@@ -396,7 +396,7 @@ func (c *collector) enterUBoot(prompt string) {
 		c.noInterrupt = true
 		c.lastRx = c.s.now()
 		c.kicked = true
-		c.s.Info(L("U-Boot собран. Для Linux-части ВЫКЛЮЧИТЕ и ВКЛЮЧИТЕ питание (Reset не держать). Прерывать загрузку больше не буду.", "U-Boot collected. For the Linux part, POWER-CYCLE the device (do not hold Reset). Boot will not be interrupted again."))
+		c.s.Info("%s", L("U-Boot собран. Для Linux-части ВЫКЛЮЧИТЕ и ВКЛЮЧИТЕ питание (Reset не держать). Прерывать загрузку больше не буду.", "U-Boot collected. For the Linux part, POWER-CYCLE the device (do not hold Reset). Boot will not be interrupted again."))
 	}
 }
 
@@ -716,7 +716,7 @@ func (c *collector) login() {
 func (c *collector) bootromHandshake() {
 	s := c.s
 	before := s.Seen("xmodem_c")
-	s.Info(L("BootROM 'Press x' — отправляю x и жду XMODEM 'C' (в flash ничего не пишется).", "BootROM 'Press x' — sending x and waiting for XMODEM 'C' (nothing is written to flash)."))
+	s.Info("%s", L("BootROM 'Press x' — отправляю x и жду XMODEM 'C' (в flash ничего не пишется).", "BootROM 'Press x' — sending x and waiting for XMODEM 'C' (nothing is written to flash)."))
 	_ = s.sendKeys("x (BootROM)", []byte("x"))
 	end := s.now().Add(s.T.HandshakeWait)
 	for s.now().Before(end) && s.Seen("xmodem_c") <= before {
@@ -929,9 +929,9 @@ func (c *collector) collectUBoot(u *UBoot) {
 		}
 	}
 	if c.ubiAttached {
-		s.Info(L("U-Boot probe завершён. ВНИМАНИЕ: выполнялся ubi part — UBI мог записать во flash (advanced-режим).", "U-Boot probe finished. WARNING: ubi part was run — UBI may have written to flash (advanced mode)."))
+		s.Info("%s", L("U-Boot probe завершён. ВНИМАНИЕ: выполнялся ubi part — UBI мог записать во flash (advanced-режим).", "U-Boot probe finished. WARNING: ubi part was run — UBI may have written to flash (advanced mode)."))
 	} else {
-		s.Info(L("U-Boot probe завершён; команд записи не отправлялось.", "U-Boot probe finished; no write commands were sent."))
+		s.Info("%s", L("U-Boot probe завершён; команд записи не отправлялось.", "U-Boot probe finished; no write commands were sent."))
 	}
 }
 
@@ -1283,7 +1283,7 @@ func (c *collector) readHexFromLinux(l *Linux, src string, pipe bool) ([]byte, b
 
 func (c *collector) collectLinux(l *Linux) {
 	s, ly := c.s, c.o.Layers
-	s.Info(L("Linux probe — только read-only команды.", "Linux probe — read-only commands only."))
+	s.Info("%s", L("Linux probe — только read-only команды.", "Linux probe — read-only commands only."))
 	if ly.Linux || ly.UBoot {
 		c.lxRun(l, "cat /proc/cpuinfo", "linux/cpuinfo.txt", 0)
 		c.lxRun(l, "cat /proc/cmdline", "linux/cmdline.txt", 0)
@@ -1333,7 +1333,7 @@ func (c *collector) collectLinux(l *Linux) {
 		c.lxRun(l, "cat /sys/kernel/debug/gpio", "gpio/linux-debug-gpio.txt", 0)
 		c.lxRun(l, "ls /sys/class/leds", "gpio/linux-leds.txt", 0)
 	}
-	s.Info(L("Linux probe завершён; flash не изменялась.", "Linux probe finished; flash was not changed."))
+	s.Info("%s", L("Linux probe завершён; flash не изменялась.", "Linux probe finished; flash was not changed."))
 }
 
 func (c *collector) sampleLinuxMTD(l *Linux, parts []ProcMTD) {

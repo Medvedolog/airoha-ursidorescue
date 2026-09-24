@@ -17,8 +17,7 @@ var consoleFrontEnd = map[string]bool{
 	"realMain": true, "run": true, "showErr": true, "expertMenu": true, "bold": true,
 	// main_probe.go
 	"cliProbe": true, "cliExport": true, "portingMenu": true, "showProbeErr": true,
-	"menuProbe": true, "menuBootROM": true, "menuUBIAttach": true, "menuExport": true,
-	"menuView": true, "printProbeSummary": true,
+	"printProbeSummary": true,
 	// console_ui.go drawing helpers
 	"consoleColorEnabled": true, "paint": true, "uiRule": true, "uiStatus": true,
 	"eventTone": true, "uiEvent": true,
