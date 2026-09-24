@@ -1,3 +1,22 @@
+# UrsidoRescue 0.2.0-test8-dev
+
+Status: **HW terminal debugging / unreleased.** Real Windows/OpenWrt testing of v0.2.0-test7
+showed that local Ctrl+P/Ctrl+Q were visible but ordinary keys and Enter could be dropped in the
+new raw-console path. The COM transport itself remained open.
+
+## 0.2.0-test8-dev
+
+- Windows terminal input now uses ReadConsoleInputW + KEY_EVENT_RECORD instead of ReadFile/os.Stdin
+  bytes under VIRTUAL_TERMINAL_INPUT.
+- Enter, Backspace, printable ASCII and arrow/Home/End/Delete keys are translated explicitly;
+  arrows become one complete ANSI sequence before the UART write path sees them.
+- Ctrl+Q, Ctrl+P, Ctrl+C, Ctrl+D and Ctrl+] are translated locally from Windows key events.
+- Non-Latin Unicode input is preserved long enough for the ASCII gate to reject it reliably before
+  UART transmission, with the existing keyboard-layout warning.
+- VIRTUAL_TERMINAL_INPUT is disabled on stdin; QuickEdit remains enabled for Windows clipboard use.
+- Linux terminal input is unchanged.
+- Pure-Go regression tests cover Windows Enter/arrows/control keys and Cyrillic rejection.
+
 # UrsidoRescue 0.2.0-test7
 
 Status: **simulation PASS / HW PARTIAL.** Real OpenWrt testing of v0.2.0-test6 showed that

@@ -54,3 +54,7 @@ func consoleRows() int {
 	}
 	return 24
 }
+
+func consoleReadInput(buf []byte) (int, error) {
+	return os.Stdin.Read(buf)
+}

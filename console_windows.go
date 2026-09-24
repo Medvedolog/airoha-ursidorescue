@@ -13,6 +13,7 @@ type consoleState struct{ mode uint32 }
 var pGetConsoleMode = k32.NewProc("GetConsoleMode")
 var pSetConsoleMode = k32.NewProc("SetConsoleMode")
 var pGetConsoleScreenBufferInfo = k32.NewProc("GetConsoleScreenBufferInfo")
+var pReadConsoleInputW = k32.NewProc("ReadConsoleInputW")
 
 func consoleRaw() (*consoleState, error) {
 	h := syscall.Handle(os.Stdin.Fd())
@@ -21,9 +22,10 @@ func consoleRaw() (*consoleState, error) {
 	if r == 0 {
 		return nil, syscall.GetLastError()
 	}
-	// Keep raw keyboard delivery for UART, but leave QuickEdit enabled so the
-	// Windows console still supports native selection/copy/paste. EXTENDED_FLAGS
-	// is required when changing QUICK_EDIT_MODE.
+	// ReadConsoleInputW below consumes KEY_EVENT_RECORDs directly. Do not enable
+	// VIRTUAL_TERMINAL_INPUT here: mixing VT translation with os/File reads was
+	// the cause of test7 dropping normal keys/Enter on real Windows consoles.
+	// QuickEdit stays enabled for native mouse selection/copy/paste.
 	const (
 		enableProcessedInput = 0x0001
 		enableLineInput      = 0x0002
@@ -32,8 +34,8 @@ func consoleRaw() (*consoleState, error) {
 		enableExtendedFlags  = 0x0080
 		enableVTInput        = 0x0200
 	)
-	mode := old &^ (enableProcessedInput | enableLineInput | enableEchoInput)
-	mode |= enableVTInput | enableExtendedFlags | enableQuickEditMode
+	mode := old &^ (enableProcessedInput | enableLineInput | enableEchoInput | enableVTInput)
+	mode |= enableExtendedFlags | enableQuickEditMode
 	r, _, _ = pSetConsoleMode.Call(uintptr(h), uintptr(mode))
 	if r == 0 {
 		return nil, syscall.GetLastError()
@@ -78,4 +80,72 @@ func consoleRows() int {
 		}
 	}
 	return 24
+}
+
+const winKeyEvent = 0x0001
+
+type winInputRecord struct {
+	EventType uint16
+	_         uint16
+	Event     [16]byte
+}
+
+type winKeyEventRecord struct {
+	KeyDown         int32
+	RepeatCount     uint16
+	VirtualKeyCode  uint16
+	VirtualScanCode uint16
+	UnicodeChar     uint16
+	ControlKeyState uint32
+}
+
+var consoleInputPending []byte
+
+// consoleReadInput reads Windows KEY_EVENT_RECORDs rather than relying on
+// ReadFile/VT-input translation. That gives deterministic Enter, arrows,
+// control shortcuts, Unicode-layout detection and pasted text.
+func consoleReadInput(buf []byte) (int, error) {
+	if len(buf) == 0 {
+		return 0, nil
+	}
+	if len(consoleInputPending) > 0 {
+		n := copy(buf, consoleInputPending)
+		consoleInputPending = consoleInputPending[n:]
+		return n, nil
+	}
+	h := syscall.Handle(os.Stdin.Fd())
+	for {
+		var rec winInputRecord
+		var nrec uint32
+		r, _, _ := pReadConsoleInputW.Call(
+			uintptr(h),
+			uintptr(unsafe.Pointer(&rec)),
+			1,
+			uintptr(unsafe.Pointer(&nrec)),
+		)
+		if r == 0 {
+			return 0, syscall.GetLastError()
+		}
+		if nrec == 0 || rec.EventType != winKeyEvent {
+			continue
+		}
+		key := (*winKeyEventRecord)(unsafe.Pointer(&rec.Event[0]))
+		if key.KeyDown == 0 {
+			continue
+		}
+		out := translateWindowsConsoleKey(
+			key.VirtualKeyCode,
+			rune(key.UnicodeChar),
+			key.ControlKeyState,
+			key.RepeatCount,
+		)
+		if len(out) == 0 {
+			continue
+		}
+		n := copy(buf, out)
+		if n < len(out) {
+			consoleInputPending = append(consoleInputPending[:0], out[n:]...)
+		}
+		return n, nil
+	}
 }

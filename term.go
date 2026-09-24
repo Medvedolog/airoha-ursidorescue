@@ -112,6 +112,77 @@ func (d *ansiDecoder) decodeEsc() []keyEvent {
 	return nil // unknown sequence: ignore
 }
 
+
+const (
+	winVKHome   = 0x24
+	winVKLeft   = 0x25
+	winVKUp     = 0x26
+	winVKRight  = 0x27
+	winVKDown   = 0x28
+	winVKEnd    = 0x23
+	winVKDelete = 0x2e
+	winVKQ      = 0x51
+	winVKP      = 0x50
+	winVKC      = 0x43
+	winVKD      = 0x44
+	winVKOEM6   = 0xdd
+
+	winRightCtrlPressed = 0x0004
+	winLeftCtrlPressed  = 0x0008
+)
+
+// translateWindowsConsoleKey converts one Windows KEY_EVENT_RECORD into the
+// same byte stream the terminal backend expects on POSIX: printable/control
+// bytes plus ANSI cursor sequences. Keeping this translation in pure Go makes
+// Windows keyboard semantics testable on the Linux CI runner.
+func translateWindowsConsoleKey(vk uint16, ch rune, controlState uint32, repeat uint16) []byte {
+	if repeat == 0 {
+		repeat = 1
+	}
+	var one []byte
+	if ch != 0 {
+		one = []byte(string(ch))
+	} else if controlState&(winLeftCtrlPressed|winRightCtrlPressed) != 0 {
+		switch vk {
+		case winVKQ:
+			one = []byte{0x11}
+		case winVKP:
+			one = []byte{0x10}
+		case winVKC:
+			one = []byte{0x03}
+		case winVKD:
+			one = []byte{0x04}
+		case winVKOEM6:
+			one = []byte{0x1d}
+		}
+	} else {
+		switch vk {
+		case winVKUp:
+			one = []byte("\x1b[A")
+		case winVKDown:
+			one = []byte("\x1b[B")
+		case winVKRight:
+			one = []byte("\x1b[C")
+		case winVKLeft:
+			one = []byte("\x1b[D")
+		case winVKHome:
+			one = []byte("\x1b[H")
+		case winVKEnd:
+			one = []byte("\x1b[F")
+		case winVKDelete:
+			one = []byte("\x1b[3~")
+		}
+	}
+	if len(one) == 0 {
+		return nil
+	}
+	out := make([]byte, 0, len(one)*int(repeat))
+	for i := uint16(0); i < repeat; i++ {
+		out = append(out, one...)
+	}
+	return out
+}
+
 // lineEditor is the editable input line with command history. It is pure so it
 // can be tested without a terminal.
 type lineEditor struct {

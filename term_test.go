@@ -135,6 +135,41 @@ func TestRenderPortableAndCursor(t *testing.T) {
 	}
 }
 
+
+func TestTranslateWindowsConsoleKey(t *testing.T) {
+	cases := []struct {
+		name string
+		vk   uint16
+		ch   rune
+		ctrl uint32
+		rep  uint16
+		want string
+	}{
+		{"ascii", 0, 'a', 0, 1, "a"},
+		{"enter", 0, '\r', 0, 1, "\r"},
+		{"down", winVKDown, 0, 0, 1, "\x1b[B"},
+		{"up-repeat", winVKUp, 0, 0, 2, "\x1b[A\x1b[A"},
+		{"ctrl-q", winVKQ, 0, winLeftCtrlPressed, 1, "\x11"},
+		{"ctrl-menu", winVKOEM6, 0, winRightCtrlPressed, 1, "\x1d"},
+		{"cyrillic", 0, 'й', 0, 1, "й"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := string(translateWindowsConsoleKey(tc.vk, tc.ch, tc.ctrl, tc.rep)); got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWindowsCyrillicTranslationIsBlockedByASCIIGate(t *testing.T) {
+	p := translateWindowsConsoleKey(0, 'й', 0, 1)
+	got, blocked := filterASCIICommandInput(p)
+	if !blocked || len(got) != 0 {
+		t.Fatalf("got=%q blocked=%v", got, blocked)
+	}
+}
+
 func TestFilterASCIICommandInput(t *testing.T) {
 	in := append([]byte("ip addr "), []byte{0xd0, 0xb9, '\r'}...)
 	got, blocked := filterASCIICommandInput(in)

@@ -89,7 +89,7 @@ func (a *App) runTerminalOnMode(s Serial, simple bool) error {
 			return err
 		default:
 		}
-		n, err := os.Stdin.Read(ib)
+		n, err := consoleReadInput(ib)
 		if err != nil {
 			return err
 		}
@@ -476,7 +476,7 @@ func (t *uartTerm) menuChoice(prefetched byte) {
 func (t *uartTerm) readByte() byte {
 	ib := make([]byte, 1)
 	for {
-		n, err := os.Stdin.Read(ib)
+		n, err := consoleReadInput(ib)
 		if err != nil {
 			return 0
 		}
@@ -492,7 +492,7 @@ func (t *uartTerm) readRawLine(prompt string) string {
 	var b []rune
 	ib := make([]byte, 1)
 	for {
-		n, err := os.Stdin.Read(ib)
+		n, err := consoleReadInput(ib)
 		if err != nil || n == 0 {
 			return ""
 		}

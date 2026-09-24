@@ -28,7 +28,7 @@ import (
 
 const (
 	appName               = "UrsidoRescue"
-	appVersion            = "0.2.0-test7"
+	appVersion            = "0.2.0-test8-dev"
 	defaultRouterIP       = "192.168.1.1"
 	defaultLocalIP        = "192.168.1.254"
 	defaultTFTPPort       = 1069
@@ -1855,7 +1855,7 @@ func (a *App) physicalRestoreWizard() error {
 		return e
 	}
 	if len(blbad) > 0 || len(bad) > 0 {
-		return fmt.Errorf(L("восстановление physical image в 0.2.0-test7 требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test7 requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
+		return fmt.Errorf(L("восстановление physical image в 0.2.0-test8-dev требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test8-dev requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
 	}
 	local, e := a.networkIP()
 	if e != nil {
@@ -2124,7 +2124,7 @@ func (a *App) expertUBIVolume() error {
 	}
 	st, _ := os.Stat(path)
 	if st.Size() > maxGenericRAMFile {
-		return errors.New(L("файл volume >64 MiB за один раз не поддерживается в 0.2.0-test7", "expert one-shot volume file >64 MiB is not supported in 0.2.0-test7"))
+		return errors.New(L("файл volume >64 MiB за один раз не поддерживается в 0.2.0-test8-dev", "expert one-shot volume file >64 MiB is not supported in 0.2.0-test8-dev"))
 	}
 	sha, _ := shaFile(path)
 	fmt.Printf("WRITE EXISTING UBI VOLUME %s size=%d SHA256=%s\n", name, st.Size(), sha)
@@ -2276,7 +2276,7 @@ func (a *App) makeSupportBundle() (string, error) {
 }
 
 func (a *App) selftest() error {
-	if appVersion != "0.2.0-test7" {
+	if appVersion != "0.2.0-test8-dev" {
 		return errors.New("version")
 	}
 	if _, e := probe.CheckUBoot("saveenv"); e == nil {
