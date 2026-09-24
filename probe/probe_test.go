@@ -116,6 +116,19 @@ func TestInternalTemplates(t *testing.T) {
 	}
 }
 
+func TestAuthLinesAreNarrow(t *testing.T) {
+	for _, line := range []string{"exit", "su user_ftp", "su user-telnet"} {
+		if err := checkAuthLine(line); err != nil {
+			t.Errorf("auth line %q blocked: %v", line, err)
+		}
+	}
+	for _, line := range []string{"su", "su root; reboot", "exit; reboot", "reboot", "su root root"} {
+		if err := checkAuthLine(line); err == nil {
+			t.Errorf("unsafe auth line %q allowed", line)
+		}
+	}
+}
+
 func TestOnlyInternalWritesLines(t *testing.T) {
 	fset := token.NewFileSet()
 	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
@@ -156,7 +169,7 @@ func TestGuardLinux(t *testing.T) {
 		}
 	}
 	good := []string{
-		"uname -a", "cat /proc/mtd", "dmesg", "ubinfo -a", "fw_printenv", "ip link", "ethtool -i eth0",
+		"id -u", "uname -a", "cat /proc/mtd", "dmesg", "ubinfo -a", "fw_printenv", "ip link", "ethtool -i eth0",
 		"dd if=/dev/mtd3 bs=4096 count=1 skip=5 | od -An -v -tx1", "od -An -v -tx1 /sys/firmware/fdt",
 		"grep -H . /sys/class/mtd/mtd*/name /sys/class/mtd/mtd*/type", "ls -l /sys/class/net", "cat /etc/board.json",
 	}

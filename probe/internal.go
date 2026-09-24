@@ -6,21 +6,24 @@ import (
 	"regexp"
 )
 
-// The probe writes a line to a device in exactly two ways:
+// The probe writes a shell/bootloader line to a device in exactly three ways:
 //
 //   - sendCommand: a command that passed the guard (CheckUBoot, CheckUBootAttach
 //     or CheckLinux); it is validated again right before it is written;
 //   - sendInternal: one of the fixed probe templates below, which carry
-//     markers so output and return codes can be found.
+//     markers so output and return codes can be found;
+//   - sendAuthLine: only "exit" or "su <validated-account>" while the stock
+//     UART login state machine is already inside a Linux shell.
 //
-// Raw keys (Ctrl-C, Esc, Enter, BootROM 'x', --stop-key, login answers) go
-// through sendKeys and are never lines. writeLine is private to this file;
+// Raw keys (Ctrl-C, Esc, Enter, BootROM 'x', --stop-key) and getty login
+// answers go through sendKeys. writeLine is private to this file;
 // TestOnlyInternalWritesLines keeps it that way.
 
 var (
 	tmplHush      = regexp.MustCompile(`^echo URSIDO_HUSH_\$\?$`)
 	tmplRC        = regexp.MustCompile(`^echo URSIDO_[0-9]{1,6}_RC_\$\?$`)
 	tmplLinuxWrap = regexp.MustCompile(`^echo URSIDO_B_([0-9]{1,6}); (.+) 2>&1; echo URSIDO_E_([0-9]{1,6})_\$\?$`)
+	authLineRE    = regexp.MustCompile(`^(?:exit|su [A-Za-z0-9_.-]{1,32})$`)
 )
 
 func internalHush() string    { return "echo URSIDO_HUSH_$?" }
@@ -66,6 +69,22 @@ func (s *Session) sendCommand(canon string, check func(string) (string, error)) 
 // sendInternal writes one of the fixed probe templates.
 func (s *Session) sendInternal(line string) error {
 	if err := checkInternal(line); err != nil {
+		return err
+	}
+	return s.writeLine(line)
+}
+
+func checkAuthLine(line string) error {
+	if authLineRE.MatchString(line) {
+		return nil
+	}
+	return &BlockedError{Target: "linux-auth", Command: line, Reason: "only exit or su <validated-account> is allowed"}
+}
+
+// sendAuthLine is the narrow interactive-auth exception to the read-only
+// command allowlist. It can only leave a shell or change effective user.
+func (s *Session) sendAuthLine(line string) error {
+	if err := checkAuthLine(line); err != nil {
 		return err
 	}
 	return s.writeLine(line)

@@ -1,3 +1,28 @@
+# UrsidoRescue 0.2.0-test17
+
+Status: **simulation candidate / HW PARTIAL.** test16's stock-LAN-assisted UART login remains
+hardware-unverified. This follow-up fixes two review findings before the next MF run.
+
+## 0.2.0-test17
+
+- Passive stock LAN assist no longer requires FTP credentials to exist. If FTP is disabled and
+  ftp_cfg exposes only the Telnet account, the plan still returns immediately, the Telnet UART
+  login is tried, and the interactive "enable FTP?" y/N remains reachable.
+- After the first UART UID-0 attempt fails, the probe keeps draining UART for 12 seconds, re-reads
+  stock credentials once, and retries before offering FTP provisioning. This covers the observed
+  Nokia behaviour where stock init can rotate service passwords after the Web UI is already up.
+- If a non-root Telnet shell is already open during that refresh, the probe first retries su with
+  the refreshed UID-0 credentials; if that still fails it returns to Login: and retries the full
+  plan.
+- UID 0 is still accepted only after id -u returns 0. Passwords remain memory-only; transcript
+  authentication records store only the prompt kind rather than copying the raw trailing line.
+- The stock-auth shell transitions are narrowed to exactly "su <validated-account>" and "exit";
+  they no longer use the generic raw-key path for shell command lines.
+- Tests cover passive Telnet-only plans, the post-provision FTP-credential requirement, id -u and
+  the narrow authentication-line grammar.
+- The test15/test16 documentation was updated on main before this candidate; test17 documentation
+  will record these fixes and the credential re-read.
+
 # UrsidoRescue 0.2.0-test16
 
 Status: **simulation candidate / HW PARTIAL.** A real MF stock boot under test15 reached the serial

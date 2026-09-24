@@ -46,6 +46,27 @@ type stockCredentials struct {
 	FTPPort        int
 }
 
+func stockLoginPlan(model string, creds stockCredentials, provision, changed bool) (probe.LinuxLoginPlan, error) {
+	loginUser := strings.TrimSpace(creds.TelnetUser)
+	if loginUser == "" || creds.TelnetPassword == "" {
+		return probe.LinuxLoginPlan{}, errors.New("stock Web returned no usable Telnet credentials")
+	}
+	rootUser := strings.TrimSpace(creds.FTPUser)
+	if provision && (rootUser == "" || creds.FTPPassword == "") {
+		return probe.LinuxLoginPlan{}, errors.New("stock Web returned no usable FTP service credentials after provisioning")
+	}
+	return probe.LinuxLoginPlan{
+		LoginUser:       loginUser,
+		LoginPassword:   creds.TelnetPassword,
+		RootUser:        rootUser,
+		RootPassword:    creds.FTPPassword,
+		Model:           model,
+		Source:          "stock-web " + defaultRouterIP,
+		FTPEnabled:      creds.FTPEnabled,
+		SettingsChanged: changed,
+	}, nil
+}
+
 func newStockWebClient(host string) (*stockWebClient, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -516,21 +537,13 @@ func (a *App) stockLANLoginAssist(provision bool) (probe.LinuxLoginPlan, error) 
 			time.Sleep(2 * time.Second)
 			continue
 		}
-		if creds.FTPUser == "" || creds.FTPPassword == "" {
-			last = errors.New("stock Web returned no usable FTP service credentials yet")
+		plan, err := stockLoginPlan(model, creds, provision, changed)
+		if err != nil {
+			last = err
 			time.Sleep(2 * time.Second)
 			continue
 		}
-		return probe.LinuxLoginPlan{
-			LoginUser:       creds.TelnetUser,
-			LoginPassword:   creds.TelnetPassword,
-			RootUser:        creds.FTPUser,
-			RootPassword:    creds.FTPPassword,
-			Model:           model,
-			Source:          "stock-web " + defaultRouterIP,
-			FTPEnabled:      creds.FTPEnabled || provision,
-			SettingsChanged: changed,
-		}, nil
+		return plan, nil
 	}
 	if last == nil {
 		last = errors.New("stock Web did not become ready")

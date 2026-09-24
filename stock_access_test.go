@@ -39,3 +39,29 @@ func TestStockPKCS7(t *testing.T) {
 		t.Fatalf("full-block PKCS7: len=%d tail=%d", len(got), got[len(got)-1])
 	}
 }
+
+func TestStockLoginPlanAllowsTelnetOnlyWhenFTPDisabled(t *testing.T) {
+	plan, err := stockLoginPlan("XG-040G-MF", stockCredentials{
+		TelnetUser: "user-telnet", TelnetPassword: "telnet-pass",
+		FTPEnabled: false,
+	}, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.LoginUser != "user-telnet" || plan.LoginPassword != "telnet-pass" {
+		t.Fatalf("bad Telnet plan: %+v", plan)
+	}
+	if plan.RootUser != "" || plan.RootPassword != "" || plan.FTPEnabled {
+		t.Fatalf("passive plan incorrectly requires FTP credentials: %+v", plan)
+	}
+}
+
+func TestStockLoginPlanRequiresFTPCredentialsAfterProvision(t *testing.T) {
+	_, err := stockLoginPlan("XG-040G-MF", stockCredentials{
+		TelnetUser: "user-telnet", TelnetPassword: "telnet-pass",
+		FTPEnabled: true,
+	}, true, true)
+	if err == nil {
+		t.Fatal("provisioned plan accepted without FTP service credentials")
+	}
+}

@@ -345,9 +345,9 @@ func existingPorts() []string {
 func (a *App) portingMenu() error {
 	for {
 		fmt.Println("\n────────────────────────────────")
-		fmt.Println(L(" ПОРТИРОВАНИЕ / ИССЛЕДОВАНИЕ ОБОРУДОВАНИЯ (только чтение)", " PORTING / HARDWARE DISCOVERY (read-only)"))
+		fmt.Println(L(" ПОРТИРОВАНИЕ / ИССЛЕДОВАНИЕ ОБОРУДОВАНИЯ", " PORTING / HARDWARE DISCOVERY"))
 		fmt.Println("────────────────────────────────")
-		fmt.Println(L("  1. Исследовать новое устройство Airoha (полный автоматический read-only probe)", "  1. Probe new Airoha device (full automatic read-only probe)"))
+		fmt.Println(L("  1. Исследовать новое устройство Airoha (полный автоматический probe)", "  1. Probe new Airoha device (full automatic probe)"))
 		fmt.Println(L("  2. Собрать профиль BootROM", "  2. Collect BootROM profile"))
 		fmt.Println(L("  3. Собрать профиль U-Boot", "  3. Collect U-Boot profile"))
 		fmt.Println(L("  4. Собрать профиль Linux", "  4. Collect Linux profile"))
