@@ -1,6 +1,8 @@
-# Porting Collector (probe mode) — UrsidoRescue 0.2.0 (current: test16)
+# Porting Collector (probe mode) — UrsidoRescue 0.2.0 (current: test17)
 
-Read-only discovery of an Airoha device over UART. The result is a porting bundle:
+Flash/MTD discovery of an Airoha device over UART is read-only by default. The one explicit
+stock-side exception is enabling the stock FTP service after a separate operator y/N; it changes
+a service setting, not raw flash or firmware. The result is a porting bundle:
 `ursus-probe-<vendor>-<model>-<soc>-<timestamp>.zip` with `profile.json` (ursus-profile-v1),
 `ursusboot-porting-report.md`, `ursusflasher-device-draft.json`, raw logs and `hashes.sha256`.
 
@@ -8,12 +10,11 @@ Read-only discovery of an Airoha device over UART. The result is a porting bundl
 
 Default probe mode is strict: no command that can write flash is sent.
 
-- **What reaches the device.** A line is written in exactly two ways: a command that passed the
-  allowlist (`probe/guard.go`), re-checked right before it is written; or one of three fixed
-  internal templates (`probe/internal.go`): the hush test `echo URSIDO_HUSH_$?`, the return-code
-  marker `echo URSIDO_<n>_RC_$?`, and the Linux wrapper
-  `echo URSIDO_B_<n>; <allowlisted command> 2>&1; echo URSIDO_E_<n>_$?`. A test fails the build
-  if anything else writes a line.
+- **What reaches the device.** A shell/bootloader line is written in exactly three ways: a command
+  that passed the allowlist (`probe/guard.go`) and is re-checked before writing; one of three fixed
+  internal templates (`probe/internal.go`) for hush/return-code/Linux markers; or the narrow stock
+  authentication path, which accepts only `exit` and `su <validated-account>`. Getty login
+  answers and passwords use the raw-key path, with passwords masked in host-side annotations.
 - **Allowlist.** Full command names, case-sensitive; U-Boot abbreviations (`sa`, `mtd wr`),
   `;`, `&&`, `|`, `$`, quotes and newlines are refused. erase / write / saveenv / env save /
   ubi create|remove|write / sf write|update are never sent. `--unsafe` changes nothing.
@@ -32,10 +33,13 @@ Default probe mode is strict: no command that can write flash is sent.
 - **Stock Linux login (Nokia XG-040G-MD/MF).** At a stock `Login:` the interactive probe (and the CLI
   with `--stock-lan-assist`) waits up to 90 s for the stock Web UI on `192.168.1.1` while it keeps
   draining the UART, logs in to it, checks the model and reads the current Telnet/FTP credentials.
-  It then logs in over UART as the UID-0 service account, or as the Telnet account followed by `su`,
-  and claims UID 0 only when `id -u` returns `0` (the only `id` form the guard allows). Credentials
-  stay in memory: they are never printed or written to the transcript, UART log or bundle. If UID 0
-  is not reached and stock FTP is off, the interactive probe asks one explicit `y/N` to enable FTP
+  A passive plan is valid with Telnet credentials alone even if FTP is off and the page exposes no
+  FTP account yet. The probe tries direct UID-0 service login when those credentials exist, otherwise
+  Telnet login followed by `su`, and claims UID 0 only when `id -u` returns `0`. If that first
+  attempt does not prove UID 0, it keeps draining UART for 12 s, re-reads stock credentials once,
+  and retries; this covers late password rotation during stock init. Credentials stay in memory:
+  they are never printed or written to the transcript, UART log or bundle. If UID 0 is still not
+  reached and stock FTP is off, the interactive probe asks one explicit `y/N` to enable FTP
   through the stock Web UI: a **stock-settings change** (FTP stays on), no MTD/firmware write. The
   CLI never enables FTP. Result fields: `linux_uid0`, `stock_lan_assist`, `stock_service_provisioned`.
 - **Reads into RAM** (`mtd read`, `hash`; `ubi read` only in the attach mode) only when

@@ -20,8 +20,8 @@ hardware-unverified. This follow-up fixes two review findings before the next MF
   they no longer use the generic raw-key path for shell command lines.
 - Tests cover passive Telnet-only plans, the post-provision FTP-credential requirement, id -u and
   the narrow authentication-line grammar.
-- The test15/test16 documentation was updated on main before this candidate; test17 documentation
-  will record these fixes and the credential re-read.
+- Documentation is updated to test17, including the passive Telnet-only plan, the one-time 12 s
+  credential refresh, stock-auth line restrictions, menu wording, and the test15/test16 history.
 
 # UrsidoRescue 0.2.0-test16
 

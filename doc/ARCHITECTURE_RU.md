@@ -1,6 +1,6 @@
 # Архитектура UrsidoRescue
 
-[English version](ARCHITECTURE_EN.md) · [Оглавление](README.md) · версия 0.2.0-test16
+[English version](ARCHITECTURE_EN.md) · [Оглавление](README.md) · версия 0.2.0-test17
 
 ## Общая схема
 
@@ -56,7 +56,7 @@
 | файл | назначение |
 |---|---|
 | `guard.go` | Allowlist команд U-Boot и Linux (`CheckUBoot`, `CheckUBootAttach`, `CheckLinux`): полные имена, запрет сокращений, `;`, `&&`, `\|`, `$`, кавычек и переводов строки; разрушительные команды не проходят никогда |
-| `internal.go` | Три фиксированных внутренних шаблона строк (hush-тест, маркер кода возврата, Linux-обёртка `echo URSIDO_B_n; cmd 2>&1; echo URSIDO_E_n_$?`) |
+| `internal.go` | Три фиксированных внутренних шаблона строк плюс узкий stock-auth путь: только `exit` и `su <валидированная-учётка>`; всё остальное проходит обычный allowlist |
 | `session.go` | Сессия: порт, лог `uart.log`, `transcript.jsonl`, таймауты (`Timing` — чтобы тесты шли быстро) |
 | `console.go` | Классификация последней строки: приглашение U-Boot, shell Linux, логин, неизвестное |
 | `collect.go` | Сценарий сбора по слоям (`BootROM`, `UBoot`, `Linux`, `Flash`, `DT`, `Network`, `GPIO`), остановка автозагрузки, ожидание Linux, логин: stock LAN assist через `LinuxLoginAssist` (реквизиты в `LinuxLoginPlan` — только в памяти), вход по UART, `su`, доказательство UID 0 через `id -u`, вопрос о включении FTP |

@@ -1,6 +1,6 @@
 # UrsidoRescue operator guide
 
-[Русская версия](GUIDE_RU.md) · [Contents](README.md) · version 0.2.0-test16
+[Русская версия](GUIDE_RU.md) · [Contents](README.md) · version 0.2.0-test17
 
 ## 0. Before you start
 
@@ -31,7 +31,7 @@ Port settings (the program sets them): 115200, 8N1, no flow control.
 3. Contents:
 
 ```
-UrsidoRescue-0.2.0-test16/
+UrsidoRescue-0.2.0-test17/
   UrsidoRescue.exe            Windows x64
   UrsidoRescue-linux-amd64    Linux x86_64
   UrsidoRescue-linux-arm64    Linux aarch64 (Raspberry Pi 4/5, ARM laptops)
@@ -174,6 +174,13 @@ boot. So the current credentials are taken from the router's own Web UI.
 6. If a login succeeds without UID 0, the read-only Linux diagnostics continue with the current
    privileges. If the stock assist fails completely, the probe asks for a user and password by hand
    as before.
+
+**Retry after late password rotation.** A reachable Web UI does not prove that stock init has
+finished rotating service passwords. If the first attempt does not prove UID 0, the probe keeps
+draining UART for another 12 seconds, re-reads Web credentials once, and retries the login/`su`.
+If FTP is off and the page does not expose an FTP account yet, that does not block the Telnet login
+or the later explicit FTP question. After confirmed FTP enablement, usable FTP credentials are
+required.
 
 **Credential safety.** Passwords live in memory only. They are never printed or written to the
 bundle, `transcript.jsonl` or `uart.log`, which record only a "password (masked)" label. A password
