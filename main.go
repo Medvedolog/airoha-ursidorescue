@@ -28,7 +28,7 @@ import (
 
 const (
 	appName               = "UrsidoRescue"
-	appVersion            = "0.2.0-test10"
+	appVersion            = "0.2.0-test11"
 	defaultRouterIP       = "192.168.1.1"
 	defaultLocalIP        = "192.168.1.254"
 	defaultTFTPPort       = 1069
@@ -619,13 +619,28 @@ func (a *App) xmodemSend(s Serial, path, label string) error {
 	return fmt.Errorf(L("XMODEM EOT не подтверждён: %s", "XMODEM EOT not ACKed: %s"), label)
 }
 
-var promptRE = regexp.MustCompile(`(?m)(?:^|[\r\n])(?:AN7581|AN7583|U-Boot)>[ \t]*(?:$|[\r\n])|(?:^|[\r\n])=>[ \t]*(?:$|[\r\n])`)
+var ansiCSIForPromptRE = regexp.MustCompile("\x1b\\[[0-?]*[ -/]*[@-~]")
 
 func promptPresent(b []byte) bool {
-	if len(b) > 4096 {
-		b = b[len(b)-4096:]
+	// U-Boot bootmenu is screen-oriented: it may position the cursor with ANSI
+	// instead of emitting a CR/LF before the command prompt. Looking only for a
+	// line-start prompt therefore misses a real "AN7583> " after menu exit.
+	if len(b) > 8192 {
+		b = b[len(b)-8192:]
 	}
-	return promptRE.Match(b)
+	clean := ansiCSIForPromptRE.ReplaceAll(b, nil)
+	clean = bytes.TrimRight(clean, " \t\r\n\x00")
+	for _, suffix := range [][]byte{
+		[]byte("AN7581>"),
+		[]byte("AN7583>"),
+		[]byte("U-Boot>"),
+		[]byte("=>"),
+	} {
+		if bytes.HasSuffix(clean, suffix) {
+			return true
+		}
+	}
+	return false
 }
 func (a *App) waitQuiet(s Serial, quiet, timeout time.Duration) []byte {
 	end := time.Now().Add(timeout)
@@ -657,6 +672,7 @@ func (a *App) waitUBootPrompt(s Serial, timeout time.Duration) ([]byte, error) {
 	menu := false
 	lastBreak := time.Time{}
 	breaks := 0
+	menuEscapes := 0
 	for time.Now().Before(end) {
 		n, e := s.Read(buf, 120*time.Millisecond)
 		if e != nil {
@@ -686,13 +702,19 @@ func (a *App) waitUBootPrompt(s Serial, timeout time.Duration) ([]byte, error) {
 			menu = true
 			seen = true
 		}
-		if seen && time.Since(lastBreak) >= 200*time.Millisecond && breaks < 40 {
-			_ = s.Write([]byte{0x03})
+		if seen && time.Since(lastBreak) >= 250*time.Millisecond {
 			if menu {
-				_ = s.Write([]byte{0x1b})
+				// Once bootmenu is visible, ESC is the correct non-selecting exit.
+				// Do not keep mixing Ctrl-C into the menu/prompt stream.
+				if menuEscapes < 6 {
+					_ = s.Write([]byte{0x1b})
+					menuEscapes++
+				}
+			} else if breaks < 20 {
+				_ = s.Write([]byte{0x03})
+				breaks++
 			}
 			lastBreak = time.Now()
-			breaks++
 		}
 		if strings.Contains(low, "mtd erase ubi") || strings.Contains(low, "erasing 0x") {
 			return out, errors.New(L("до prompt замечена разрушительная автозагрузка", "destructive autoboot observed before prompt"))
@@ -1855,7 +1877,7 @@ func (a *App) physicalRestoreWizard() error {
 		return e
 	}
 	if len(blbad) > 0 || len(bad) > 0 {
-		return fmt.Errorf(L("восстановление physical image в 0.2.0-test10 требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test10 requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
+		return fmt.Errorf(L("восстановление physical image в 0.2.0-test11 требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test11 requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
 	}
 	local, e := a.networkIP()
 	if e != nil {
@@ -2124,7 +2146,7 @@ func (a *App) expertUBIVolume() error {
 	}
 	st, _ := os.Stat(path)
 	if st.Size() > maxGenericRAMFile {
-		return errors.New(L("файл volume >64 MiB за один раз не поддерживается в 0.2.0-test10", "expert one-shot volume file >64 MiB is not supported in 0.2.0-test10"))
+		return errors.New(L("файл volume >64 MiB за один раз не поддерживается в 0.2.0-test11", "expert one-shot volume file >64 MiB is not supported in 0.2.0-test11"))
 	}
 	sha, _ := shaFile(path)
 	fmt.Printf("WRITE EXISTING UBI VOLUME %s size=%d SHA256=%s\n", name, st.Size(), sha)
@@ -2276,7 +2298,7 @@ func (a *App) makeSupportBundle() (string, error) {
 }
 
 func (a *App) selftest() error {
-	if appVersion != "0.2.0-test10" {
+	if appVersion != "0.2.0-test11" {
 		return errors.New("version")
 	}
 	if _, e := probe.CheckUBoot("saveenv"); e == nil {

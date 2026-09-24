@@ -1,3 +1,24 @@
+# UrsidoRescue 0.2.0-test11
+
+Status: **simulation PASS / HW PARTIAL.** Real Nokia XG-040G-MF / AN7583 testing of test10
+successfully completed BootROM preloader XMODEM and RAM BL31+U-Boot FIP loading. The recovery
+wizard then reached a live AN7583> prompt but failed to recognize it after the ANSI boot menu, so
+no NAND erase/write had started.
+
+## 0.2.0-test11
+
+- U-Boot prompt detection now strips ANSI CSI control sequences and recognizes a prompt by its
+  stable trailing token (AN7581>, AN7583>, U-Boot> or =>), rather than requiring a physical CR/LF
+  before it. This handles screen-oriented bootmenu output where cursor positioning replaces newline.
+- Once bootmenu is detected, the recovery handshake sends only bounded ESC exits instead of mixing
+  repeated Ctrl-C + ESC into the menu/prompt stream.
+- Regression tests reproduce AN7583 bootmenu cursor-addressing before/after the prompt and reject
+  prompt-like text that is not at the end of the stream.
+- test10's branded Windows EXE icon and test9's terminal/TUI/Ctrl+C/Ctrl+Z fixes are retained.
+- Hardware status: RAM U-Boot load on MF is now observed on real hardware; stock NAND restore is
+  still not HW PASS until version/mtd geometry, TFTP preflight, erase/write/readback and BL2-last
+  stages complete successfully.
+
 # UrsidoRescue 0.2.0-test10
 
 Status: **simulation PASS / HW PARTIAL.** UART/recovery hardware status is unchanged from test9.

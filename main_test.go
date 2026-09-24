@@ -8,11 +8,26 @@ func TestCRC16Xmodem(t *testing.T) {
 	}
 }
 func TestPrompt(t *testing.T) {
-	if !promptPresent([]byte("\r\nU-Boot> \r\n")) {
-		t.Fatal("prompt")
+	good := [][]byte{
+		[]byte("\r\nU-Boot> \r\n"),
+		[]byte("AN7583> "),
+		[]byte("\x1b[2J\x1b[H    *** U-Boot Boot Menu ***\x1b[20;1HAN7583> \x1b[?25h"),
+		[]byte("menu text without newline\x1b[24;1H=> "),
 	}
-	if promptPresent([]byte("foo > bar")) {
-		t.Fatal("false prompt")
+	for _, in := range good {
+		if !promptPresent(in) {
+			t.Fatalf("prompt not detected in %q", in)
+		}
+	}
+	bad := [][]byte{
+		[]byte("foo > bar"),
+		[]byte("AN7583> still printing"),
+		[]byte("echo U-Boot> not-a-prompt"),
+	}
+	for _, in := range bad {
+		if promptPresent(in) {
+			t.Fatalf("false prompt in %q", in)
+		}
 	}
 }
 func TestBadBlocks(t *testing.T) {
