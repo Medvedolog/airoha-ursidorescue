@@ -52,6 +52,9 @@ Releases by CI.
 - Added `doc/` with Russian and English documentation: about the project and the Ursus family,
   operator guide, every menu in detail, architecture, and this complete changelog.
 - Added `README.ru.md`, the Russian version of the main README, linked from the English `README.md`.
+- Redesigned the `README.md` / `README.ru.md` front pages: a header with the bear and badges,
+  purpose and capabilities, principles, quick start, documentation links. The payload provenance
+  table moved to ARCHITECTURE.
 - `PROBE.md`: the Porting Collector main-menu number is now 7. Number 8 has been stale since test5.
 - Documentation and `PROBE.md` updated to test16: network and LAN prerequisites, coloured output,
   EOT, stock LAN assist and `--stock-lan-assist`.

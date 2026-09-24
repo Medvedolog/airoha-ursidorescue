@@ -103,7 +103,14 @@ Window where bad blocks are tolerated during stock restore (physical addresses):
 
 The `md`/`mf` profiles in `main.go` hold the path, size and SHA256 of every file in `payloads/`.
 `validatePinned` checks them before every BootROM send and in `--selftest`. A replaced file without
-a profile update means the program refuses to work. File provenance: [../README.md](../README.md#payloads).
+a profile update means the program refuses to work. File provenance:
+
+| file | source |
+|---|---|
+| `payloads/md/an7581-preloader.bin` | airoha-router-ursusflasher, OpenWrt AN7581 UBI preloader |
+| `payloads/md/an7581-fudan-capable-ram.fip` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-md/recovery-safe-u-boot.fip` |
+| `payloads/mf/an7583-preloader.bin` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/ursusboot-uart-preloader.bin` |
+| `payloads/mf/an7583-recovery-ram.fip` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/recovery-safe-u-boot.fip` |
 
 ## Key mechanisms
 
