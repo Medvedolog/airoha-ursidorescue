@@ -1,6 +1,6 @@
 # UrsidoRescue architecture
 
-[Русская версия](ARCHITECTURE_RU.md) · [Contents](README.md) · version 0.2.0-test10
+[Русская версия](ARCHITECTURE_RU.md) · [Contents](README.md) · version 0.2.0-test13
 
 ## Overview
 
@@ -28,7 +28,7 @@ everything else is shared.
 
 | file | lines | purpose |
 |---|---|---|
-| `main.go` | ~2300 | NAND layout constants, MD/MF profiles with pinned SHA256, `realMain` (argument parsing, release-root lookup), main and expert menus, profile and port choice, BootROM wait and XMODEM send, U-Boot prompt wait, U-Boot commands with return codes, TFTP server, RAM checks and readback, all wizards (stock, FIP, physical, ITB, diagnostics, expert 3/4), log bundle, `--selftest` |
+| `main.go` | ~2600 | NAND layout constants, MD/MF profiles with pinned SHA256, `realMain` (argument parsing, release-root lookup), main and expert menus, profile and port choice, BootROM wait and XMODEM send, U-Boot prompt wait, U-Boot commands with return codes, TFTP server, RAM checks and readback, all wizards (stock, FIP, physical, ITB, diagnostics, expert 3/4), log bundle, `--selftest` |
 | `main_probe.go` | ~570 | Glue to the `probe` package: the Porting menu, BootROM submenu, `probe`/`export` CLI, exit codes, profile summary |
 | `lang.go` | 83 | UI language: `L(ru, en)`, `--lang`, `URSIDO_LANG`, locale, selection dialogue |
 | `term.go` | ~400 | Terminal logic without I/O: ANSI key decoder, Windows `KEY_EVENT_RECORD` translation, line editor with history, XMODEM receive (CRC, 128/1K) |
@@ -36,6 +36,7 @@ everything else is shared.
 | `serial.go` | 11 | The `Serial` interface: `Name`, `Read(buf, timeout)`, `Write`, `ResetInput`, `Close` |
 | `serial_linux.go` | ~110 | termios via `ioctl(TCGETS/TCSETS)`: raw 115200 8N1, `CLOCAL`, no flow control; lists `/dev/ttyUSB*`, `ttyACM*`, `ttyAMA*`, `ttyS*` |
 | `serial_windows.go` | ~170 | `kernel32.dll` via `syscall`: `CreateFileW`, `SetCommState`, `SetCommTimeouts`, `PurgeComm`, `ReadFile`/`WriteFile`; lists existing `COMn` via `QueryDosDeviceW` |
+| `udp_windows.go`, `udp_other.go` | 18 / 5 | `isExpectedUDPNoise`: on Windows, UDP `WSAECONNRESET` (10054) / `WSAECONNABORTED` (10053) errors from a stale peer are noise for the TFTP server; always `false` elsewhere |
 | `console_linux.go` | 60 | Raw console mode, window size (`TIOCGWINSZ`) |
 | `console_windows.go` | ~150 | `ReadConsoleInputW`, console modes, VT output (ANSI), QuickEdit kept |
 | `*_test.go` | | Main package tests (see below) |
@@ -107,12 +108,41 @@ a profile update means the program refuses to work. File provenance: [../README.
 - **U-Boot return code.** After every command, `echo __URSIDO_<nanoseconds>__RC_$?`; the answer is
   parsed with a regular expression. No marker or `rc≠0` stops the operation.
 - **Slow line sending.** 16-byte pieces 3 ms apart: U-Boot's UART buffer is small.
-- **TFTP server.** A goroutine on UDP; answers only an RRQ for the expected name from
-  `192.168.1.1`, supports options (block size) and checks the transferred byte count.
+- **XMODEM send (`xmodemSend`).** Returns `xmodemResult{EOTAck, Trailing}`:
+  - 128-byte blocks with CRC16; ACK wait 2 s, at most 8 attempts; NAK or `C` retries the block at
+    once (`scanXmodemReply`: ACK beats noise in the same read);
+  - a receiver abort is only `CAN CAN` in a row; a single `CAN` is ignored;
+  - `CAN CAN CAN` from the PC is sent in a `defer`, only while `dataComplete == false`;
+  - EOT at most 3 times with 1.5 s waits. `scanXmodemEOTReply`: ACK is success; NAK retries; any
+    other non-whitespace byte is a handoff, i.e. next-stage output;
+  - on handoff or with no EOT ACK it returns `nil` and keeps the bytes received after EOT in
+    `Trailing`.
+  The caller must prove the transition: `acquireRAMUBoot` feeds `Trailing` into `waitReceiver` (the
+  second receiver after the preloader) or `waitUBootPrompt` (the prompt after the FIP). Without
+  proof: the normal timeout and a stop. The terminal's manual send prints `Trailing` and warns
+  when there was no EOT ACK.
+- **U-Boot prompt detection (`promptPresent`).** ANSI CSI sequences are stripped from the last 8 KiB
+  of output, then the end of the stream is checked for `AN7581>`, `AN7583>`, `U-Boot>`, `=>`.
+  Autoboot stop: Ctrl-C every 250 ms (up to 20), with a bootmenu only Esc (up to 6).
+- **LAN/TFTP (`tftpLoadKnownLocal`).**
+  - `detectLocalIP`: the address of the interface routed to `192.168.1.1` (a UDP "dial" that sends
+    no packets); fallback: scan active `192.168.1.x` interfaces.
+  - Up to **3 attempts**. Each: `configureUBootNet` (temporary MACs, IP, `serverip`, `tftpdstp`,
+    `autoload`) → a fresh `runTFTPServer` with a cancel channel → `tftpboot` → byte count →
+    `verifyRAM` (`hash sha256` or `crc32`).
+  - On failure: `close(cancel)` releases UDP/1069, `resyncUBootAfterNetError` (Ctrl-C until the
+    prompt, 4 × 1.5 s), a backoff of `attempt` seconds.
+  - `ping` is not used.
+- **TFTP server (`runTFTPServer`).** A goroutine on UDP:
+  - answers only an RRQ for the expected name from `192.168.1.1`;
+  - supports options (block size) and checks the transferred byte count;
+  - every wait is bounded: RRQ 30 s, OACK 8 × 1 s, block ACK 10 × 1 s;
+  - Windows UDP noise is ignored.
 - **Fail-closed wizards.** Any error returns an `error` before the next write command; the
   `[STOP]` message says explicitly that no further write/erase was sent.
 - **BL2 last** in stock and physical restore; the bad-block map is compared before, between and
-  after the writes.
+  after the writes. A transport retry repeats only the current chunk's RAM upload; chunks already
+  written are never rewritten.
 - **Terminal.** A separate goroutine reads the UART with a 20 ms timeout; keyboard input is
   forwarded in whole chunks (arrow ANSI sequences stay intact); the pager queues up to 4 MiB;
   fullscreen-ANSI detection survives a sequence split across reads.
@@ -127,7 +157,9 @@ a profile update means the program refuses to work. File provenance: [../README.
 2. `CGO_ENABLED=0`, `-trimpath -ldflags "-s -w"`: `UrsidoRescue.exe` (windows/amd64),
    `UrsidoRescue-linux-amd64`, `UrsidoRescue-linux-arm64`;
 3. `go run ./tools/embedicon` embeds the icon into the `.exe`;
-4. copies `payloads/`, `VERSION`, `STATUS.md`, `PROBE.md` into `dist/UrsidoRescue-<VERSION>/`;
+4. copies `payloads/`, `VERSION`, `STATUS.md`, `PROBE.md` into `dist/UrsidoRescue-<VERSION>/`.
+   The `doc/` folder is currently **not** in the release ZIP, because `build.sh` does not copy it;
+   the documentation lives in the repository;
 5. writes `SHA256SUMS` for all files;
 6. on x86_64 runs the built binary with `--selftest`.
 
@@ -157,7 +189,8 @@ messages (physical restore, expert 3/4).
 - **Main package:** XMODEM CRC16, prompt detection, bad blocks and good spans, language choice, ANSI
   decoder, line editor and history, Windows key translation, ASCII gate (including Cyrillic from
   Windows), fullscreen-ANSI detection (including across reads), pager, batched escape sequences,
-  local Ctrl+Q, XMODEM receive and bad-CRC rejection.
+  local Ctrl+Q, XMODEM receive and bad-CRC rejection, XMODEM reply parsing (noise, single `CAN`,
+  `CAN CAN`), the EOT handoff classifier, the prompt after the AN7583 ANSI bootmenu.
 - **probe:** allowlist (destructive commands blocked, read-only allowed, UBI attach not read-only),
   internal templates and "nothing else writes lines", no destructive literals in probe code, all
   parsers, FDT, FIP, conflict resolution, full probe on a simulated board (with and without UBI

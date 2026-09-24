@@ -1,6 +1,6 @@
 # UrsidoRescue menus: every item in detail
 
-[Русская версия](MENU_RU.md) · [Contents](README.md) · version 0.2.0-test10
+[Русская версия](MENU_RU.md) · [Contents](README.md) · version 0.2.0-test13
 
 This page explains what every menu item does, in which order, which commands reach the router and
 where the program stops by itself. Wiring and network setup are in [GUIDE_EN.md](GUIDE_EN.md).
@@ -81,12 +81,21 @@ mode. **Nothing is written to flash.**
 5. The profile (see above) and the pinned SHA256 of the files are checked.
 6. Preloader stage: XMODEM-CRC sends `payloads/<md|mf>/…-preloader.bin`, then waits for `CCC` again
    (up to 180 s) and checks that the SoC did not change.
-7. XMODEM-CRC sends the RAM FIP (BL31 + RECOVERY_SAFE U-Boot). XMODEM: 128-byte blocks, up to 10
-   retries per block, up to 12 s per answer; a `CAN` from the BootROM stops the transfer.
-8. Waiting up to 180 s for the U-Boot prompt. Once `U-Boot 20…` or
-   `Hit any key to stop autoboot` shows up, the program sends Ctrl-C every 200 ms (at most 40
-   times), plus Esc if it sees a bootmenu. **Enter is never sent**, so no bootmenu entry gets
-   selected. It stops if:
+7. XMODEM-CRC sends the RAM FIP (BL31 + RECOVERY_SAFE U-Boot). XMODEM rules (details in
+   [GUIDE_EN.md](GUIDE_EN.md#xmodem)):
+   - 128-byte blocks, ACK wait up to 2 s, **at most 8 attempts** per block; NAK or `C` retries only
+     that block at once;
+   - a single `CAN` is line noise; a receiver abort needs **`CAN CAN`**;
+   - after the last block is ACKed: EOT, at most 3 times with 1.5 s waits. **A missing EOT ACK after
+     fully ACKed data is not fatal**: the next stage proves success, either the second `CCC`
+     receiver after the preloader (step 6) or a stable U-Boot prompt after the FIP (step 8);
+   - `CAN CAN CAN` is sent only when the data phase fails, never after the last block was ACKed.
+8. Waiting up to 180 s for the U-Boot prompt (output that arrived during EOT counts). Once
+   `U-Boot 20…` or `Hit any key to stop autoboot` shows up, the program sends Ctrl-C every 250 ms
+   (at most 20 times); with a bootmenu it sends only Esc instead (at most 6 times). **Enter is
+   never sent**, so no bootmenu entry gets selected. The prompt (`AN7581>`, `AN7583>`, `U-Boot>`,
+   `=>`) is recognised at the end of the stream after ANSI sequences are stripped, so it is found
+   after a screen-oriented bootmenu too. It stops if:
    - the output shows `mtd erase ubi` / `Erasing 0x…`: autoboot started erasing NAND;
    - `Starting kernel` / `Booting Linux`: autoboot escaped into Linux;
    - `Press x to load BL31` appears again after the FIP: the device went back to the BootROM.
@@ -104,24 +113,28 @@ stops it.
 
 ### Loading a file into RAM over TFTP
 
-Used by items 1–4 and expert 3–4. The router's Ethernet (LAN) port is cabled to the PC.
+Used by items 1–4 and expert 3–4. The router's Ethernet (LAN) port is cabled to the PC. Resilience
+details: [GUIDE_EN.md](GUIDE_EN.md#lan-tftp).
 
-1. **PC IP.** The program looks for a `192.168.1.x` address on the PC. If none, it asks you to set
-   Ethernet statically (`192.168.1.254/24` recommended) and type the address, and checks that it
-   can bind to it.
-2. **The built-in TFTP server** starts on `<PC IP>:1069/UDP`. It serves exactly one file under one
-   expected name and only to client `192.168.1.1`.
-3. In U-Boot: `setenv ipaddr 192.168.1.1`, `setenv serverip <PC IP>`, `setenv netmask 255.255.255.0`,
-   `setenv tftpdstp 1069`, `setenv autoload no`, then `ping <PC IP>` (no answer → stop).
-4. `tftpboot 0x90000000 <name>`; the byte count must equal the file size.
-5. **RAM check:** `hash sha256` if U-Boot has it, otherwise `crc32` at the load address.
+1. **Route-aware PC IP.** The program takes the address of the interface the OS uses to reach
+   `192.168.1.1`; fallback: any active interface with `192.168.1.x`. If none, it asks you to set
+   Ethernet statically (`192.168.1.254/24` recommended) and type the address, and checks that it can
+   bind to it.
+2. For every attempt (at most **3**):
+   1. U-Boot gets `ethaddr=02:00:00:04:0d:10`, `eth1addr=02:00:00:04:0d:11` (temporary locally
+      administered MACs, in-memory environment only), `ipaddr 192.168.1.1`, `serverip <PC IP>`,
+      `netmask 255.255.255.0`, `tftpdstp 1069`, `autoload no` again;
+   2. **the built-in TFTP server** starts on `<PC IP>:1069/UDP`: it serves exactly one file under
+      one expected name, only to `192.168.1.1`, and every wait it makes is bounded;
+   3. `tftpboot 0x90000000 <name>`; the byte count must equal the file size;
+   4. **RAM check:** `hash sha256` if U-Boot has it, otherwise `crc32`.
+3. On failure the server stops and releases the port, U-Boot is **resynchronised** (Ctrl-C until a
+   stable prompt), there is a 1–2 s backoff, and **only this transfer** is repeated. After 3
+   failures: stop, "TFTP failed after 3 attempts".
 
-One transfer is at most `0x08000000` (128 MiB). Large images (stock, physical) are split into
-8 MiB chunks.
-
-Stock restore and physical restore also set temporary `ethaddr=02:00:00:04:0d:10` and
-`eth1addr=02:00:00:04:0d:11` (locally administered MACs, only in the RAM U-Boot's in-memory
-environment, never saved to flash).
+`ping` is no longer run: the transfer plus the RAM check is the proof that the network works. One
+transfer is at most `0x08000000` (128 MiB). Large images (stock, physical) are split into 8 MiB
+chunks; only the current chunk is retried, and chunks already written to NAND are never rewritten.
 
 ### Readback after write
 
@@ -234,7 +247,7 @@ entering the BootROM again and repeating. A broken BL2 on top of a half-written 
 
 1. Path to the image; the size must be **exactly** `0x10000000` (256 MiB). The SHA256 is printed.
 2. Profile → RAM U-Boot.
-3. `mtd bad bl2` and `mtd bad ubi`: in 0.2.0-test10 **any** bad block → stop. A raw image carries
+3. `mtd bad bl2` and `mtd bad ubi`: in 0.2.0-test13 **any** bad block → stop. A raw image carries
    another chip's bad-block layout; writing it over a NAND with bad blocks without understanding
    the format is unsafe.
 4. Network; the image is split in `work/physical-<time>/` into `bl2.bin` and 8 MiB `ubi-NN.bin`.

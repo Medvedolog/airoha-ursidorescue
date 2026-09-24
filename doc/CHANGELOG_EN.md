@@ -1,132 +1,350 @@
-# UrsidoRescue changelog
+# UrsidoRescue changelog (complete, reconstructed)
 
 [Русская версия](CHANGELOG_RU.md) · [Contents](README.md)
 
-Status labels: **simulation PASS**: tests and simulation passed; **HW PARTIAL**: partly verified
-on hardware; **HW HOLD/PENDING**: not verified on hardware. Builds and CI are not hardware
-validation. The detailed status of every version is in [../STATUS.md](../STATUS.md).
+This file is reconstructed from the very beginning of the project from these sources:
+
+- this repository's git history (every commit, its message and diff);
+- the `v0.2.0-test*` tags and the GitHub pre-releases;
+- the `STATUS.md` section of every version;
+- the source code at every version (menu numbers, limits, behaviour);
+- sibling Ursus repositories (MedveFlasher, UrsusBoot), for the prehistory.
+
+What happened before this repository's first commit is known only from `STATUS.md` and the
+0.2.0-test2 code; such sections are marked **(reconstructed)**.
+
+**Status labels:**
+
+- **simulation PASS**: tests and simulation passed;
+- **simulation candidate**: a candidate that has not completed a full run yet;
+- **HW PARTIAL**: partly verified on hardware;
+- **HW HOLD / PENDING**: not verified on hardware.
+
+Builds and CI are not hardware validation.
+
+Times are UTC on 2026-09-24 unless stated otherwise. "Pre-release" means published to GitHub
+Releases by CI.
+
+| version | commit | pre-release | headline |
+|---|---|---|---|
+| 0.1.x | — (before the repo) | — | UART recovery for Nokia MD/MF |
+| 0.2.0-test1 | — (before the repo) | — | Porting Collector |
+| 0.2.0-test2 | `0a30362` | no | first commit, language choice |
+| 0.2.0-test3 | `0722824` | 08:07 | probe review, CI |
+| 0.2.0-test4 | `f96b654` | 08:20 | UART terminal |
+| 0.2.0-test5 | `911c101` | 08:33 | raw passthrough, new menu order |
+| 0.2.0-test6 | `ce5a30c` | 08:55 | Windows COM: latency, port list |
+| 0.2.0-test7 | `7228235` | 09:24 | UART Shell on the new engine, pager |
+| 0.2.0-test8 | `5c90240` | 09:52 | Windows input via ReadConsoleInputW |
+| 0.2.0-test9 | `9909608` | 10:11 | pager and TUI, Ctrl+C/Ctrl+Z |
+| 0.2.0-test10 | `1865cb1` | 10:27 | .exe icon |
+| 0.2.0-test11 | `260419f` | 10:36 | U-Boot prompt after the ANSI bootmenu |
+| 0.2.0-test12 | `0b07944` | 11:03 | XMODEM and LAN/TFTP hardening |
+| 0.2.0-test13 | `03336da`, `d799a8f` | no (no tag) | AN7583 EOT handoff |
+
+---
 
 ## Unreleased
 
 - Added `doc/` with Russian and English documentation: about the project and the Ursus family,
-  operator guide, every menu in detail, architecture, changelog.
-- `PROBE.md`: fixed the main menu item number of the Porting Collector (7, not 8).
+  operator guide, every menu in detail, architecture, and this complete changelog.
+- `PROBE.md`: the Porting Collector main-menu number is now 7. Number 8 has been stale since test5.
 
-## 0.2.0-test10 (2026-09-24)
+---
 
-Status: simulation PASS / HW PARTIAL. UART/recovery hardware status unchanged from test9.
+## 0.2.0-test13 (2026-09-24 11:18–11:19)
 
-- `UrsidoRescue.exe` carries the Ursus bear icon as Windows `RT_ICON` / `RT_GROUP_ICON` resources in
-  7 sizes (16, 24, 32, 48, 64, 128, 256 px) instead of the generic Go icon.
-- Icon sources (`assets/ursus-bear.svg`, 256 px `assets/ursus-bear.png`) are kept for the planned GUI.
-- Embedding is done by the pure-Go tool `tools/embedicon`; the build needs no MinGW, windres, Python
-  or ImageMagick.
-- Fix: `build.sh` is executable again.
+Commits: `03336da` (release), `d799a8f` (manual XMODEM in the terminal). No `v0.2.0-test13` tag and
+no `[publish prerelease]` marker, so it is not published on GitHub.
 
-## 0.2.0-test9 (2026-09-24)
+Status: **simulation candidate / HW PARTIAL**.
 
-Status: simulation PASS / HW PARTIAL. Testing test8 on Windows/OpenWrt confirmed normal input and
-live UART output, but the pager split fullscreen programs such as BusyBox `top`.
+**Why:** two consecutive test12 runs on a real Nokia XG-040G-MF (AN7583) went like this:
+- all 2539 FIP data blocks were ACKed;
+- no EOT ACK ever arrived;
+- test12 retried EOT six times and aborted, although the next stage had already started.
 
-- Ctrl+P paging applies only to ordinary line-oriented output.
-- Fullscreen ANSI/TUI streams are detected from cursor-home, clear-screen and alternate-screen
-  sequences; the pager flushes its queue and turns itself off.
-- Detection works even when a CSI sequence is split across two reads.
-- Colour (SGR) output and simple erase-line sequences do not trigger TUI mode.
-- `top`/`vi`/`less` keep their own screen model; Ctrl+P can be re-enabled for `ps`, `dmesg`, logs.
-- Ctrl+C and Ctrl+Z are forwarded to the router as `0x03` and `0x1A` in both input modes, including
-  Windows `KEY_EVENT_RECORD`.
-- Regression tests for all of the above.
+**Fixed: XMODEM EOT handoff**
 
-## 0.2.0-test8 (2026-09-24)
+- Once **every data block is ACKed**, a missing EOT ACK is no longer fatal by itself. The next stage
+  proves success:
+  - after the preloader: the second BootROM XMODEM receiver (`CCC`) appears;
+  - after the FIP: a stable RAM U-Boot prompt appears.
+  If the stage does not appear, the normal wait timeouts apply and the operation stops. On success
+  the log says "EOT ACK was absent, but a stable RAM U-Boot prompt proved the handoff".
+- EOT replies are read according to the stage:
+  - ACK is definitive;
+  - NAK requests another EOT;
+  - ASCII `C` or any boot text is next-stage output, and no more EOT is sent. The `C` in words
+    like `NOTICE` is no longer taken for a CRC request.
+- EOT is retried at most **3 times** with 1.5 s waits, and only while there is no next-stage output.
+- `CAN CAN CAN` is sent only when the **data phase** failed. It is never sent after the final block
+  was ACKed, because the peer may already be running the transferred image.
+- In block replies, ACK wins over `C`/NAK noise in the same UART read.
+- UART bytes received during EOT go straight to the next-stage parser. A U-Boot banner and prompt
+  from the same read are not lost, and autoboot can still be interrupted.
 
-Status: simulation PASS / HW PARTIAL. In test7 on Windows, Ctrl+P/Ctrl+Q worked but ordinary keys
-and Enter could be dropped in the new raw console path.
+**Terminal (`d799a8f`):**
+- The manual XMODEM send (Ctrl+] → `s`) prints the output received after the transfer.
+- Without an EOT ACK it says "All data blocks were ACKed; EOT ACK was not received. Verify the
+  device state in the terminal" and does not treat this as a failure.
 
-- Windows terminal input uses `ReadConsoleInputW` + `KEY_EVENT_RECORD` instead of reading
-  `os.Stdin` bytes under `VIRTUAL_TERMINAL_INPUT`.
-- Enter, Backspace, printable ASCII, arrows and Home/End/Delete are translated explicitly; an arrow
-  becomes one complete ANSI sequence before it reaches the UART.
-- Ctrl+Q, Ctrl+P, Ctrl+C, Ctrl+D and Ctrl+] are translated locally.
-- Non-Latin Unicode reaches the ASCII gate and is reliably rejected with a layout warning.
-- `VIRTUAL_TERMINAL_INPUT` is off on stdin; QuickEdit stays on for the clipboard.
-- Linux unchanged. Tests for Windows Enter/arrows/Ctrl keys and Cyrillic rejection.
+**Tests:** `TestXmodemEOTHandoffClassifier`.
 
-## 0.2.0-test7 (2026-09-24)
+## 0.2.0-test12 (2026-09-24 10:55–11:02)
 
-Status: simulation PASS / HW PARTIAL. OpenWrt testing showed that the old UART Shell (Expert 6) read
-the console byte by byte and polled the port every 250 ms: arrows were split and input lagged by
-almost a second.
+Commits:
+- `5e0ec4a`: release;
+- `6355c79`: gofmt;
+- `74ef552`: CI gofmt diff output for diagnosis, reverted afterwards;
+- `2d72182`: finalisation;
+- `e3a4df8`: restores wizard helpers accidentally removed while replacing the TFTP block;
+- `0b07944`: restores route-aware IP selection.
 
-- Expert 6 uses the same low-latency raw engine as Expert 1; there is no separate byte-by-byte
-  implementation any more.
-- Interactive port polling is 20 ms instead of 200/250 ms.
-- Keyboard and paste input is written in chunks; ANSI arrows stay intact.
-- Ctrl+Q and Ctrl+] leave the UART Shell.
-- Commands are ASCII-only: bytes ≥ 0x80 are blocked locally with a warning. XMODEM is unaffected.
-- Ctrl+P is a local pager sized to the window; while paused the UART keeps being read and logged,
-  Enter shows the next page; the queue is capped at 4 MiB.
+Tag `v0.2.0-test12` → `0b07944`, pre-release 11:03.
 
-## 0.2.0-test6 (2026-09-24)
+Status: **simulation PASS / HW PARTIAL**.
 
-Status: simulation PASS / HW PARTIAL. The interactive UART terminal ran on real OpenWrt hardware for
-the first time; the Windows issues it exposed are fixed. Probe and writes: HW HOLD.
+**Why:** with test11 on a real XG-040G-MF, the second BootROM XMODEM stage had transferred 1152 of
+2539 FIP blocks when a single received `CAN` byte made the host abort the whole session. No NAND
+erase or write had started.
 
-- Windows lists only COM ports that actually exist (`QueryDosDeviceW`), selectable by number;
-  manual `COM<n>` input remains.
-- Windows serial writes no longer call `FlushFileBuffers` after every write, removing the
-  near-second typing latency.
-- QuickEdit stays enabled in raw mode, so select/copy/paste work again.
-- Ctrl+Q is a local fast exit and never reaches the router.
-- Tests: an arrow goes out in one write, Ctrl+Q stays local.
+**XMODEM:**
+- A single `CAN` is **no longer** a cancellation; it is line noise. A receiver abort requires
+  **`CAN CAN`** (two in a row).
+- NAK or `C` (CRC request) retries only the current block immediately, without waiting out the old
+  12-second deadline.
+- The block ACK wait is 2 s with at most **8 attempts** (was 12 s and 10 attempts).
+- EOT: 6 attempts of 2 s each (replaced by the handoff logic in test13).
+- A final host-side failure sends `CAN CAN CAN`, so the peer is not left in an ambiguous session
+  (test13 narrows this to the data phase).
 
-## 0.2.0-test5 (2026-09-24)
+**LAN/TFTP (UrsusFlasher-style):**
+- **Route-aware PC IP.** The program takes the address of the interface the OS routes to
+  `192.168.1.1`. Fallback: any active non-loopback interface with a `192.168.1.x` address.
+- **3 attempts** of only the current transfer. Every attempt re-applies all U-Boot network
+  variables.
+- **U-Boot resync** after a network error: Ctrl-C and wait for the prompt, up to 4 cycles of 1.5 s.
+  Backoff between attempts: 1 s, then 2 s.
+- **Mandatory RAM verification** (`hash sha256` or `crc32`) after every successful transfer,
+  retries included.
+- ICMP `ping` is no longer a hard preflight. The TFTP transfer plus the RAM check is the proof that
+  the Ethernet path works.
+- **TFTP server:**
+  - it can be cancelled; a failed attempt releases UDP/1069 before the next one;
+  - every wait is bounded: RRQ 30 s, option negotiation 8 × 1 s, block ACK 10 × 1 s.
+- **Windows:** `WSAECONNRESET`/`WSAECONNABORTED` UDP errors from a stale peer are treated as noise
+  (`udp_windows.go`, `udp_other.go`).
+- **Stock restore:** only the current 8 MiB RAM upload is retried. Chunks already written to NAND
+  are never replayed by the transport retry. The BL2-last rule is unchanged.
+- The temporary MACs `02:00:00:04:0d:10/11` are now set before every TFTP transfer in all wizards,
+  not only in stock and physical restore.
 
-- The terminal defaults to raw passthrough: device output verbatim, clean and copyable, and the
-  device's own history (BusyBox/U-Boot) works. The `[K` litter came from the old line-mode redraw
-  injecting ANSI erase codes.
-- Line-input mode (menu `l`) remains for devices without their own editing; its redraw now uses
-  only CR/space/backspace.
-- Main menu: Expert mode moved to the last position and shown in bold.
-- Windows: `ENABLE_VIRTUAL_TERMINAL_PROCESSING` is enabled, so bold and ANSI render.
+**Tests:** `TestXmodemReplyNoiseAndCancel`.
 
-## 0.2.0-test4 (2026-09-24)
+## 0.2.0-test11 (2026-09-24 10:35)
 
-- New UART terminal (Expert 1): local line editing, ↑/↓ history, cursor keys, Home/End, a raw
-  passthrough toggle, manual XMODEM send and receive (XMODEM-CRC, 128/1K) and full session logging.
-  The old transparent shell stays as item 6. It holds no credentials and guesses none.
-- CI: a pre-release can be published from a manual workflow run on `main`.
+Commit `260419f`, tag `v0.2.0-test11`, pre-release 10:36.
 
-## 0.2.0-test3 (2026-09-24)
+Status: **simulation PASS / HW PARTIAL**.
 
-Review fixes before the first hardware probe.
+**Why:** on a real XG-040G-MF (AN7583), test10 completed the BootROM stage for the first time:
+preloader XMODEM and the RAM FIP (BL31 + U-Boot) load. The wizard then reached a live `AN7583>`
+prompt but did not recognise it after the ANSI bootmenu. No NAND erase or write happened.
 
-- `ubi part` removed from the strict probe: attaching UBI can write (auto-resize, fastmap). UBI
-  geometry is parsed offline from the EC/VID headers; U-Boot attach is a separate ADVANCED mode
-  (`--ubi-attach`, item A) reported as not read-only.
-- Identity leak: `/etc/board.json` `macaddr` values reached `profile.json`. A recursive sanitizer now
-  cleans the profile, report and draft; regression tests added.
-- Unknown devices are passive: no Ctrl-C and no commands until a U-Boot/Linux banner is seen;
-  `--wake` allows one Ctrl-C, and only well-known prompts get U-Boot commands.
-- Internal marker lines use fixed, tested templates (`probe/internal.go`).
-- `--redact` also handles JSON identity fields and leaves binary files out of the bundle.
-- CI: build and test on every push, pre-releases for `v*` tags.
+- **U-Boot prompt detection:**
+  - ANSI CSI sequences are stripped from the output;
+  - the prompt is recognised by the stable end of the stream: `AN7581>`, `AN7583>`, `U-Boot>` or
+    `=>`;
+  - a newline before the prompt is no longer required, since the bootmenu positions the cursor with
+    ANSI instead of CR/LF.
+- **Leaving the bootmenu:** once a bootmenu is seen, only Esc is sent, at most 6 times, 250 ms apart.
+  No more Ctrl-C into the menu (previously Ctrl-C and Esc together, up to 40 times). Without a menu:
+  Ctrl-C at most 20 times.
+- **Regression tests:** AN7583 bootmenu cursor addressing before and after the prompt; prompt-like
+  text that is not at the end of the stream is rejected.
+- **First hardware observation:** the RAM U-Boot load works on MF.
 
-## 0.2.0-test2 (2026-09-24)
+## 0.2.0-test10 (2026-09-24 10:25)
 
-First version in this repository.
+Commits `f4dfd56` and `1865cb1` (restores the `build.sh` executable bit). Tag `v0.2.0-test10` →
+`1865cb1`, pre-release 10:27.
 
-- Language choice at start (Русский / English); `--lang ru|en` or `URSIDO_LANG`.
-- Includes everything from 0.2.0-test1 and the recovery from 0.1.1-test2.
+Status: **simulation PASS / HW PARTIAL**. UART and recovery hardware status as in test9.
 
-## 0.2.0-test1
+- `UrsidoRescue.exe` carries the Ursus bear icon as Windows `RT_ICON` and `RT_GROUP_ICON` resources
+  in 7 sizes (16, 24, 32, 48, 64, 128, 256 px).
+- Icon sources: `assets/ursus-bear.svg` and `assets/ursus-bear.png` (256 px), kept for the planned
+  GUI.
+- The icon is embedded by the in-house pure-Go tool `tools/embedicon`. The build needs no MinGW,
+  windres, Python or ImageMagick.
 
-- Read-only Porting Collector (the "Porting" menu item, `probe` / `export` commands),
-  `ursus-profile-v1` bundles.
+## 0.2.0-test9 (2026-09-24 10:03–10:10)
 
-## 0.1.x
+Commits `a76836d`, `fd3a01f` (gofmt), `9909608` (Ctrl+C/Ctrl+Z). Tag `v0.2.0-test9` → `9909608`,
+pre-release 10:11.
 
-Early UrsidoRescue builds before this repository: UART recovery of the Nokia XG-040G-MD/MF through
-the BootROM (stock mtd16, FIP, physical NAND, recovery ITB, diagnostics, expert mode). Since
-0.1.1-test2 the RAM FIPs of both boards are UrsusBoot 0.1.0-alpha5-t66 RECOVERY_SAFE (Fudan FM25S01A
-+ FM25G02B). Hardware status: PENDING.
+Status: **simulation PASS / HW PARTIAL**.
+
+**Why:** on Windows/OpenWrt, test8 confirmed normal input and live output, but the pager split
+fullscreen programs such as BusyBox `top`.
+
+- **Ctrl+P pager** applies only to ordinary line-oriented output.
+- **Fullscreen output** is detected from cursor-home, clear-screen and alternate-screen ANSI
+  sequences:
+  - the pager flushes its queue at once and switches itself off;
+  - detection works even when a CSI sequence is split across two reads;
+  - colour (SGR) and erase-line sequences do not trigger TUI mode.
+- **Ctrl+C and Ctrl+Z** are forwarded to the router as `0x03` and `0x1A` in both input modes,
+  Windows included.
+
+## 0.2.0-test8 (2026-09-24 09:29–09:51)
+
+Commits `e95e2b8`, `8e49aa6` (gofmt), `5c90240`. Tag `v0.2.0-test8`, pre-release 09:52.
+
+Status: **simulation PASS / HW PARTIAL**.
+
+**Why:** in test7 on Windows, Ctrl+P and Ctrl+Q worked but ordinary keys and Enter could be lost.
+
+- **Windows input** uses `ReadConsoleInputW` + `KEY_EVENT_RECORD` instead of byte reads under
+  `VIRTUAL_TERMINAL_INPUT`:
+  - Enter, Backspace, ASCII, arrows and Home/End/Delete are translated explicitly;
+  - an arrow goes out as one complete ANSI sequence;
+  - Ctrl+Q, Ctrl+P, Ctrl+C, Ctrl+D and Ctrl+] are translated locally.
+- Non-Latin input is reliably rejected by the ASCII gate.
+- `VIRTUAL_TERMINAL_INPUT` is off; QuickEdit is kept.
+
+## 0.2.0-test7 (2026-09-24 09:09–09:23)
+
+Commits `d54ec3f`, `23810f0` (gofmt), `7228235`. Tag `v0.2.0-test7`, pre-release 09:24.
+
+Status: **simulation PASS / HW PARTIAL**.
+
+**Why:** the old UART Shell (Expert 6) read the console byte by byte and polled the port every
+250 ms. Arrows were split and input lagged by almost a second.
+
+- **Expert 6** runs on the same low-latency engine as Expert 1.
+- Port polling is 20 ms (was 200/250 ms).
+- Input is sent in chunks.
+- Ctrl+Q and Ctrl+] exit.
+- **ASCII gate:** bytes ≥ 0x80 are blocked with a keyboard-layout warning.
+- **Local Ctrl+P pager** (queue up to 4 MiB).
+
+## 0.2.0-test6 (2026-09-24 08:46–08:54)
+
+Commits `b083d61`, `dac94ac` (gofmt), `ce5a30c`, the first commits by medvedolog. Tag
+`v0.2.0-test6`, pre-release 08:55.
+
+Status: **simulation PASS / HW PARTIAL**: the terminal ran on real OpenWrt for the first time.
+
+- **Windows COM port list** shows only ports that exist (`QueryDosDeviceW`), selectable by number.
+- No `FlushFileBuffers` after every write, which removed the near-second input lag.
+- QuickEdit is kept in raw mode, so copy and paste work.
+- Ctrl+Q is a local fast exit.
+
+## 0.2.0-test5 (2026-09-24 08:30)
+
+Commit `911c101`, tag `v0.2.0-test5`, pre-release 08:33.
+
+- **Terminal** defaults to raw passthrough:
+  - device output verbatim;
+  - the device's own history works;
+  - no more `[K` litter from ANSI redraws.
+- Line mode (`l`) redraws the line only with CR, space and backspace.
+- **Main menu reordered** (the current numbering):
+
+  | item | before test5 | since test5 |
+  |---|---|---|
+  | Expert mode | 6 | **8, bold** |
+  | Log bundle | 7 | 6 |
+  | Porting | 8 | 7 |
+
+- Windows: `ENABLE_VIRTUAL_TERMINAL_PROCESSING` is enabled.
+
+## 0.2.0-test4 (2026-09-24 08:18)
+
+Commit `f96b654`, tag `v0.2.0-test4`, pre-release 08:20.
+
+- **New UART terminal, Expert 1:**
+  - line input, ↑/↓ history, cursor, Home/End;
+  - a raw passthrough toggle;
+  - manual XMODEM send and receive: XMODEM-CRC, 128 and 1K blocks;
+  - full session log.
+- **Expert menu reordered:**
+
+  | item | before test4 | since test4 |
+  |---|---|---|
+  | UART terminal | — | **1** |
+  | UART Shell | 1 | 6 |
+
+## 0.2.0-test3 (2026-09-24 07:55–08:05)
+
+Commits:
+- `84c00e3`: CI builds and tests on every push, pre-releases for `v*` tags;
+- `0722824`: probe review;
+- `6692754`: CI publishing from a manual run on `main`.
+
+Tag `v0.2.0-test3` → `6692754`, pre-release 08:07, the first published one.
+
+Review fixes before the first hardware probe:
+
+- **UBI attach:**
+  - `ubi part` removed from the strict probe;
+  - UBI geometry is parsed offline from the EC/VID headers;
+  - attach is a separate ADVANCED mode (`--ubi-attach`, item A).
+- **Identity leak:** `board.json` `macaddr` reached `profile.json`. A recursive sanitizer was added.
+- **Unknown devices** stay passive until a bootloader banner is seen. `--wake` allows one Ctrl-C.
+- **Internal lines** use the fixed templates in `probe/internal.go`.
+- **`--redact`** masks JSON fields and leaves binary files out of the archive.
+
+## 0.2.0-test2 (2026-09-24 07:49)
+
+Commit `0a30362`, the repository's first commit. No pre-release: CI did not exist yet.
+
+- **Language choice at start**: Русский / English.
+  - Preset it with `--lang ru|en` or `URSIDO_LANG`.
+  - `probe` and `export` follow the system locale.
+  - Confirmation phrases, `profile.json` and reports are always English.
+- **Contents at the first commit:**
+  - main menu: 1 stock, 2 FIP, 3 physical, 4 ITB, 5 diagnostics, 6 expert, 7 log bundle, 8 porting;
+  - expert: 1 UART Shell, 2 RAM U-Boot, 3 UBI volume, 4 raw MTD, 5 diagnostics;
+  - `payloads/` with pinned SHA256, `--selftest`, `build.sh` for 3 targets.
+- **XMODEM at the time:**
+  - 10 attempts per block, 12 s wait;
+  - a single `CAN` meant cancellation;
+  - EOT without ACK was an error.
+- **Status:** the probe was tested on a simulated board and a pseudo-terminal, not on hardware.
+  Recovery: HW PENDING.
+
+## 0.2.0-test1 (reconstructed)
+
+Before the repository; known from the test2 `STATUS.md`.
+
+- Read-only **Porting Collector**:
+  - the "Porting" menu item;
+  - the `probe` and `export` commands;
+  - `ursus-profile-v1` bundles.
+
+## 0.1.x (reconstructed)
+
+Before the repository; per-version details were not preserved. The 0.2.0-test2 code and `STATUS.md`
+show that by 0.1.1-test2 the tool already had:
+
+- UART recovery of the Nokia XG-040G-MD (AN7581) and XG-040G-MF (AN7583) through the BootROM:
+  preloader + RAM FIP over XMODEM;
+- stock restore from `mtd16`, FIP replacement, physical NAND, ITB boot from RAM, diagnostics,
+  expert mode, log bundle;
+- a built-in TFTP server, readback after write, "BL2 last".
+
+**0.1.1-test2:** the RAM FIPs of both boards are UrsusBoot 0.1.0-alpha5-t66 RECOVERY_SAFE (Fudan
+FM25S01A + FM25G02B). Hardware status: PENDING.
+
+## Prehistory in the Ursus family (reconstructed)
+
+- **MedveFlasher RC18** (no later than 2026-08-14): the RECOVERY_SAFE RAM U-Boot contract:
+  - `bootdelay=-1`;
+  - `bootcmd` only prints text;
+  - the environment is saved only to UBI volumes that never exist.
+  These RAM U-Boots knew only the Fudan FM25S01A.
+- **UrsusBoot 0.1.0-alpha5-t66** (2026-09-23): a Fudan-capable RECOVERY_SAFE RAM U-Boot on the same
+  contract with FM25G01B/FM25G02B support. Its FIPs are what `payloads/` ships.

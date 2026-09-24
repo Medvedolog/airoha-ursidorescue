@@ -1,6 +1,6 @@
 # UrsidoRescue — документация / documentation
 
-Версия: **0.2.0-test10** · статус: simulation PASS / HW PARTIAL (см. [../STATUS.md](../STATUS.md))
+Версия: **0.2.0-test13** · статус: simulation candidate / HW PARTIAL (см. [../STATUS.md](../STATUS.md))
 
 ## Русский
 
