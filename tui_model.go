@@ -795,11 +795,37 @@ func (m *tuiModel) viewMenu(h int) []string {
 		desc = append(desc, tsFaint.Render(L("сессия: ", "session: ")+displayDir(m.a.probeDir)))
 	}
 	lines := []string{head}
-	if descW := m.w - listW - 3; descW >= 30 {
-		// Two columns: the list │ what the selected item does.
+	descW := m.w - listW - 3
+	twoCol := descW >= 30
+	var descText []string
+	for _, l := range wrapLines(it.desc, max(descW, m.w)) {
+		descText = append(descText, tsMuted.Render(l))
+	}
+	if twoCol {
+		descText = descText[:0]
 		for _, l := range wrapLines(it.desc, descW) {
-			desc = append(desc, tsMuted.Render(l))
+			descText = append(descText, tsMuted.Render(l))
 		}
+	}
+	// The winking bear goes where it takes nothing away: big in the top-left
+	// corner when the whole menu and description still fit, otherwise small
+	// under the list, otherwise small over the description.
+	need := 1 + len(list)
+	if twoCol {
+		need = 1 + max(len(list), len(desc)+len(descText))
+	} else {
+		need += 1 + len(desc) + len(descText)
+	}
+	if logo := tuiLogo(h-need-1, m.w); logo != nil && len(logo) == len(bearBig) {
+		lines = append(append(logo, ""), lines...)
+	} else if small := tuiLogo(len(bearSmall), listW-1); twoCol && small != nil && len(list)+1+len(small) <= h-1 {
+		list = append(append(list, ""), small...)
+	} else if small := tuiLogo(len(bearSmall), descW); twoCol && small != nil {
+		desc = append(append(small, ""), desc...)
+	}
+	if twoCol {
+		// Two columns: the list │ what the selected item does.
+		desc = append(desc, descText...)
 		rows := max(len(list), min(len(desc), h-len(lines)))
 		if len(desc) > rows {
 			desc = append(desc[:rows-1], tsFaint.Render("… "+L("подробно — doc/MENU_RU.md", "details: doc/MENU_EN.md")))
@@ -819,9 +845,7 @@ func (m *tuiModel) viewMenu(h int) []string {
 		lines = append(lines, list...)
 		lines = append(lines, tsFaint.Render(strings.Repeat("┄", m.w)))
 		lines = append(lines, desc...)
-		for _, l := range wrapLines(it.desc, m.w) {
-			lines = append(lines, tsMuted.Render(l))
-		}
+		lines = append(lines, descText...)
 	}
 	if m.toast != "" {
 		lines = append(lines[:min(len(lines), h-1)], tsSand.Render(m.toast))

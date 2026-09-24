@@ -86,6 +86,9 @@ Releases by CI.
   questions and short options (`bl2/ubi`, reset / stay) are buttons, lists use highlighted arrows with the
   `[1]` default preselected; hotkeys work with the Russian layout and through F2/F3/F4/F10; long lines wrap
   at words. `AskRequest` gained `Quick` and `Default` for this; the console does not show them.
+- TUI: the logo is a winking ASCII bear with the UrsidoRescue name and version: big in the top-left
+  corner when the height allows, otherwise small in a free corner of the menu; it never pushes the menu or
+  the description off the screen.
 - Porting Collector: a `Username:` / `User:` prompt is recognised as a login (previously only `login:`);
   when the last line is not a known prompt the probe says so instead of waiting silently for the timeout.
 - The Porting menu items report through the application layer; the console prints the same as before,

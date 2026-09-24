@@ -233,3 +233,19 @@ func TestWrapLinesKeepsHyphenatedWords(t *testing.T) {
 		t.Fatalf("hyphenated words must not be split: %q", joined)
 	}
 }
+
+func TestTUILogo(t *testing.T) {
+	for _, sz := range [][2]int{{80, 24}, {120, 36}} {
+		m, _, _ := testTUI(t, sz[0], sz[1])
+		for tab := range m.menu {
+			m.tab = tab
+			v := checkFits(t, m, "menu with logo")
+			if !strings.Contains(v, "o   -") || !strings.Contains(v, appVersion) {
+				t.Errorf("%dx%d tab %d: the winking bear with the version must be on screen:\n%s", sz[0], sz[1], tab, v)
+			}
+			if last := m.menu[tab].items[len(m.menu[tab].items)-1].label; !strings.Contains(v, last) {
+				t.Errorf("%dx%d tab %d: the logo must not push %q off the menu", sz[0], sz[1], tab, last)
+			}
+		}
+	}
+}
