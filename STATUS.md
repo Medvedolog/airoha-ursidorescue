@@ -1,3 +1,20 @@
+# UrsidoRescue 0.2.0-test14
+
+Status: **simulation candidate / HW PARTIAL.** This code-only follow-up does not touch the separate
+doc/ work. It closes three code/documentation mismatches found during documentation review.
+
+## 0.2.0-test14
+
+- Normal NAND/UBI/U-Boot diagnostics are now genuinely read-only: they no longer execute
+  `ubi part ubi`. MTD layout/bad-block/environment inspection remains, and the UI explicitly
+  points users to Porting mode A / `--ubi-attach` for an intentional advanced UBI attach.
+- Expert one-shot RAM-file limit messages are derived from `maxGenericRAMFile` instead of
+  hard-coding 64 MiB. The current 0x08000000 limit therefore reports 128 MiB consistently.
+- CLI `probe` now uses the same serial-port enumerator as the menu on every platform. On Windows
+  that is the existing QueryDosDeviceW implementation; one detected COM port is auto-selected,
+  multiple COM ports are shown as a numbered list and require explicit `--uart PORT`.
+- No files under doc/ are changed in this release.
+
 # UrsidoRescue 0.2.0-test13
 
 Status: **simulation candidate / HW PARTIAL.** Two consecutive AN7583/MF hardware runs of test12

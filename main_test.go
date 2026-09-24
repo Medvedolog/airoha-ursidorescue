@@ -2,6 +2,12 @@ package main
 
 import "testing"
 
+func TestGenericRAMFileLimitIs128MiB(t *testing.T) {
+	if got := maxGenericRAMFile / (1024 * 1024); got != 128 {
+		t.Fatalf("maxGenericRAMFile = %d MiB, want 128", got)
+	}
+}
+
 func TestCRC16Xmodem(t *testing.T) {
 	if got := crc16Xmodem([]byte("123456789")); got != 0x31c3 {
 		t.Fatalf("got %04x", got)

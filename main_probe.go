@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -226,14 +225,24 @@ func (a *App) cliProbe(args []string) int {
 		fmt.Fprintln(os.Stderr, L("--sample должен быть 4k или 64k", "--sample must be 4k or 64k"))
 		return exitProbeFail
 	}
-	p := *port
+	p := strings.TrimSpace(*port)
 	if p == "" {
 		ports := existingPorts()
-		if len(ports) != 1 {
-			fmt.Fprintf(os.Stderr, L("нужен --uart (найдено: %s)\n", "--uart is required (found: %s)\n"), strings.Join(ports, ", "))
+		switch len(ports) {
+		case 0:
+			fmt.Fprintln(os.Stderr, L("UART-порты не найдены. Подключите USB-UART или укажите --uart PORT.", "No UART ports found. Connect a USB-UART adapter or specify --uart PORT."))
+			return exitUARTUnavailable
+		case 1:
+			p = ports[0]
+			fmt.Println(L("[UART] Автовыбор единственного порта:", "[UART] Auto-selected the only port:"), p)
+		default:
+			fmt.Fprintln(os.Stderr, L("Найденные UART:", "UART ports found:"))
+			for i, name := range ports {
+				fmt.Fprintf(os.Stderr, "  %d. %s\n", i+1, name)
+			}
+			fmt.Fprintln(os.Stderr, L("Найдено несколько UART. Повторите команду с --uart PORT.", "Multiple UART ports found. Re-run with --uart PORT."))
 			return exitUARTUnavailable
 		}
-		p = ports[0]
 	}
 	dir := *out
 	if dir == "" {
@@ -319,12 +328,10 @@ func latestProbeDir(work string) string {
 	return dirs[len(dirs)-1]
 }
 
-// existingPorts lists ports that are present (Linux) — on Windows COM names
-// cannot be enumerated without the registry, so --uart is required there.
+// existingPorts uses the same platform enumerator as the interactive menu.
+// On Windows listSerialPorts uses QueryDosDeviceW, so CLI probe sees real COM
+// devices without opening or disturbing them.
 func existingPorts() []string {
-	if runtime.GOOS == "windows" {
-		return nil
-	}
 	return listSerialPorts()
 }
 

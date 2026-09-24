@@ -28,7 +28,7 @@ import (
 
 const (
 	appName               = "UrsidoRescue"
-	appVersion            = "0.2.0-test13"
+	appVersion            = "0.2.0-test14"
 	defaultRouterIP       = "192.168.1.1"
 	defaultLocalIP        = "192.168.1.254"
 	defaultTFTPPort       = 1069
@@ -2162,7 +2162,7 @@ func (a *App) physicalRestoreWizard() error {
 		return e
 	}
 	if len(blbad) > 0 || len(bad) > 0 {
-		return fmt.Errorf(L("восстановление physical image в 0.2.0-test13 требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test13 requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
+		return fmt.Errorf(L("восстановление physical image в 0.2.0-test14 требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test14 requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
 	}
 	local, e := a.networkIP()
 	if e != nil {
@@ -2308,17 +2308,15 @@ func (a *App) diagnosticsWizard() error {
 	if out, e := a.ubootCommand(s, "mtd bad ubi", 2*time.Minute); e == nil {
 		fmt.Println("--- mtd bad ubi ---\n", string(out))
 	}
-	if _, e := a.ubootCommand(s, "ubi part ubi", 3*time.Minute); e == nil {
-		if out, e := a.ubootCommand(s, "ubi info layout", 60*time.Second); e == nil {
-			fmt.Println("--- UBI layout ---\n", string(out))
-		}
-	} else {
-		fmt.Println(L("[INFO] UBI не подключился:", "[INFO] UBI attach failed:"), e)
+	if out, e := a.ubootCommand(s, "mtd list", 60*time.Second); e == nil {
+		fmt.Println("--- MTD layout (read-only) ---\n", string(out))
 	}
+	fmt.Println(L("[INFO] UBI attach пропущен: обычная диагностика не отправляет 'ubi part', потому что attach может изменить UBI metadata/fastmap. Для явного advanced attach используйте режим портирования A / --ubi-attach.",
+		"[INFO] UBI attach skipped: normal diagnostics never sends 'ubi part' because attach may change UBI metadata/fastmap. Use Porting mode A / --ubi-attach for an explicit advanced attach."))
 	if out, e := a.ubootCommand(s, "printenv", 60*time.Second); e == nil {
 		fmt.Println("--- environment ---\n", string(out))
 	}
-	fmt.Println(L("Диагностика завершена. NAND write/erase не выполнялись.", "Diagnostics finished. No NAND write/erase was done."))
+	fmt.Println(L("Read-only диагностика завершена. NAND/UBI write, erase и attach не выполнялись.", "Read-only diagnostics finished. No NAND/UBI write, erase, or attach was performed."))
 	return nil
 }
 
@@ -2431,7 +2429,8 @@ func (a *App) expertUBIVolume() error {
 	}
 	st, _ := os.Stat(path)
 	if st.Size() > maxGenericRAMFile {
-		return errors.New(L("файл volume >64 MiB за один раз не поддерживается в 0.2.0-test13", "expert one-shot volume file >64 MiB is not supported in 0.2.0-test13"))
+		return fmt.Errorf(L("файл volume >%d MiB за один раз не поддерживается в %s", "expert one-shot volume file >%d MiB is not supported in %s"),
+			maxGenericRAMFile/(1024*1024), appVersion)
 	}
 	sha, _ := shaFile(path)
 	fmt.Printf("WRITE EXISTING UBI VOLUME %s size=%d SHA256=%s\n", name, st.Size(), sha)
@@ -2488,7 +2487,8 @@ func (a *App) expertRawMTD() error {
 	}
 	st, _ := os.Stat(path)
 	if st.Size() > maxGenericRAMFile {
-		return errors.New(L("файл >64 MiB; используйте пошаговый режим", "file >64 MiB; use chunked workflow"))
+		return fmt.Errorf(L("файл >%d MiB; используйте пошаговый режим", "file >%d MiB; use chunked workflow"),
+			maxGenericRAMFile/(1024*1024))
 	}
 	if off+uint64(st.Size()) > cap {
 		return errors.New(L("файл выходит за границы target", "file exceeds target range"))
@@ -2583,7 +2583,7 @@ func (a *App) makeSupportBundle() (string, error) {
 }
 
 func (a *App) selftest() error {
-	if appVersion != "0.2.0-test13" {
+	if appVersion != "0.2.0-test14" {
 		return errors.New("version")
 	}
 	if _, e := probe.CheckUBoot("saveenv"); e == nil {
