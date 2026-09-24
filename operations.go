@@ -59,10 +59,12 @@ func (a *App) RunOperation(kind string) error {
 // routes the UI through the session and records start, end and failure.
 func (a *App) inSession(sess *app.Session, kind string, risk app.Risk, fn func() error, closeAfter bool) error {
 	opID := sess.NewOperation(kind)
+	a.cancelMu.Lock()
 	prevUI, prevSess, prevOp, prevKind := a.ui, a.sess, a.op, a.opKind
 	a.ui = &app.SessionUI{Inner: a.front, Session: sess, Op: opID}
 	a.sess, a.op, a.opKind = sess, opID, kind
 	a.stop.Reset()
+	a.cancelMu.Unlock()
 	sess.Record(map[string]any{"op": opID, "event": "start", "operation": kind, "risk": string(risk)})
 	if unstoppable[kind] || strings.HasPrefix(kind, "probe") {
 		a.cancelBlocked(noStopReason())
@@ -84,7 +86,9 @@ func (a *App) inSession(sess *app.Session, kind string, risk app.Risk, fn func()
 	}
 	sess.Record(rec)
 	a.cancelNow()
+	a.cancelMu.Lock()
 	a.ui, a.sess, a.op, a.opKind = prevUI, prevSess, prevOp, prevKind
+	a.cancelMu.Unlock()
 	if closeAfter {
 		sess.Close(result)
 	}
@@ -280,8 +284,11 @@ func (a *App) confirmOp(risk app.Risk, phrase string, actions []string) error {
 
 // setCancel reports what STOP does now; the front end only displays it.
 func (a *App) setCancel(mode app.CancelMode, checkpoint, reason string) {
+	a.cancelMu.Lock()
 	a.cancel = app.CancelState{Mode: mode, Checkpoint: checkpoint, Reason: reason, Requested: a.stop.Requested()}
-	a.ui.Cancel(a.cancel)
+	c, ui := a.cancel, a.ui
+	a.cancelMu.Unlock()
+	ui.Cancel(c)
 }
 
 func (a *App) cancelNow() { a.setCancel(app.CancelNow, "", "") }
@@ -290,15 +297,42 @@ func (a *App) cancelAt(checkpoint string) {
 }
 func (a *App) cancelBlocked(reason string) { a.setCancel(app.CancelUnavailable, "", reason) }
 
-// RequestStop is what a front end's STOP button calls. The core stops at
-// once only where nothing is being written; otherwise at the next safe
-// checkpoint, never inside an unavailable step.
-func (a *App) RequestStop() {
-	a.stop.Request()
-	c := a.cancel
-	c.Requested = true
-	a.cancel = c
-	a.ui.Cancel(c)
+// cancelMode is the current STOP phase.
+func (a *App) cancelMode() app.CancelMode {
+	a.cancelMu.Lock()
+	defer a.cancelMu.Unlock()
+	return a.cancel.Mode
+}
+
+// Busy reports whether an operation is running. Safe from any goroutine.
+func (a *App) Busy() bool {
+	a.cancelMu.Lock()
+	defer a.cancelMu.Unlock()
+	return a.opKind != ""
+}
+
+// RequestStop is what a front end's STOP button calls; it may be called from
+// any goroutine. The core alone decides: in an unavailable phase the request
+// is refused (not queued) and the returned state says why; otherwise the core
+// stops at once where nothing is being written, or at the next checkpoint.
+func (a *App) RequestStop() app.CancelState {
+	a.cancelMu.Lock()
+	c, ui, sess, op := a.cancel, a.ui, a.sess, a.op
+	if c.Mode != app.CancelUnavailable {
+		a.stop.Request()
+		c.Requested = true
+		a.cancel = c
+	}
+	a.cancelMu.Unlock()
+	if sess != nil {
+		ev := "stop_requested"
+		if !c.Requested {
+			ev = "stop_refused"
+		}
+		sess.Record(map[string]any{"op": op, "event": ev, "reason": c.Reason})
+	}
+	ui.Cancel(c)
+	return c
 }
 
 // stopError is the cancellation of an operation at a safe point.
@@ -318,7 +352,7 @@ func (a *App) checkpoint(where string) error {
 // stopBeforeCommand lets STOP take effect before the next U-Boot command,
 // but only while the operation is in a phase where stopping at once is safe.
 func (a *App) stopBeforeCommand(command string) error {
-	if a.cancel.Mode == app.CancelNow && a.stop.Requested() {
+	if a.stop.Requested() && a.cancelMode() == app.CancelNow {
 		return stopError(L("до команды ", "before the command ") + command)
 	}
 	return nil

@@ -167,6 +167,22 @@ Before the first write the program shows exactly what will happen and requires a
 
 Anything else means "operation cancelled by the user".
 
+### Stopping an operation (Ctrl+C)
+
+While an operation runs, **Ctrl+C is the STOP button**, and the core decides:
+
+- where nothing is written to flash (waiting for the BootROM, checks, the XMODEM data phase), the
+  next command is not sent; XMODEM is aborted with `CAN CAN CAN`;
+- during a chunked write the current chunk is finished and verified, then the operation stops
+  ("will stop after chunk 10/30");
+- where interrupting is unsafe (after the last XMODEM ACK until the next stage is proven, writing
+  and verifying BL2, `ubi write` → CRC) the press is **refused** with the reason and not queued.
+
+A second Ctrl+C within 3 seconds forces the program to exit (in an unavailable phase the device may
+be left unbootable). Outside an operation Ctrl+C ends the program as before. In the UART terminal
+and UART Shell Ctrl+C still goes to the router. Every press is recorded in the session's
+`operations.jsonl` (`stop_requested` / `stop_refused`).
+
 ---
 
 ## Main menu

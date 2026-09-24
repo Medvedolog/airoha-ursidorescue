@@ -113,3 +113,50 @@ func TestXmodemStopSendsCancel(t *testing.T) {
 		t.Fatalf("aborted data phase must end with CAN CAN CAN, got %q", last)
 	}
 }
+
+func TestStopRefusedWhenUnavailable(t *testing.T) {
+	rec := &app.Recorder{}
+	a := &App{ui: rec.UI()}
+	a.cancelBlocked("BL2 is being verified")
+	c := a.RequestStop()
+	if c.Requested || a.stop.Requested() {
+		t.Fatalf("an unavailable phase must refuse STOP, not queue it: %+v", c)
+	}
+	if c.Reason != "BL2 is being verified" {
+		t.Fatalf("the refusal must carry the core's reason: %+v", c)
+	}
+	a.cancelNow()
+	if err := a.checkpoint("after BL2"); err != nil {
+		t.Fatal("a refused STOP must not fire later")
+	}
+}
+
+func TestRequestStopFromAnotherGoroutine(t *testing.T) {
+	rec := &app.Recorder{}
+	a := &App{work: t.TempDir(), front: rec.UI(), frontEnd: "test"}
+	a.ui = a.front
+	saved := operationCatalog["diagnostics"]
+	defer func() { operationCatalog["diagnostics"] = saved }()
+	started, release := make(chan struct{}), make(chan struct{})
+	operationCatalog["diagnostics"] = operation{saved.Risk, func(a *App) error {
+		close(started)
+		<-release
+		return a.stopBeforeCommand("mtd list")
+	}}
+	done := make(chan error)
+	go func() { done <- a.RunOperation("diagnostics") }()
+	<-started
+	if !a.Busy() {
+		t.Fatal("Busy must be true while an operation runs")
+	}
+	if c := a.RequestStop(); !c.Requested {
+		t.Fatalf("STOP in a Now phase must be accepted: %+v", c)
+	}
+	close(release)
+	if err := <-done; !errors.Is(err, app.ErrCancelled) {
+		t.Fatalf("operation must end cancelled, got %v", err)
+	}
+	if a.Busy() {
+		t.Fatal("Busy must be false after the operation")
+	}
+}

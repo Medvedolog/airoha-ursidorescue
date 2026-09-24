@@ -70,6 +70,14 @@ Releases by CI.
   - the port belongs to `PortOwner` and is leased to one operation at a time;
   - UART logs and image chunks moved into the session directory; the log bundle and `export` still
     find older files in `work/`.
+- **STOP in the core:** "now / at a checkpoint / unavailable" modes (`CancelState`) for every
+  operation phase; the XMODEM data phase is aborted with `CAN CAN CAN`, and after the last ACK
+  stopping is unavailable until the next stage is proven; in an unavailable phase a request is
+  refused, not queued. The confirmation shows the risk class, the ordered actions and the stop boundary.
+- In the console Ctrl+C during an operation is STOP (a second Ctrl+C within 3 s forces exit);
+  outside an operation and in the UART terminal nothing changed.
+- UI spec v3.1 and mockup: STOP states, port chooser, IDs on screen, Porting banners, BootROM wait
+  and result screens, compact layout, no external fonts.
 - Documentation and `PROBE.md` updated to test17: network and LAN prerequisites, coloured output,
   EOT, stock LAN assist, `--stock-lan-assist`, the Telnet-only passive plan and late credential refresh.
 

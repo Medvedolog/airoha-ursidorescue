@@ -109,6 +109,7 @@ type App struct {
 	opKind    string         // catalogue kind of the running operation
 	stop      app.StopFlag   // STOP from the front end, polled at checkpoints
 	cancel    app.CancelState
+	cancelMu  sync.Mutex   // guards cancel, ui/sess/op/opKind swaps against RequestStop
 	op        string       // its operation ID
 	probeSess *app.Session // current Porting session (spans probe items)
 }
@@ -157,6 +158,7 @@ func realMain() int {
 		a.chooseLanguage()
 	}
 	a.lang = uiLang
+	defer a.watchInterrupt()()
 	if err := a.run(); err != nil {
 		fmt.Fprintln(os.Stderr, "\n[FAIL-CLOSED]", err)
 		return 1
@@ -551,7 +553,7 @@ func (a *App) waitReceiver(s Serial, timeout time.Duration, keepExisting bool, i
 		return ph, p, tail, nil
 	}
 	for time.Now().Before(deadline) {
-		if a.stop.Requested() && a.cancel.Mode != app.CancelUnavailable {
+		if a.stop.Requested() && a.cancelMode() != app.CancelUnavailable {
 			return phaseUnknown, Profile{}, tail, stopError(L("ожидание BootROM", "waiting for the BootROM"))
 		}
 		n, e := s.Read(buf, 500*time.Millisecond)
