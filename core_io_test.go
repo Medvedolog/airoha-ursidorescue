@@ -4,6 +4,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
+	"strings"
 	"testing"
 )
 
@@ -55,6 +57,32 @@ func TestCoreHasNoDirectConsoleIO(t *testing.T) {
 					if id, ok := x.Fun.(*ast.Ident); ok && forbidden[id.Name] {
 						t.Errorf("%s: core function %s draws console output (%s); use a.ui", fset.Position(x.Pos()), fd.Name.Name, id.Name)
 					}
+				}
+				return true
+			})
+		}
+	}
+}
+
+// TestPortsOnlyThroughOwner keeps serial ports behind the application layer:
+// only portOwner may open a device; operations lease it via a.openPort.
+func TestPortsOnlyThroughOwner(t *testing.T) {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi fs.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range pkgs["main"].Files {
+		for _, d := range f.Decls {
+			fd, ok := d.(*ast.FuncDecl)
+			if !ok || fd.Name.Name == "portOwner" || fd.Name.Name == "openSerial" {
+				continue
+			}
+			ast.Inspect(fd, func(n ast.Node) bool {
+				if id, ok := n.(*ast.Ident); ok && id.Name == "openSerial" {
+					t.Errorf("%s: %s opens a serial port directly; lease it with a.openPort", fset.Position(id.Pos()), fd.Name.Name)
 				}
 				return true
 			})

@@ -115,18 +115,12 @@ func (a *App) runProbe(r probeRequest) (probeResult, error) {
 		b, _ := json.MarshalIndent(br, "", "  ")
 		_ = os.WriteFile(filepath.Join(r.dir, "bootrom", "bootrom.json"), b, 0o644)
 	} else {
-		port := r.port
-		if port == "" {
-			var err error
-			if port, err = a.choosePort(); err != nil {
-				res.code = exitUARTUnavailable
-				return res, err
-			}
-		}
-		ser, err := openSerial(port)
+		a.portOverride = r.port
+		ser, err := a.openPort()
+		a.portOverride = ""
 		if err != nil {
 			res.code = exitUARTUnavailable
-			return res, fmt.Errorf(L("не удалось открыть %s: %w", "open %s: %w"), port, err)
+			return res, err
 		}
 		s = ser
 	}

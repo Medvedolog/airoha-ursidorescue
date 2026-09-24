@@ -162,3 +162,56 @@ func (a *App) sessionScratch(name string) string {
 	_ = os.MkdirAll(d, 0o755)
 	return d
 }
+
+// portOwner returns the application layer's port owner.
+func (a *App) portOwner() *app.PortOwner {
+	if a.ports == nil {
+		a.ports = app.NewPortOwner(openSerial)
+	}
+	return a.ports
+}
+
+// openPort leases the serial port to the running operation. When no port is
+// connected (the console connects per operation), it asks for one, connects
+// it for this operation only, and the lease's Close also disconnects it.
+func (a *App) openPort() (Serial, error) {
+	owner := a.portOwner()
+	implicit := false
+	if _, ok := owner.Connected(); !ok {
+		name, err := a.choosePort()
+		if err != nil {
+			return nil, err
+		}
+		if err := owner.Connect(name); err != nil {
+			return nil, fmt.Errorf(L("не удалось открыть %s: %w", "open %s: %w"), name, err)
+		}
+		implicit = true
+	}
+	p, err := owner.Acquire(a.op)
+	if err != nil {
+		if implicit {
+			_ = owner.Disconnect()
+		}
+		return nil, err
+	}
+	if implicit {
+		return &oneShotPort{Port: p, owner: owner}, nil
+	}
+	return p, nil
+}
+
+// oneShotPort is a lease on a port connected just for one operation.
+type oneShotPort struct {
+	app.Port
+	owner *app.PortOwner
+	done  bool
+}
+
+func (p *oneShotPort) Close() error {
+	if p.done {
+		return nil
+	}
+	p.done = true
+	_ = p.Port.Close()
+	return p.owner.Disconnect()
+}

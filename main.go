@@ -104,9 +104,10 @@ type App struct {
 	front    app.UI
 	frontEnd string
 
-	sess      *app.Session // session of the running operation
-	op        string       // its operation ID
-	probeSess *app.Session // current Porting session (spans probe items)
+	ports     *app.PortOwner // owns the serial port; operations lease it
+	sess      *app.Session   // session of the running operation
+	op        string         // its operation ID
+	probeSess *app.Session   // current Porting session (spans probe items)
 }
 
 func main() { os.Exit(realMain()) }
@@ -1114,13 +1115,9 @@ func goodSpans(off, size uint64, bad []uint64) [][2]uint64 {
 }
 
 func (a *App) acquireRAMUBoot(preferred Profile) (Serial, Profile, []byte, error) {
-	port, e := a.choosePort()
+	s, e := a.openPort()
 	if e != nil {
 		return nil, Profile{}, nil, e
-	}
-	s, e := openSerial(port)
-	if e != nil {
-		return nil, Profile{}, nil, fmt.Errorf("open %s: %w", port, e)
 	}
 	log, e := a.startLog("recovery")
 	if e != nil {
@@ -2410,11 +2407,7 @@ func (a *App) expertMenu() error {
 	}
 }
 func (a *App) uartShell() error {
-	port, e := a.choosePort()
-	if e != nil {
-		return e
-	}
-	s, e := openSerial(port)
+	s, e := a.openPort()
 	if e != nil {
 		return e
 	}

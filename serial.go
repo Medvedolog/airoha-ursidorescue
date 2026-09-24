@@ -1,11 +1,8 @@
 package main
 
-import "time"
+import "ursidorescue/app"
 
-type Serial interface {
-	Read([]byte, time.Duration) (int, error)
-	Write([]byte) error
-	ResetInput() error
-	Close() error
-	Name() string
-}
+// Serial is the serial port as the core uses it. Operations get it as a lease
+// from the application layer's PortOwner (a.openPort), never by opening the
+// device themselves.
+type Serial = app.Port

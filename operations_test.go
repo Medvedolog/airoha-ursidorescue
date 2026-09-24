@@ -5,8 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"ursidorescue/app"
 )
@@ -122,3 +124,68 @@ func TestProbeSessionSpansItems(t *testing.T) {
 		t.Fatalf("first probe session should hold 2 operations: %v", m["operations"])
 	}
 }
+
+func TestOpenPortImplicitAndExplicit(t *testing.T) {
+	opened := 0
+	var last *fakeSerial
+	owner := app.NewPortOwner(func(name string) (app.Port, error) {
+		opened++
+		last = &fakeSerial{name: name}
+		return last, nil
+	})
+
+	// Console: nothing connected, so the operation asks and connects for itself.
+	name := "/dev/ttyUSB9"
+	if runtime.GOOS == "windows" {
+		name = "COM9"
+	}
+	rec := &app.Recorder{Answers: []string{name}}
+	a := &App{front: rec.UI(), ports: owner, op: "op-a"}
+	a.ui = a.front
+	p, err := a.openPort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.Asks) != 1 || owner.Holder() != "op-a" {
+		t.Fatalf("implicit connect: asks=%d holder=%q", len(rec.Asks), owner.Holder())
+	}
+	a2 := &App{front: rec.UI(), ports: owner, op: "op-b"}
+	a2.ui = a2.front
+	if _, err := a2.openPort(); !errors.Is(err, app.ErrPortBusy) {
+		t.Fatalf("a second operation must not get the port, got %v", err)
+	}
+	_ = p.Close()
+	if _, ok := owner.Connected(); ok || last.closed != 1 {
+		t.Fatal("a one-shot connection must be closed with its lease")
+	}
+
+	// TUI/Web: the front end connected explicitly; no question, port stays open.
+	if err := owner.Connect("COM6"); err != nil {
+		t.Fatal(err)
+	}
+	rec2 := &app.Recorder{}
+	a3 := &App{front: rec2.UI(), ports: owner, op: "op-c"}
+	a3.ui = a3.front
+	p3, err := a3.openPort()
+	if err != nil || len(rec2.Asks) != 0 {
+		t.Fatalf("explicit connection must not ask: err=%v asks=%d", err, len(rec2.Asks))
+	}
+	_ = p3.Close()
+	if name, ok := owner.Connected(); !ok || name != "COM6" {
+		t.Fatal("an explicit connection must survive the operation")
+	}
+	if opened != 2 {
+		t.Fatalf("opened %d ports, want 2", opened)
+	}
+}
+
+type fakeSerial struct {
+	name   string
+	closed int
+}
+
+func (f *fakeSerial) Name() string                            { return f.name }
+func (f *fakeSerial) Close() error                            { f.closed++; return nil }
+func (f *fakeSerial) ResetInput() error                       { return nil }
+func (f *fakeSerial) Write([]byte) error                      { return nil }
+func (f *fakeSerial) Read([]byte, time.Duration) (int, error) { return 0, nil }

@@ -33,11 +33,7 @@ type uartTerm struct {
 
 // runTerminal opens the port and runs the interactive terminal.
 func (a *App) runTerminal() error {
-	port, e := a.choosePort()
-	if e != nil {
-		return e
-	}
-	s, e := openSerial(port)
+	s, e := a.openPort()
 	if e != nil {
 		return e
 	}
