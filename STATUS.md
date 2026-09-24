@@ -1,3 +1,20 @@
+# UrsidoRescue 0.2.0-test9
+
+Status: **simulation PASS / HW PARTIAL.** Windows/OpenWrt hardware testing of v0.2.0-test8
+confirmed ordinary keyboard input and live UART output, and exposed a pager/TUI interaction:
+screen-oriented programs such as BusyBox top were being split by the local line pager.
+
+## 0.2.0-test9
+
+- Local Ctrl+P paging is now limited to ordinary line-oriented output.
+- Fullscreen ANSI/TUI streams are detected from cursor-home/display-clear/alternate-screen control
+  sequences; the pager immediately flushes pending data and auto-disables before forwarding them.
+- Detection spans serial read boundaries so a split CSI sequence is still recognized.
+- Color-only SGR output and simple erase-line sequences do not trigger TUI bypass.
+- top/vi/less-style applications therefore retain their own terminal screen model; Ctrl+P can
+  re-enable paging later for ps, dmesg, logs and other static output.
+- Regression tests cover fullscreen ANSI detection, normal colored output and split CSI sequences.
+
 # UrsidoRescue 0.2.0-test8
 
 Status: **simulation PASS / HW PARTIAL.** Real Windows/OpenWrt testing of v0.2.0-test7

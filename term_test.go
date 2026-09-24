@@ -180,6 +180,41 @@ func TestFilterASCIICommandInput(t *testing.T) {
 	}
 }
 
+
+func TestHasFullscreenANSI(t *testing.T) {
+	full := []string{
+		"\x1b[H",
+		"\x1b[2J",
+		"\x1b[1;1H",
+		"\x1b[?1049h",
+		"\x1b[?25l",
+	}
+	for _, s := range full {
+		if !hasFullscreenANSI([]byte(s)) {
+			t.Fatalf("did not detect fullscreen ANSI %q", s)
+		}
+	}
+	normal := []string{
+		"plain text\n",
+		"\x1b[31mred\x1b[0m",
+		"\x1b[K",
+	}
+	for _, s := range normal {
+		if hasFullscreenANSI([]byte(s)) {
+			t.Fatalf("false fullscreen detection for %q", s)
+		}
+	}
+}
+
+func TestHasFullscreenANSIAcrossReadBoundary(t *testing.T) {
+	left := []byte("\x1b[")
+	right := []byte("2J")
+	joined := append(append([]byte(nil), left...), right...)
+	if !hasFullscreenANSI(joined) {
+		t.Fatal("split CSI sequence was not detected after reassembly")
+	}
+}
+
 func TestSplitOutputPage(t *testing.T) {
 	head, tail, lines, full := splitOutputPage([]byte("1\n2\n3\n4\n"), 3)
 	if !full || lines != 3 || string(head) != "1\n2\n3\n" || string(tail) != "4\n" {

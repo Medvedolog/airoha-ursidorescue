@@ -23,11 +23,12 @@ type uartTerm struct {
 	shownW    int  // rune width of the input line currently on screen (line mode)
 	lineShown bool // an input line is drawn and needs erasing before device output
 
-	pagerEnabled    bool
-	pagerWaiting    bool
-	pagerLines      int
-	pagerPending    []byte
-	lastASCIINotice time.Time
+	pagerEnabled     bool
+	pagerWaiting     bool
+	pagerLines       int
+	pagerPending     []byte
+	pagerANSIProbe   []byte
+	lastASCIINotice  time.Time
 }
 
 // runTerminal opens the port and runs the interactive terminal.
@@ -59,16 +60,16 @@ func (a *App) runTerminalOnMode(s Serial, simple bool) error {
 	t.ed.hidx = 0
 	if simple {
 		fmt.Printf(L("\nUART Shell %s — 115200 8N1, no flow\n", "\nUART Shell %s — 115200 8N1, no flow\n"), s.Name())
-		fmt.Println(L("Ctrl+] / Ctrl+Q — выход, Ctrl+P — постраничный вывод. Команды только ASCII/латиница.",
-			"Ctrl+] / Ctrl+Q — exit, Ctrl+P — local pager. Command input is ASCII/Latin only."))
+		fmt.Println(L("Ctrl+] / Ctrl+Q — выход, Ctrl+P — pager для обычного текста; полноэкранные TUI обходят его автоматически.",
+			"Ctrl+] / Ctrl+Q — exit, Ctrl+P — text pager; fullscreen TUIs bypass it automatically."))
 		fmt.Println(L("Никаких автоматических x/Enter/Ctrl-C не отправляется.", "No automatic x/Enter/Ctrl-C is sent."))
 	} else {
 		fmt.Println(L("\nUART-терминал 115200 8N1 — прозрачный режим (вывод как есть, копируется).",
 			"\nUART terminal 115200 8N1 — raw passthrough (verbatim output, copyable)."))
 		fmt.Println(L("Ctrl+] — меню: l — построчный ввод с историей ↑/↓, s/r — XMODEM отправка/приём, g — лог, q — выход.",
 			"Ctrl+] — menu: l line-input with ↑/↓ history, s/r XMODEM send/receive, g log, q quit."))
-		fmt.Println(L("Ctrl+Q — быстрый выход, Ctrl+P — постраничный вывод по высоте окна. Команды только ASCII/латиница.",
-			"Ctrl+Q — quick exit, Ctrl+P — local pager sized to the console window. Command input is ASCII/Latin only."))
+		fmt.Println(L("Ctrl+Q — быстрый выход, Ctrl+P — pager для обычного текстового вывода. top/vi и другие TUI отключают pager автоматически.",
+			"Ctrl+Q — quick exit, Ctrl+P — pager for normal text output. top/vi and other TUIs disable it automatically."))
 	}
 	fmt.Println(L("В Windows QuickEdit/clipboard остаётся включён. Всё пишется в лог.",
 		"On Windows QuickEdit/clipboard stays enabled. Everything is logged."))
@@ -161,6 +162,38 @@ func splitOutputPage(data []byte, maxLines int) (head, tail []byte, lines int, f
 		}
 	}
 	return data, nil, lines, false
+}
+
+// hasFullscreenANSI detects terminal-control sequences used by screen-oriented
+// programs such as top/vi/less. A line pager must never split these streams:
+// cursor addressing and display clears only make sense when delivered
+// immediately and in order.
+func hasFullscreenANSI(p []byte) bool {
+	for i := 0; i+2 < len(p); i++ {
+		if p[i] != 0x1b || p[i+1] != '[' {
+			continue
+		}
+		for j := i + 2; j < len(p) && j-i < 32; j++ {
+			b := p[j]
+			if b < 0x40 || b > 0x7e {
+				continue
+			}
+			params := string(p[i+2 : j])
+			switch b {
+			case 'H', 'f', 'J':
+				return true
+			case 'h', 'l':
+				if strings.Contains(params, "?1049") ||
+					strings.Contains(params, "?1047") ||
+					strings.Contains(params, "?47") ||
+					strings.Contains(params, "?25") {
+					return true
+				}
+			}
+			break
+		}
+	}
+	return false
 }
 
 func (t *uartTerm) writeRawInput(p []byte) error {
@@ -335,6 +368,34 @@ func (t *uartTerm) flushPagerLocked() {
 func (t *uartTerm) deviceOutput(d []byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// Probe across read boundaries: a CSI sequence is only a few bytes, but a
+	// serial read may split it anywhere.
+	probe := make([]byte, 0, len(t.pagerANSIProbe)+len(d))
+	probe = append(probe, t.pagerANSIProbe...)
+	probe = append(probe, d...)
+	if len(probe) > 64 {
+		t.pagerANSIProbe = append(t.pagerANSIProbe[:0], probe[len(probe)-64:]...)
+	} else {
+		t.pagerANSIProbe = append(t.pagerANSIProbe[:0], probe...)
+	}
+
+	if t.pagerEnabled && hasFullscreenANSI(probe) {
+		// Do not page screen-oriented programs. Flush anything held by the pager,
+		// then permanently turn it off for this session until Ctrl+P enables it
+		// again. The TUI's own clear/home sequence immediately follows, so this
+		// notice does not corrupt its screen model.
+		t.pagerEnabled = false
+		t.pagerWaiting = false
+		t.pagerLines = 0
+		if len(t.pagerPending) > 0 {
+			os.Stdout.Write(t.pagerPending)
+			t.pagerPending = nil
+		}
+		fmt.Print(L("\r\n[pager: автоотключение для полноэкранного ANSI/TUI]\r\n",
+			"\r\n[pager: auto-disabled for fullscreen ANSI/TUI]\r\n"))
+	}
+
 	if !t.pagerEnabled {
 		if !t.raw && t.lineShown {
 			t.eraseLineLocked()
