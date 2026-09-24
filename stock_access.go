@@ -26,8 +26,8 @@ import (
 )
 
 const (
-	stockWebUser             = "CMCCAdmin"
-	stockWebDefaultPassword  = "aDm8H%MdA"
+	stockWebUser            = "CMCCAdmin"
+	stockWebDefaultPassword = "aDm8H%MdA"
 )
 
 type stockWebClient struct {

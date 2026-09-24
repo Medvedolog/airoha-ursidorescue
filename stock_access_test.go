@@ -17,10 +17,10 @@ func TestStockJSField(t *testing.T) {
 	for key, want := range map[string]string{
 		"TelnetUserName": "user-telnet",
 		"TelnetPassword": "p%1",
-		"FtpEnable":       "0",
-		"FtpUserName":     "user_ftp",
-		"FtpPassword":     "rootpw",
-		"FtpPort":         "21",
+		"FtpEnable":      "0",
+		"FtpUserName":    "user_ftp",
+		"FtpPassword":    "rootpw",
+		"FtpPort":        "21",
 	} {
 		got, ok := stockJSField(src, key)
 		if !ok || got != want {
