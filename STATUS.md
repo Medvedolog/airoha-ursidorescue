@@ -1,10 +1,10 @@
-# UrsidoRescue 0.2.0-test8-dev
+# UrsidoRescue 0.2.0-test8
 
-Status: **HW terminal debugging / unreleased.** Real Windows/OpenWrt testing of v0.2.0-test7
+Status: **simulation PASS / HW PARTIAL.** Real Windows/OpenWrt testing of v0.2.0-test7
 showed that local Ctrl+P/Ctrl+Q were visible but ordinary keys and Enter could be dropped in the
-new raw-console path. The COM transport itself remained open.
+new raw-console path. The COM transport itself remained open. These Windows input fixes are included here and still need hardware re-test.
 
-## 0.2.0-test8-dev
+## 0.2.0-test8
 
 - Windows terminal input now uses ReadConsoleInputW + KEY_EVENT_RECORD instead of ReadFile/os.Stdin
   bytes under VIRTUAL_TERMINAL_INPUT.
