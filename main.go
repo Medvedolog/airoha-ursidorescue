@@ -278,8 +278,23 @@ func (a *App) showErr(err error) {
 	fmt.Println()
 }
 func (a *App) ask(prompt string) string {
-	v, _ := a.ui.Ask(app.AskRequest{Kind: app.AskText, Prompt: prompt})
+	quick, def := app.QuickFromPrompt(prompt)
+	return a.askQuick(prompt, def, quick...)
+}
+
+// askQuick asks with short answers a front end may offer as buttons; the
+// console shows only the prompt, as before.
+func (a *App) askQuick(prompt, def string, quick ...app.Choice) string {
+	v, _ := a.ui.Ask(app.AskRequest{Kind: app.AskText, Prompt: prompt, Quick: quick, Default: def})
 	return strings.TrimSpace(v)
+}
+
+// askResetOrStay is the question after a successful write: an empty answer
+// resets the router, "n" keeps U-Boot.
+func (a *App) askResetOrStay() bool {
+	return strings.ToLower(a.askQuick("> ", "",
+		app.Choice{Key: "", Label: L("Перезагрузить (reset)", "Reset")},
+		app.Choice{Key: "n", Label: L("Остаться в U-Boot", "Stay in U-Boot")})) != "n"
 }
 func (a *App) askPath(prompt string) (string, error) {
 	v, _ := a.ui.Ask(app.AskRequest{Kind: app.AskPath, Prompt: prompt})
@@ -440,7 +455,7 @@ func chooseProfileInteractive(a *App) (Profile, error) {
 			{Key: "2", Label: "Nokia XG-040G-MD / AN7581"},
 			{Key: "3", Label: "Nokia XG-040G-MF / AN7583"},
 		},
-		Prompt: L("Выбор [1]: ", "Choice [1]: ")})
+		Prompt: L("Выбор [1]: ", "Choice [1]: "), Default: "1"})
 	v = strings.TrimSpace(v)
 	if v == "" || v == "1" {
 		return Profile{ID: "auto"}, nil
@@ -471,7 +486,11 @@ func (a *App) choosePort() (string, error) {
 	if len(ports) == 1 {
 		prompt = L("UART порт [1]: ", "UART port [1]: ")
 	}
-	v, _ := a.ui.Ask(app.AskRequest{Kind: app.AskChoice, Title: title, Choices: choices, Prompt: prompt})
+	def := ""
+	if len(ports) == 1 {
+		def = "1"
+	}
+	v, _ := a.ui.Ask(app.AskRequest{Kind: app.AskChoice, Title: title, Choices: choices, Prompt: prompt, Default: def})
 	v = strings.TrimSpace(v)
 	if v == "" && len(ports) == 1 {
 		return ports[0], nil
@@ -1744,10 +1763,13 @@ func (a *App) fipRepairWizard() error {
 	if !strings.Contains(strings.ToLower(string(layout)), "fip") {
 		return errors.New(L("UBI volume fip не найден", "UBI volume fip not found"))
 	}
-	a.noteln(L("\nFIP источник:", "\nFIP source:"))
-	a.noteln(L("  1. Встроенный RAM FIP текущего профиля (рекомендуется для rescue)", "  1. Built-in RAM FIP of the current profile (recommended for rescue)"))
-	a.noteln(L("  2. Выбрать другой .fip", "  2. Choose another .fip"))
-	v := a.ask(L("Выбор [1]: ", "Choice [1]: "))
+	v, _ := a.ui.Ask(app.AskRequest{Kind: app.AskChoice, Title: L("\nFIP источник:", "\nFIP source:"),
+		Choices: []app.Choice{
+			{Key: "1", Label: L("Встроенный RAM FIP текущего профиля (рекомендуется для rescue)", "Built-in RAM FIP of the current profile (recommended for rescue)")},
+			{Key: "2", Label: L("Выбрать другой .fip", "Choose another .fip")},
+		},
+		Prompt: L("Выбор [1]: ", "Choice [1]: "), Default: "1"})
+	v = strings.TrimSpace(v)
 	path := filepath.Join(a.root, filepath.FromSlash(p.RAMFIPRel))
 	if v == "2" {
 		path, e = a.askPath(L("Путь к .fip: ", "Path to the .fip: "))
@@ -1792,7 +1814,7 @@ func (a *App) fipRepairWizard() error {
 	a.cancelNow()
 	a.event(L("Запись FIP + проверка PASS; SHA256 источника=", "FIP write + readback PASS; source SHA256=") + sha)
 	a.noteln(L("Можно выполнить reset. Нажмите Enter для reset или введите N чтобы оставить RAM U-Boot.", "Ready to reset. Press Enter to reset or type N to stay in RAM U-Boot."))
-	if strings.ToLower(a.ask("> ")) != "n" {
+	if a.askResetOrStay() {
 		_ = sendLine(s, "reset")
 	}
 	return nil
@@ -2248,7 +2270,7 @@ func (a *App) stockRestoreWizard() error {
 	a.cancelNow()
 	a.event(L("Восстановление стока PASS: IBU проверен, BL2 проверен последним. SHA256 источника mtd16=", "Stock restore PASS: IBU verified, BL2 verified last. Source mtd16 SHA256=") + prep.allSHA)
 	a.noteln(L("Нажмите Enter для reset или N чтобы оставить U-Boot.", "Press Enter to reset or N to stay in U-Boot."))
-	if strings.ToLower(a.ask("> ")) != "n" {
+	if a.askResetOrStay() {
 		_ = sendLine(s, "reset")
 	}
 	return nil

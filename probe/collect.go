@@ -91,6 +91,7 @@ type Outcome struct {
 	StockProvisioned  bool     `json:"stock_service_provisioned,omitempty"`
 	UBIAttached       bool     `json:"ubi_attached,omitempty"`
 	UnconfirmedPrompt string   `json:"unconfirmed_prompt,omitempty"`
+	UnknownPrompt     string   `json:"unknown_prompt,omitempty"`
 	Blocked           int      `json:"blocked"`
 	Notes             []string `json:"notes,omitempty"`
 }
@@ -339,7 +340,12 @@ func (c *collector) tryPrompt(idle bool) bool {
 		}
 		return true
 	}
-	_ = idle
+	if idle && strings.TrimSpace(line) != "" && c.res.UnknownPrompt != line {
+		// Say why nothing happens instead of waiting silently.
+		c.res.UnknownPrompt = line
+		c.note(fmt.Sprintf(L("последняя строка %q не похожа на известное приглашение (U-Boot, login:/Username:, shell) — ничего не отправляю, жду дальше",
+			"the last line %q does not look like a known prompt (U-Boot, login:/Username:, shell); sending nothing, still waiting"), line))
+	}
 	return false
 }
 

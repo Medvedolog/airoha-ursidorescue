@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -76,5 +77,29 @@ func TestRecorder(t *testing.T) {
 	u.Output([]byte("uart"))
 	if string(r.Output) != "uart" || len(r.Events) != 1 {
 		t.Fatal("recorder did not keep output/events")
+	}
+}
+
+func TestQuickFromPrompt(t *testing.T) {
+	for _, tc := range []struct {
+		prompt string
+		keys   string
+		def    string
+	}{
+		{"Mask MAC addresses? [y/N]: ", "y,n", "n"},
+		{"Continue? [Y/n]: ", "y,n", "y"},
+		{"Target [bl2/ubi]: ", "bl2,ubi", ""},
+		{"Choice [1]: ", "", "1"},
+		{"Path to the .fip: ", "", ""},
+		{"Enter the local IP after configuring it [192.168.1.254]: ", "", ""},
+	} {
+		q, def := QuickFromPrompt(tc.prompt)
+		var keys []string
+		for _, c := range q {
+			keys = append(keys, c.Key)
+		}
+		if strings.Join(keys, ",") != tc.keys || def != tc.def {
+			t.Errorf("%q: quick=%v default=%q, want %s / %q", tc.prompt, keys, def, tc.keys, tc.def)
+		}
 	}
 }

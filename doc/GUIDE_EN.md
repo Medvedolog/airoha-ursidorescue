@@ -220,16 +220,20 @@ must be at least 80×24.
 UrsidoRescue.exe --tui --lang en
 ```
 
+Next to the menu the TUI explains what the selected item does, what it needs and its risk. Yes/no
+questions and short options are buttons (← → and Enter), lists (COM port, profile) use the arrows; typing
+an answer still works. The hotkeys also work with the Russian layout and through F-keys.
+
 | key | action |
 |---|---|
-| ↑ ↓, ← → / Tab | pick an item and a section |
+| ↑ ↓, ← → / Tab | pick an item and a section; in a dialog, pick an option |
 | Enter | run the item; answer a dialog |
-| p | choose and connect the UART port (or disconnect) |
+| p, F4 | choose and connect the UART port (or disconnect) |
 | s, Ctrl+C | STOP during an operation; the core decides (a second Ctrl+C within 3 s forces exit) |
 | PgUp / PgDn, End | scroll the log, jump to new lines |
-| f | log filter: all / UART / events |
-| m | large log |
-| q | quit (when no operation runs) |
+| f, F2 | log filter: all / UART / events |
+| m, F3 | large log |
+| q, F10 | quit (when no operation runs) |
 
 The UART terminal, UART Shell and "RAM U-Boot and prompt" open full screen as in the console; the TUI
 comes back when you leave them. Without `--tui` the console menu starts as before. With `TERM=dumb`

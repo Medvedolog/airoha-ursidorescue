@@ -509,7 +509,7 @@ func (a *App) menuBootROM() error {
 			{Key: "2", Label: L("Ответить x на 'Press x' и проверить XMODEM 'C'", "Answer 'Press x' with x and check the XMODEM 'C'")},
 			{Key: "3", Label: L("Загрузить RAM U-Boot UrsidoRescue (только Nokia MD/MF) и собрать U-Boot/flash профиль", "Load UrsidoRescue's RAM U-Boot (Nokia MD/MF only) and collect the U-Boot/flash profile")},
 		},
-		Prompt: L("Выбор [1]: ", "Choice [1]: ")})
+		Prompt: L("Выбор [1]: ", "Choice [1]: "), Default: "1"})
 	switch strings.TrimSpace(v) {
 	case "", "1":
 		return a.menuProbe(probe.Options{Layers: probe.Layers{BootROM: true}, LinuxOnly: true, NoLinux: true, Timeout: 3 * time.Minute}, false)

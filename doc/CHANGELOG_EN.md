@@ -81,6 +81,13 @@ Releases by CI.
   actions and stop boundary; port choice and connection; STOP with `s` / Ctrl+C labelled by the core;
   the UART terminal and Shell full screen with a return to the TUI; the 80×24 layout is covered by tests.
   Without `--tui` the old console menu starts.
+- TUI after first feedback: screen zones are separated (top and bottom bars, titled rules, a log bar, a
+  gutter on log lines); every menu item has a description (what it does, what it needs, its risk); yes/no
+  questions and short options (`bl2/ubi`, reset / stay) are buttons, lists use highlighted arrows with the
+  `[1]` default preselected; hotkeys work with the Russian layout and through F2/F3/F4/F10; long lines wrap
+  at words. `AskRequest` gained `Quick` and `Default` for this; the console does not show them.
+- Porting Collector: a `Username:` / `User:` prompt is recognised as a login (previously only `login:`);
+  when the last line is not a known prompt the probe says so instead of waiting silently for the timeout.
 - The Porting menu items report through the application layer; the console prints the same as before,
   and the literal `\n` in the UBI attach text is now a line break.
 - Go 1.24 (required by the Charm modules); `probe`: `Info` calls no longer use a non-constant format

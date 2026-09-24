@@ -40,7 +40,8 @@ everything else is shared.
 | `serial.go` | 8 | `Serial` = `app.Port`: `Name`, `Read(buf, timeout)`, `Write`, `ResetInput`, `Close` |
 | `operations.go` | ~210 | Operation catalogue (spec §10 scenarios with risk classes), `RunOperation`, operation sessions and the probe session, `openPort` — a lease from `PortOwner` |
 | `tui.go` | ~230 | TUI (`--tui`): starts Bubble Tea; `tuiUI` implements `app.UI` with messages and answer channels; operations that own the terminal (UART terminal, Shell, RAM U-Boot) get the real console through `tea.Exec`, and their events are kept and shown on return |
-| `tui_model.go` | ~830 | The TUI screen: the console's menus (Main / Porting / Expert), an operation panel with progress, the UART and event log (≈35 %, filter, scroll, wrapping), Ask / Confirm dialogs per §13 and the port chooser, the STOP label from `CancelState`; the layout is tested at 80×24 |
+| `tui_menu.go` | ~90 | TUI menu items with descriptions (what it does, what it needs, its risk): the same operations as the console menus |
+| `tui_model.go` | ~1030 | The TUI screen: the console's menus (Main / Porting / Expert), an operation panel with progress, the UART and event log (≈35 %, filter, scroll, wrapping), Ask / Confirm dialogs per §13 and the port chooser, the STOP label from `CancelState`; the layout is tested at 80×24 |
 | `console_frontend.go` | ~200 | Console implementation of `app.UI`: renders events, progress, questions and confirmations exactly as the console did before the application layer |
 | `serial_linux.go` | ~110 | termios via `ioctl(TCGETS/TCSETS)`: raw 115200 8N1, `CLOCAL`, no flow control; lists `/dev/ttyUSB*`, `ttyACM*`, `ttyAMA*`, `ttyS*` |
 | `serial_windows.go` | ~170 | `kernel32.dll` via `syscall`: `CreateFileW`, `SetCommState`, `SetCommTimeouts`, `PurgeComm`, `ReadFile`/`WriteFile`; lists existing `COMn` via `QueryDosDeviceW` |

@@ -39,7 +39,8 @@
 | `serial.go` | 8 | `Serial` = `app.Port`: `Name`, `Read(buf, timeout)`, `Write`, `ResetInput`, `Close` |
 | `operations.go` | ~210 | Каталог операций (сценарии ТЗ §10 с классами риска), `RunOperation`, сессии операций и probe-сессия, `openPort` — аренда порта у `PortOwner` |
 | `tui.go` | ~230 | TUI (`--tui`): запуск Bubble Tea, `tuiUI` — реализация `app.UI` через сообщения и каналы ответа; операции с собственным терминалом (UART-терминал, Shell, RAM U-Boot) получают настоящую консоль через `tea.Exec`, их события копятся и показываются после возврата |
-| `tui_model.go` | ~830 | Экран TUI: меню как в консоли (Главное / Портирование / Эксперт), панель операции с прогрессом, лог UART и событий (≈35 %, фильтр, прокрутка, перенос строк), диалоги Ask / Confirm по §13 и выбора порта, надпись СТОП из `CancelState`; раскладка проверена на 80×24 |
+| `tui_menu.go` | ~90 | Пункты меню TUI с описаниями (что делает, что нужно, риск) — те же операции, что в консольных меню |
+| `tui_model.go` | ~1030 | Экран TUI: меню как в консоли (Главное / Портирование / Эксперт), панель операции с прогрессом, лог UART и событий (≈35 %, фильтр, прокрутка, перенос строк), диалоги Ask / Confirm по §13 и выбора порта, надпись СТОП из `CancelState`; раскладка проверена на 80×24 |
 | `console_frontend.go` | ~200 | Консольная реализация `app.UI`: рисует события, прогресс, вопросы и подтверждения так же, как консоль до application layer |
 | `serial_linux.go` | ~110 | termios через `ioctl(TCGETS/TCSETS)`: raw 115200 8N1, `CLOCAL`, без управления потоком; поиск `/dev/ttyUSB*`, `ttyACM*`, `ttyAMA*`, `ttyS*` |
 | `serial_windows.go` | ~170 | `kernel32.dll` через `syscall`: `CreateFileW`, `SetCommState`, `SetCommTimeouts`, `PurgeComm`, `ReadFile`/`WriteFile`; поиск существующих `COMn` через `QueryDosDeviceW` |

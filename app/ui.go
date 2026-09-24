@@ -7,6 +7,8 @@ package app
 
 import (
 	"errors"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -85,6 +87,12 @@ type AskRequest struct {
 	Title   string
 	Choices []Choice
 	Prompt  string
+	// Quick lists short answers a front end may offer as buttons (yes/no,
+	// bl2/ubi, reset/stay). The prompt already names them, so the console
+	// ignores Quick and prints exactly what it printed before.
+	Quick []Choice
+	// Default is what an empty answer means, when the prompt has one.
+	Default string
 }
 
 // ConfirmRequest is the single confirmation before an operation with risk.
@@ -156,3 +164,35 @@ type UI interface {
 
 // ErrCancelled is returned by Confirm when the operator did not confirm.
 var ErrCancelled = errors.New("operation cancelled by the operator")
+
+var (
+	yesNoRE   = regexp.MustCompile(`\[(y/N|Y/n|y/n)\]`)
+	optionsRE = regexp.MustCompile(`\[([a-z0-9]{1,8}(?:/[a-z0-9]{1,8})+)\]`)
+	defaultRE = regexp.MustCompile(`\[([0-9A-Za-z])\]\s*:?\s*$`)
+)
+
+// QuickFromPrompt derives Quick and Default from the usual prompt forms:
+// "[y/N]" / "[Y/n]" (the capital letter is the default), "[bl2/ubi]", and a
+// trailing "[1]" default for a numbered choice.
+func QuickFromPrompt(prompt string) (quick []Choice, def string) {
+	if m := yesNoRE.FindStringSubmatch(prompt); m != nil {
+		quick = []Choice{{Key: "y", Label: "yes"}, {Key: "n", Label: "no"}}
+		switch m[1] {
+		case "Y/n":
+			def = "y"
+		case "y/N":
+			def = "n"
+		}
+		return quick, def
+	}
+	if m := optionsRE.FindStringSubmatch(prompt); m != nil {
+		for _, o := range strings.Split(m[1], "/") {
+			quick = append(quick, Choice{Key: o, Label: o})
+		}
+		return quick, ""
+	}
+	if m := defaultRE.FindStringSubmatch(prompt); m != nil {
+		return nil, m[1]
+	}
+	return nil, ""
+}

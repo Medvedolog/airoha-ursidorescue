@@ -220,3 +220,16 @@ func TestStripTerminal(t *testing.T) {
 		t.Fatalf("uartLine keeps the text after the last CR, got %q", got)
 	}
 }
+
+func TestWrapLinesKeepsHyphenatedWords(t *testing.T) {
+	got := wrapLines("Nokia XG-040G-MD/MF from U-Boot and a verylongwordthatmustbecut", 14)
+	for _, l := range got {
+		if lipgloss.Width(l) > 14 {
+			t.Fatalf("line %q is wider than 14", l)
+		}
+	}
+	joined := strings.Join(got, "|")
+	if !strings.Contains(joined, "XG-040G-MD/MF") || !strings.Contains(joined, "U-Boot") {
+		t.Fatalf("hyphenated words must not be split: %q", joined)
+	}
+}

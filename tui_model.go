@@ -13,8 +13,9 @@ import (
 	"ursidorescue/app"
 )
 
-// Palette of UrsusBoot (doc/ui-mockup/style.css). Foreground only, so the
-// terminal's own background stays; lipgloss drops colours under NO_COLOR.
+// Palette of UrsusBoot (doc/ui-mockup/style.css). Bars use a background so
+// the screen zones are visibly separated; lipgloss drops colours under
+// NO_COLOR, and the rules and bars still separate the zones by characters.
 var (
 	tcInk    = lipgloss.Color("#f2e8da")
 	tcUART   = lipgloss.Color("#d9cbb8")
@@ -25,6 +26,9 @@ var (
 	tcOK     = lipgloss.Color("#7cc493")
 	tcBad    = lipgloss.Color("#e8837a")
 	tcStopBg = lipgloss.Color("#b23a2e")
+	tcBarBg  = lipgloss.Color("#3a2616")
+	tcLogBg  = lipgloss.Color("#2e1f16")
+	tcDark   = lipgloss.Color("#241610")
 
 	tsBrand   = lipgloss.NewStyle().Bold(true).Foreground(tcAmber)
 	tsInk     = lipgloss.NewStyle().Foreground(tcInk)
@@ -34,61 +38,18 @@ var (
 	tsSand    = lipgloss.NewStyle().Bold(true).Foreground(tcSand)
 	tsOK      = lipgloss.NewStyle().Foreground(tcOK)
 	tsBad     = lipgloss.NewStyle().Foreground(tcBad)
-	tsSel     = lipgloss.NewStyle().Bold(true).Foreground(tcSand)
+	tsRule    = lipgloss.NewStyle().Foreground(tcAmber)
+	tsSel     = lipgloss.NewStyle().Bold(true).Foreground(tcDark).Background(tcSand)
 	tsStop    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff")).Background(tcStopBg).Padding(0, 1)
-	tsStopOff = lipgloss.NewStyle().Bold(true).Foreground(tcSand).Padding(0, 1)
+	tsStopOff = lipgloss.NewStyle().Bold(true).Foreground(tcSand).Background(tcDark).Padding(0, 1)
 	tsTab     = lipgloss.NewStyle().Foreground(tcMuted).Padding(0, 1)
-	tsTabOn   = lipgloss.NewStyle().Bold(true).Foreground(tcSand).Underline(true).Padding(0, 1)
+	tsTabOn   = lipgloss.NewStyle().Bold(true).Foreground(tcDark).Background(tcAmber).Padding(0, 1)
+	tsBar     = lipgloss.NewStyle().Foreground(tcInk).Background(tcBarBg)
+	tsLogBar  = lipgloss.NewStyle().Bold(true).Foreground(tcSand).Background(tcLogBg)
+	tsBtn     = lipgloss.NewStyle().Foreground(tcInk).Border(lipgloss.RoundedBorder()).BorderForeground(tcFaint).Padding(0, 2)
+	tsBtnOn   = lipgloss.NewStyle().Bold(true).Foreground(tcDark).Background(tcSand).Border(lipgloss.RoundedBorder()).BorderForeground(tcSand).Padding(0, 2)
 	tsBox     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(tcAmber).Padding(0, 1)
 )
-
-// tuiItem is one menu entry; run is called in the operation goroutine.
-type tuiItem struct {
-	label, hint string
-	kind        string // catalogue operation, "" for Porting items
-	porting     string // Porting item key
-}
-
-type tuiGroup struct {
-	title string
-	items []tuiItem
-}
-
-// tuiMenu mirrors the console menus (doc/MENU_RU.md), so both front ends
-// offer the same operations under the same names.
-func tuiMenu() []tuiGroup {
-	return []tuiGroup{
-		{L("Главное", "Main"), []tuiItem{
-			{label: L("Восстановить заводскую Nokia", "Restore stock Nokia"), hint: "mtd16 / all_flash", kind: "stock-restore"},
-			{label: L("Починить загрузку / заменить FIP", "Repair boot / replace the FIP"), hint: L("UBI-том fip", "UBI volume fip"), kind: "fip-repair"},
-			{label: L("Восстановить весь NAND", "Restore the full NAND"), hint: "physical 256 MiB", kind: "physical-restore"},
-			{label: L("Загрузить ITB в RAM", "Boot an ITB from RAM"), hint: L("без записи", "no write"), kind: "itb-boot"},
-			{label: L("Диагностика NAND / UBI / U-Boot", "NAND / UBI / U-Boot diagnostics"), hint: L("только чтение", "read-only"), kind: "diagnostics"},
-			{label: L("Собрать пакет логов", "Build a log bundle"), hint: L("для отчёта", "for a report"), kind: "support-bundle"},
-		}},
-		{L("Портирование", "Porting"), []tuiItem{
-			{label: L("Полный probe нового устройства", "Full probe of a new device"), hint: "+ porting bundle", porting: "1"},
-			{label: L("Профиль BootROM", "BootROM profile"), porting: "2"},
-			{label: L("Профиль U-Boot", "U-Boot profile"), porting: "3"},
-			{label: L("Профиль Linux", "Linux profile"), porting: "4"},
-			{label: L("Карта flash / MTD / UBI", "Flash / MTD / UBI map"), porting: "5"},
-			{label: L("DTB / device tree", "DTB / device tree"), porting: "6"},
-			{label: L("Сеть / PHY / коммутатор", "Network / PHY / switch"), porting: "7"},
-			{label: L("Экспорт porting bundle", "Export the porting bundle"), porting: "8"},
-			{label: L("Показать собранный профиль", "View the collected profile"), porting: "9"},
-			{label: L("ADVANCED: UBI attach", "ADVANCED: UBI attach"), hint: L("НЕ только чтение", "NOT read-only"), porting: "A"},
-			{label: L("Новая probe-сессия", "New probe session"), porting: "N"},
-		}},
-		{L("Эксперт", "Expert"), []tuiItem{
-			{label: L("UART-терминал", "UART terminal"), hint: L("на весь экран", "full screen"), kind: "terminal"},
-			{label: L("RAM U-Boot и prompt", "RAM U-Boot and prompt"), hint: L("на весь экран", "full screen"), kind: "ram-uboot"},
-			{label: L("Записать UBI-том из файла", "Write a UBI volume from a file"), kind: "ubi-volume"},
-			{label: L("Raw-запись в MTD bl2/ubi", "Raw write into MTD bl2/ubi"), kind: "raw-mtd"},
-			{label: L("Диагностика", "Diagnostics"), kind: "diagnostics"},
-			{label: L("UART Shell", "UART Shell"), hint: L("на весь экран", "full screen"), kind: "shell"},
-		}},
-	}
-}
 
 type tuiLogKind int
 
@@ -186,7 +147,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tuiCancelMsg:
 		m.cancel = app.CancelState(msg)
 	case tuiAskMsg:
-		m.openDialog(&tuiDialog{ask: &msg})
+		m.openDialog(&tuiDialog{ask: &msg, cursor: defaultIndex(msg.req)})
 	case tuiConfirmMsg:
 		m.openDialog(&tuiDialog{confirm: &msg})
 	case tuiStopMsg:
@@ -208,10 +169,23 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// defaultIndex puts the cursor on the answer an empty reply means.
+func defaultIndex(q app.AskRequest) int {
+	opts := q.Choices
+	if len(opts) == 0 {
+		opts = q.Quick
+	}
+	for i, c := range opts {
+		if c.Key == q.Default {
+			return i
+		}
+	}
+	return 0
+}
+
 func (m *tuiModel) openDialog(d *tuiDialog) {
 	m.dlg = d
 	m.input.SetValue("")
-	m.input.EchoMode = textinput.EchoNormal
 	m.input.Focus()
 }
 
@@ -225,6 +199,31 @@ func (m *tuiModel) finish(err error) {
 		m.result, m.resultBad = err.Error(), true
 		m.addEvent(app.Event{Level: app.LevelError, Label: L("СТОП", "STOP"), Text: err.Error()})
 	}
+}
+
+// hotkey maps a key to its command letter in either keyboard layout, so
+// f/m/s/p/q work with the Russian layout too (а/ь/ы/з/й), and F-keys work
+// everywhere.
+func hotkey(k tea.KeyMsg) string {
+	switch k.Type {
+	case tea.KeyF2:
+		return "f"
+	case tea.KeyF3:
+		return "m"
+	case tea.KeyF4:
+		return "p"
+	case tea.KeyF10:
+		return "q"
+	case tea.KeyRunes:
+		if len(k.Runes) == 1 {
+			r := k.Runes[0]
+			if l, ok := map[rune]string{'а': "f", 'А': "f", 'ь': "m", 'Ь': "m", 'ы': "s", 'Ы': "s", 'з': "p", 'З': "p", 'й': "q", 'Й': "q", 'о': "j", 'л': "k"}[r]; ok {
+				return l
+			}
+			return strings.ToLower(string(r))
+		}
+	}
+	return k.String()
 }
 
 func (m *tuiModel) key(k tea.KeyMsg) tea.Cmd {
@@ -244,23 +243,22 @@ func (m *tuiModel) key(k tea.KeyMsg) tea.Cmd {
 			m.scroll = 0
 			return nil
 		}
+	case tea.KeyF2, tea.KeyF3:
+		if m.dlg != nil {
+			m.logKey(hotkey(k))
+			return nil
+		}
 	}
 	if m.dlg != nil {
 		return m.dialogKey(k)
 	}
 	m.toast = ""
-	switch k.String() {
-	case "f":
-		m.filter = (m.filter + 1) % 3
-		m.scroll = 0
+	hk := hotkey(k)
+	if m.logKey(hk) {
 		return nil
-	case "m":
-		m.logMax = !m.logMax
-		return nil
-	case "s":
-		if m.busy {
-			return m.stop()
-		}
+	}
+	if hk == "s" && m.busy {
+		return m.stop()
 	}
 	if m.busy {
 		return nil
@@ -272,27 +270,41 @@ func (m *tuiModel) key(k tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	items := m.menu[m.tab].items
-	switch k.String() {
-	case "q":
+	switch {
+	case hk == "q":
 		return tea.Quit
-	case "left", "shift+tab":
+	case k.Type == tea.KeyLeft || k.Type == tea.KeyShiftTab:
 		m.tab = (m.tab + len(m.menu) - 1) % len(m.menu)
 		m.cur = 0
-	case "right", "tab":
+	case k.Type == tea.KeyRight || k.Type == tea.KeyTab:
 		m.tab = (m.tab + 1) % len(m.menu)
 		m.cur = 0
-	case "up", "k":
+	case k.Type == tea.KeyUp || hk == "k":
 		m.cur = (m.cur + len(items) - 1) % len(items)
-	case "down", "j":
+	case k.Type == tea.KeyDown || hk == "j":
 		m.cur = (m.cur + 1) % len(items)
-	case "p":
+	case hk == "p":
 		m.dlg = &tuiDialog{port: listSerialPorts()}
 		m.input.SetValue("")
 		m.input.Focus()
-	case "enter":
+	case k.Type == tea.KeyEnter:
 		return m.start(items[m.cur])
 	}
 	return nil
+}
+
+// logKey handles the log's f (filter) and m (large log) keys.
+func (m *tuiModel) logKey(hk string) bool {
+	switch hk {
+	case "f":
+		m.filter = (m.filter + 1) % 3
+		m.scroll = 0
+		return true
+	case "m":
+		m.logMax = !m.logMax
+		return true
+	}
+	return false
 }
 
 func (m *tuiModel) ctrlC() tea.Cmd {
@@ -331,6 +343,16 @@ func (m *tuiModel) start(it tuiItem) tea.Cmd {
 	}
 }
 
+func quickLabel(c app.Choice) string {
+	switch c.Key {
+	case "y":
+		return L("Да", "Yes")
+	case "n":
+		return L("Нет", "No")
+	}
+	return c.Label
+}
+
 func (m *tuiModel) dialogKey(k tea.KeyMsg) tea.Cmd {
 	d := m.dlg
 	switch {
@@ -339,11 +361,16 @@ func (m *tuiModel) dialogKey(k tea.KeyMsg) tea.Cmd {
 	case d.confirm != nil:
 		form := app.FormFor(d.confirm.req.Risk)
 		if d.confirm.req.Phrase == "" && form == app.FormButton {
-			switch strings.ToLower(k.String()) {
-			case "y", "д":
-				m.answer(d.confirm.reply, "y")
-			case "n", "н", "esc", "enter":
+			// Two buttons: Cancel (default) and Confirm.
+			switch {
+			case k.Type == tea.KeyLeft || k.Type == tea.KeyRight || k.Type == tea.KeyTab || k.Type == tea.KeyUp || k.Type == tea.KeyDown:
+				d.cursor = 1 - d.cursor
+			case k.Type == tea.KeyEnter:
+				m.answer(d.confirm.reply, map[int]string{0: "n", 1: "y"}[d.cursor])
+			case k.Type == tea.KeyEsc || hotkey(k) == "n" || hotkey(k) == "т":
 				m.answer(d.confirm.reply, "n")
+			case hotkey(k) == "y" || hotkey(k) == "д":
+				m.answer(d.confirm.reply, "y")
 			}
 			return nil
 		}
@@ -356,7 +383,11 @@ func (m *tuiModel) dialogKey(k tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 	case d.ask != nil:
-		ch := d.ask.req.Choices
+		q := d.ask.req
+		if len(q.Choices) == 0 && len(q.Quick) > 0 {
+			return m.quickKey(k)
+		}
+		ch := q.Choices
 		switch k.Type {
 		case tea.KeyUp:
 			if len(ch) > 0 {
@@ -383,6 +414,36 @@ func (m *tuiModel) dialogKey(k tea.KeyMsg) tea.Cmd {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(k)
 	return cmd
+}
+
+// quickKey drives button answers (yes/no, bl2/ubi, reset/stay): arrows and
+// Enter, or the answer's letter in either layout.
+func (m *tuiModel) quickKey(k tea.KeyMsg) tea.Cmd {
+	d := m.dlg
+	q := d.ask.req.Quick
+	switch k.Type {
+	case tea.KeyLeft, tea.KeyUp, tea.KeyShiftTab:
+		d.cursor = (d.cursor + len(q) - 1) % len(q)
+	case tea.KeyRight, tea.KeyDown, tea.KeyTab:
+		d.cursor = (d.cursor + 1) % len(q)
+	case tea.KeyEnter:
+		m.answer(d.ask.reply, q[d.cursor].Key)
+	case tea.KeyEsc:
+		m.answer(d.ask.reply, d.ask.req.Default)
+	default:
+		hk := hotkey(k)
+		alias := map[string]string{"д": "y", "т": "n"}
+		if a, ok := alias[hk]; ok {
+			hk = a
+		}
+		for _, c := range q {
+			if c.Key != "" && c.Key == hk {
+				m.answer(d.ask.reply, c.Key)
+				return nil
+			}
+		}
+	}
+	return nil
 }
 
 func (m *tuiModel) answer(reply chan string, v string) {
@@ -439,8 +500,6 @@ func eventStyle(l app.Level) lipgloss.Style {
 		return tsSand
 	case app.LevelError:
 		return tsBad
-	case app.LevelNote:
-		return tsInk
 	}
 	return tsInk
 }
@@ -540,34 +599,48 @@ func (m *tuiModel) scrollBy(n int) {
 }
 
 // ---------- layout ----------
+//
+//	top bar            (background)
+//	── section rule ──
+//	main area          menu │ description, operation, or dialog
+//	▌ UART-лог bar      (background)
+//	log lines
+//	help bar           (background)
 
 // logRows is the number of log text rows. The log always stays on screen
-// (≈35 %, at least 5 rows); a dialog takes priority over its extra height.
+// (≈35 %, at least 5 rows).
 func (m *tuiModel) logRows() int {
-	body := m.h - 2
+	body := m.h - 3
 	if m.logMax && m.dlg == nil {
-		return max(5, body-4)
+		return max(5, body-5)
 	}
-	return max(5, min(m.h*35/100, body-8))
+	return max(5, min(m.h*35/100, body-9))
 }
 
 func (m *tuiModel) View() string {
-	body := m.h - 2
+	body := m.h - 3 // top bar, section rule, help bar
 	logH := m.logRows() + 1
 	mainH := body - logH
+	var title string
 	var mainLines []string
 	switch {
 	case m.dlg != nil:
+		title = L("ВОПРОС", "QUESTION")
 		// The dialog takes what it needs; the rest stays with the log.
 		mainLines = m.viewDialog(body - 6)
 		mainH = min(len(mainLines), body-6)
 		logH = body - mainH
 	case m.busy || m.result != "":
+		title = L("ОПЕРАЦИЯ", "OPERATION")
 		mainLines = m.viewOperation(mainH)
 	default:
-		mainLines = m.viewMenu(mainH)
+		title = L("МЕНЮ", "MENU")
+		// The whole menu stays visible; the log gives way down to 5 rows.
+		mainLines = m.viewMenu(body - 6)
+		mainH = max(mainH, min(len(mainLines), body-6))
+		logH = body - mainH
 	}
-	out := []string{m.viewTop()}
+	out := []string{m.viewTop(), m.rule(title)}
 	out = append(out, fit(mainLines, mainH)...)
 	out = append(out, m.viewLog(logH)...)
 	out = append(out, m.viewHelp())
@@ -591,6 +664,18 @@ func fit(lines []string, n int) []string {
 	return lines
 }
 
+// rule is a titled full-width separator: "── TITLE ─────────".
+func (m *tuiModel) rule(title string) string {
+	head := "── " + title + " "
+	return tsRule.Render(head + strings.Repeat("─", max(0, m.w-lipgloss.Width(head))))
+}
+
+// bar paints a full-width line on a background.
+func bar(st lipgloss.Style, w int, left, right string) string {
+	gap := max(1, w-lipgloss.Width(left)-lipgloss.Width(right))
+	return st.Render(left + strings.Repeat(" ", gap) + right)
+}
+
 func (m *tuiModel) stopLabel() string {
 	c := m.cancel
 	switch {
@@ -609,21 +694,24 @@ func (m *tuiModel) stopLabel() string {
 // viewTop keeps the STOP label whole: on a narrow screen the version, then
 // the operation ID, then the port give way first.
 func (m *tuiModel) viewTop() string {
-	port := tsBad.Render("● ") + tsMuted.Render(L("порт не выбран", "no port"))
+	bg := tsBar.GetBackground()
+	on := func(st lipgloss.Style, s string) string { return st.Background(bg).Render(s) }
+	port := on(tsBad, "● ") + on(tsMuted, L("порт не выбран (p)", "no port (p)"))
 	if name, ok := m.a.portOwner().Connected(); ok {
-		port = tsOK.Render("● ") + tsInk.Render(name)
+		port = on(tsOK, "● ") + on(tsInk, name)
 	}
 	op := ""
 	if m.busy && m.cancel.Op != "" {
-		op = "  " + tsFaint.Render("op …"+tail(m.cancel.Op, 4))
+		op = on(tsFaint, "  op …"+tail(m.cancel.Op, 4))
 	}
-	brand := tsBrand.Render("UrsidoRescue")
+	sep := on(tsFaint, "  │  ")
+	brand := on(tsBrand, " UrsidoRescue")
 	right := m.stopLabel()
 	var left string
 	for _, l := range []string{
-		brand + " " + tsFaint.Render(appVersion) + "  " + port + op,
-		brand + "  " + port + op,
-		brand + "  " + port,
+		brand + on(tsFaint, " "+appVersion) + sep + port + op,
+		brand + sep + port + op,
+		brand + sep + port,
 		brand,
 	} {
 		left = l
@@ -634,8 +722,7 @@ func (m *tuiModel) viewTop() string {
 	if room := m.w - lipgloss.Width(left) - 1; lipgloss.Width(right) > room {
 		right = ansi.Truncate(right, max(0, room), "…")
 	}
-	gap := max(1, m.w-lipgloss.Width(left)-lipgloss.Width(right))
-	return left + strings.Repeat(" ", gap) + right
+	return bar(tsBar, m.w, left, right)
 }
 
 func tail(s string, n int) string {
@@ -643,6 +730,34 @@ func tail(s string, n int) string {
 		return s
 	}
 	return s[len(s)-n:]
+}
+
+// wrapLines wraps text to width w, keeping paragraph breaks.
+func wrapLines(text string, w int) []string {
+	w = max(10, w)
+	var out []string
+	for _, para := range strings.Split(text, "\n") {
+		line := ""
+		for _, word := range strings.Split(para, " ") {
+			for lipgloss.Width(word) > w { // a word longer than the line
+				if line != "" {
+					out, line = append(out, line), ""
+				}
+				cut := ansi.Truncate(word, w, "")
+				out, word = append(out, cut), word[len(cut):]
+			}
+			switch {
+			case line == "":
+				line = word
+			case lipgloss.Width(line)+1+lipgloss.Width(word) <= w:
+				line += " " + word
+			default:
+				out, line = append(out, line), word
+			}
+		}
+		out = append(out, line)
+	}
+	return out
 }
 
 func (m *tuiModel) viewMenu(h int) []string {
@@ -654,23 +769,62 @@ func (m *tuiModel) viewMenu(h int) []string {
 			tabs = append(tabs, tsTab.Render(g.title))
 		}
 	}
-	lines := []string{strings.Join(tabs, " "), ""}
-	for i, it := range m.menu[m.tab].items {
-		mark, st := "  ", tsInk
-		if i == m.cur {
-			mark, st = "› ", tsSel
-		}
-		l := mark + st.Render(it.label)
-		if it.hint != "" {
-			l += "  " + tsFaint.Render(it.hint)
-		}
-		lines = append(lines, l)
+	head := strings.Join(tabs, " ") + tsFaint.Render("   ← → раздел · ↑ ↓ пункт · Enter запуск")
+	if uiLang == "en" {
+		head = strings.Join(tabs, " ") + tsFaint.Render("   ← → section · ↑ ↓ item · Enter run")
 	}
-	if m.tab == 1 && len(lines) < h {
-		lines = append(lines, tsFaint.Render(L("Сессия: ", "Session: ")+displayDir(m.a.probeDir)))
+	items := m.menu[m.tab].items
+	listW := 0
+	for _, it := range items {
+		listW = max(listW, lipgloss.Width(it.label)+4)
+	}
+	var list []string
+	for i, it := range items {
+		if i == m.cur {
+			list = append(list, tsSel.Render(" › "+it.label+" "))
+		} else {
+			list = append(list, tsInk.Render("   "+it.label))
+		}
+	}
+	it := items[m.cur]
+	var desc []string
+	if it.hint != "" {
+		desc = append(desc, tsSand.Render(it.hint))
+	}
+	if m.tab == 1 {
+		desc = append(desc, tsFaint.Render(L("сессия: ", "session: ")+displayDir(m.a.probeDir)))
+	}
+	lines := []string{head}
+	if descW := m.w - listW - 3; descW >= 30 {
+		// Two columns: the list │ what the selected item does.
+		for _, l := range wrapLines(it.desc, descW) {
+			desc = append(desc, tsMuted.Render(l))
+		}
+		rows := max(len(list), min(len(desc), h-len(lines)))
+		if len(desc) > rows {
+			desc = append(desc[:rows-1], tsFaint.Render("… "+L("подробно — doc/MENU_RU.md", "details: doc/MENU_EN.md")))
+		}
+		for i := 0; i < rows; i++ {
+			l, d := "", ""
+			if i < len(list) {
+				l = list[i]
+			}
+			if i < len(desc) {
+				d = desc[i]
+			}
+			l += strings.Repeat(" ", max(0, listW-lipgloss.Width(l)))
+			lines = append(lines, l+tsFaint.Render(" │ ")+d)
+		}
+	} else {
+		lines = append(lines, list...)
+		lines = append(lines, tsFaint.Render(strings.Repeat("┄", m.w)))
+		lines = append(lines, desc...)
+		for _, l := range wrapLines(it.desc, m.w) {
+			lines = append(lines, tsMuted.Render(l))
+		}
 	}
 	if m.toast != "" {
-		lines = append(lines, "", tsSand.Render(m.toast))
+		lines = append(lines[:min(len(lines), h-1)], tsSand.Render(m.toast))
 	}
 	return lines
 }
@@ -679,10 +833,12 @@ func (m *tuiModel) viewOperation(h int) []string {
 	lines := []string{tsBrand.Render(m.opTitle)}
 	switch {
 	case m.busy:
-		lines = append(lines, tsMuted.Render(L("выполняется…", "running…")))
+		lines = append(lines, tsMuted.Render(L("выполняется… (s — СТОП)", "running… (s — STOP)")))
 	case m.resultBad:
-		lines = append(lines, tsBad.Render(L("ОШИБКА: ", "FAILED: ")+m.result),
-			tsMuted.Render(L("Никаких дополнительных write/erase команд после этой ошибки не отправлено.", "No further write/erase commands were sent after this error.")))
+		for _, l := range wrapLines(L("ОШИБКА: ", "FAILED: ")+m.result, m.w) {
+			lines = append(lines, tsBad.Render(l))
+		}
+		lines = append(lines, tsMuted.Render(L("Никаких дополнительных write/erase команд после этой ошибки не отправлено.", "No further write/erase commands were sent after this error.")))
 	default:
 		lines = append(lines, tsOK.Render(m.result))
 	}
@@ -690,19 +846,24 @@ func (m *tuiModel) viewOperation(h int) []string {
 		lines = append(lines, m.progressLine(p))
 	}
 	if m.toast != "" {
-		lines = append(lines, tsSand.Render(m.toast))
+		for _, l := range wrapLines(m.toast, m.w) {
+			lines = append(lines, tsSand.Render(l))
+		}
 	}
 	if !m.busy {
-		lines = append(lines, tsFaint.Render(L("Enter — в меню", "Enter — back to the menu")))
+		lines = append(lines, tsSand.Render(L("Enter — вернуться в меню", "Enter — back to the menu")))
 	}
-	lines = append(lines, "")
+	lines = append(lines, tsFaint.Render(strings.Repeat("┄", m.w)))
 	room := h - len(lines)
-	ev := m.opEvents
-	if room > 0 && len(ev) > room {
-		ev = ev[len(ev)-room:]
+	var ev []string
+	for i := len(m.opEvents) - 1; i >= 0 && len(ev) < room; i-- {
+		w := wrapLines(m.opEvents[i], m.w)
+		for j := len(w) - 1; j >= 0 && len(ev) < room; j-- {
+			ev = append(ev, w[j])
+		}
 	}
-	for _, e := range ev {
-		lines = append(lines, tsUART.Render(e))
+	for i := len(ev) - 1; i >= 0; i-- {
+		lines = append(lines, tsUART.Render(ev[i]))
 	}
 	return lines
 }
@@ -721,22 +882,38 @@ func (m *tuiModel) progressLine(p *app.Progress) string {
 
 func (m *tuiModel) viewDialog(h int) []string {
 	d := m.dlg
-	width := min(m.w-2, 78)
+	width := min(m.w-2, 90)
 	inner := width - 4
 	var body []string
 	add := func(st lipgloss.Style, s string) {
-		for _, l := range strings.Split(lipgloss.NewStyle().Width(inner).Render(s), "\n") {
+		for _, l := range wrapLines(s, inner) {
 			body = append(body, st.Render(l))
 		}
 	}
+	list := func(items []string, cursor int) {
+		for i, s := range items {
+			body = append(body, choiceLine(i == cursor, s, inner))
+		}
+	}
+	buttons := func(labels []string, cursor int) {
+		var bs []string
+		for i, l := range labels {
+			if i == cursor {
+				bs = append(bs, tsBtnOn.Render(l))
+			} else {
+				bs = append(bs, tsBtn.Render(l))
+			}
+		}
+		body = append(body, strings.Split(lipgloss.JoinHorizontal(lipgloss.Top, bs...), "\n")...)
+	}
+	rule := tsFaint.Render(strings.Repeat("─", inner))
 	switch {
 	case d.port != nil:
 		add(tsSand, L("UART-порты", "UART ports"))
-		for i, p := range d.port {
-			body = append(body, choiceLine(i == d.cursor, p))
-		}
-		body = append(body, choiceLine(d.cursor == len(d.port), L("Отключить", "Disconnect")))
-		add(tsMuted, L("Enter — подключить; можно ввести имя вручную. Esc — закрыть.", "Enter connects; you can type a name. Esc closes."))
+		body = append(body, rule)
+		list(append(append([]string{}, d.port...), L("Отключить порт", "Disconnect")), d.cursor)
+		body = append(body, rule)
+		add(tsFaint, L("↑ ↓ выбрать · Enter подключить · Esc закрыть · имя можно ввести вручную:", "↑ ↓ pick · Enter connect · Esc close · or type a name:"))
 		body = append(body, m.input.View())
 	case d.confirm != nil:
 		r := d.confirm.req
@@ -748,6 +925,7 @@ func (m *tuiModel) viewDialog(h int) []string {
 		for _, s := range r.Summary {
 			add(tsInk, s)
 		}
+		body = append(body, rule)
 		add(tsBad, L("Риск: ", "Risk: ")+string(r.Risk))
 		for i, act := range r.Actions {
 			add(tsInk, fmt.Sprintf("%d. %s", i+1, act))
@@ -755,25 +933,44 @@ func (m *tuiModel) viewDialog(h int) []string {
 		if r.CancelNote != "" {
 			add(tsMuted, L("Остановка: ", "Stopping: ")+r.CancelNote)
 		}
+		body = append(body, rule)
 		if r.Phrase != "" {
-			add(tsInk, L("Введите точно ", "Type exactly ")+tsSand.Render(r.Phrase)+L(" и Enter; Esc — отмена", " and Enter; Esc cancels"))
+			add(tsInk, L("Введите точно ", "Type exactly ")+tsSand.Render(r.Phrase)+L(" и Enter · Esc — отмена", " and Enter · Esc cancels"))
 			body = append(body, m.input.View())
 		} else {
-			add(tsSand, L("y — подтвердить · n / Esc — отмена", "y confirm · n / Esc cancel"))
+			buttons([]string{L("Отмена", "Cancel"), L("Подтвердить", "Confirm")}, d.cursor)
+			add(tsFaint, L("← → выбрать · Enter", "← → pick · Enter"))
 		}
 	case d.ask != nil:
 		q := d.ask.req
 		if t := strings.TrimSpace(q.Title); t != "" {
 			add(tsSand, t)
 		}
-		for i, c := range q.Choices {
-			body = append(body, choiceLine(i == d.cursor, c.Key+". "+c.Label))
+		if p := strings.TrimSpace(q.Prompt); p != "" && p != ">" {
+			add(tsInk, p)
 		}
-		add(tsInk, strings.TrimSpace(q.Prompt))
-		if len(q.Choices) > 0 {
-			add(tsFaint, L("↑↓ и Enter — выбрать пункт, или введите ответ", "↑↓ and Enter pick an item, or type an answer"))
+		switch {
+		case len(q.Choices) > 0:
+			body = append(body, rule)
+			var items []string
+			for _, c := range q.Choices {
+				items = append(items, c.Key+". "+c.Label)
+			}
+			list(items, d.cursor)
+			body = append(body, rule)
+			add(tsFaint, L("↑ ↓ выбрать · Enter подтвердить · или введите ответ вручную:", "↑ ↓ pick · Enter confirm · or type an answer:"))
+			body = append(body, m.input.View())
+		case len(q.Quick) > 0:
+			var labels []string
+			for _, c := range q.Quick {
+				labels = append(labels, quickLabel(c))
+			}
+			buttons(labels, d.cursor)
+			add(tsFaint, L("← → выбрать · Enter", "← → pick · Enter"))
+		default:
+			body = append(body, m.input.View())
+			add(tsFaint, L("Enter — ответить", "Enter — answer"))
 		}
-		body = append(body, m.input.View())
 	}
 	if room := h - 2; room > 0 && len(body) > room {
 		body = append(body[:room-1], tsFaint.Render("…"))
@@ -781,18 +978,19 @@ func (m *tuiModel) viewDialog(h int) []string {
 	return strings.Split(tsBox.Width(width).Render(strings.Join(body, "\n")), "\n")
 }
 
-func choiceLine(sel bool, s string) string {
+func choiceLine(sel bool, s string, w int) string {
 	if sel {
-		return tsSel.Render("› " + s)
+		return tsSel.Render(ansi.Truncate(" › "+s+" ", w, "…"))
 	}
-	return tsInk.Render("  " + s)
+	return tsInk.Render(ansi.Truncate("   "+s, w, "…"))
 }
 
 func (m *tuiModel) viewLog(h int) []string {
 	names := []string{L("всё", "all"), "UART", L("события", "events")}
-	head := tsBrand.Render("UART") + " " + tsMuted.Render("· f "+names[m.filter])
+	left := " ▌ " + L("ЛОГ UART И СОБЫТИЙ", "UART AND EVENT LOG")
+	right := L("фильтр: ", "filter: ") + names[m.filter] + " (f) · " + L("крупно (m)", "large (m)") + " · PgUp/PgDn "
 	if m.scroll > 0 {
-		head += tsSand.Render(L("  · прокрутка, End — к новым", "  · scrolled, End for new lines"))
+		right = L("прокрутка — End к новым · ", "scrolled — End for new · ") + right
 	}
 	lines := m.filtered()
 	rows := h - 1
@@ -800,12 +998,12 @@ func (m *tuiModel) viewLog(h int) []string {
 	// Long lines wrap: fill the rows from the newest line upwards.
 	var vis []string
 	for i := end - 1; i >= 0 && len(vis) < rows; i-- {
-		wrapped := strings.Split(ansi.Wrap(lines[i].text, max(20, m.w), ""), "\n")
+		wrapped := wrapLines(lines[i].text, m.w-2)
 		for j := len(wrapped) - 1; j >= 0 && len(vis) < rows; j-- {
-			vis = append(vis, lines[i].st.Render(wrapped[j]))
+			vis = append(vis, tsFaint.Render("│ ")+lines[i].st.Render(wrapped[j]))
 		}
 	}
-	out := []string{head}
+	out := []string{bar(tsLogBar, m.w, left, right)}
 	for i := len(vis) - 1; i >= 0; i-- {
 		out = append(out, vis[i])
 	}
@@ -816,14 +1014,16 @@ func (m *tuiModel) viewHelp() string {
 	var s string
 	switch {
 	case m.dlg != nil:
-		s = L("Enter ответ · PgUp/PgDn лог · Ctrl+C СТОП", "Enter answer · PgUp/PgDn log · Ctrl+C STOP")
+		s = L(" ↑↓←→ выбор · Enter ответ · PgUp/PgDn лог · Ctrl+C СТОП", " ↑↓←→ pick · Enter answer · PgUp/PgDn log · Ctrl+C STOP")
 	case m.busy:
-		s = L("s / Ctrl+C СТОП · PgUp/PgDn лог · f фильтр · m лог крупно", "s / Ctrl+C STOP · PgUp/PgDn log · f filter · m large log")
+		s = L(" s / Ctrl+C СТОП · PgUp/PgDn лог · f фильтр · m лог крупно", " s / Ctrl+C STOP · PgUp/PgDn log · f filter · m large log")
+	case m.result != "":
+		s = L(" Enter — в меню · PgUp/PgDn лог · f фильтр · m лог крупно", " Enter — menu · PgUp/PgDn log · f filter · m large log")
 	default:
-		s = L("↑↓ выбор · ←→ раздел · Enter запуск · p порт · f фильтр · m лог · q выход", "↑↓ select · ←→ section · Enter run · p port · f filter · m log · q quit")
+		s = L(" ↑↓ пункт · ←→ раздел · Enter запуск · p порт · f фильтр лога · m лог крупно · q выход", " ↑↓ item · ←→ section · Enter run · p port · f log filter · m large log · q quit")
 	}
 	if m.w < 80 || m.h < 24 {
-		s = L("окно меньше 80×24 · ", "window below 80×24 · ") + s
+		s = L(" окно меньше 80×24 ·", " window below 80×24 ·") + s
 	}
-	return tsFaint.Render(s)
+	return bar(tsBar.Foreground(tcMuted), m.w, s, "")
 }
