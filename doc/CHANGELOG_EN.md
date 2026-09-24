@@ -44,6 +44,7 @@ Releases by CI.
 | 0.2.0-test14 | `28f14c4` | yes | read-only diagnostics, 128 MiB limit, COM in the CLI |
 | 0.2.0-test15 | `115c87c` | yes | network once per session, LAN prerequisites, colour, EOT |
 | 0.2.0-test16 | `8f72817` | yes | stock LAN assist: UART login and UID 0 |
+| 0.2.0-test17 | `6008769` | yes | Telnet-only passive plan, late credential refresh, auth hardening |
 
 ---
 
@@ -56,8 +57,44 @@ Releases by CI.
   purpose and capabilities, principles, quick start, documentation links. The payload provenance
   table moved to ARCHITECTURE.
 - `PROBE.md`: the Porting Collector main-menu number is now 7. Number 8 has been stale since test5.
-- Documentation and `PROBE.md` updated to test16: network and LAN prerequisites, coloured output,
-  EOT, stock LAN assist and `--stock-lan-assist`.
+- Documentation and `PROBE.md` updated to test17: network and LAN prerequisites, coloured output,
+  EOT, stock LAN assist, `--stock-lan-assist`, the Telnet-only passive plan and late credential refresh.
+
+---
+
+## 0.2.0-test17 (2026-09-24 12:39–12:49)
+
+Commits included in the release:
+- `3514fc7`: stock UART assist fixes;
+- `ec97bbe`: README front-page redesign;
+- `98edd7c`: test17 documentation;
+- `6008769`: release commit with the same verified tree.
+
+Tag `v0.2.0-test17` → `6008769`, pre-release. CI run #40 checked the code candidate, run #42
+checked the final tree with documentation, and run #43 on the exact release SHA fully PASSed:
+format, vet and tests, Windows/Linux builds, selftest, packaging and publishing.
+
+Status: **simulation candidate / HW PARTIAL**. The test17 stock UART login still needs the next
+real XG-040G-MF run; CI is not hardware validation.
+
+**Fixes after the test16 review:**
+- Passive stock LAN assist no longer **requires FTP credentials** when FTP is off. Current Telnet
+  credentials are enough, so the flow does not wait 90 seconds only to fail and the "enable FTP?"
+  question remains reachable.
+- After the first failed UID-0 attempt the probe keeps **draining UART for another 12 seconds**,
+  re-reads Web credentials once, and retries the login/`su`. This covers the window where the Web
+  UI is already up but stock init is still rotating service passwords.
+- If a non-root Telnet shell is already open at refresh time, the probe first retries `su` with
+  the refreshed UID-0 credentials; after failure it returns to `Login:` and retries the full plan.
+- UID 0 still counts **only after `id -u` returns `0`**.
+- Passwords remain memory-only. Auth transcript entries now store the prompt kind rather than a raw
+  trailing UART line.
+- Stock-auth shell transitions no longer use the generic raw-key path for command lines: the narrow
+  validator permits only `exit` and `su <validated-account>`.
+- Tests cover the Telnet-only plan, the FTP-credential requirement after provisioning, `id -u`,
+  and the auth-line grammar.
+- The Porting Collector wording no longer promises absolute "read-only": flash/MTD commands remain
+  read-only, while enabling stock FTP after a separate `y/N` is explicitly a stock-settings change.
 
 ---
 
