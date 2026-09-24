@@ -1282,6 +1282,44 @@ func runTFTPServer(bindIP string, port int, source, expectedName, allowedHost st
 	}
 }
 
+func detectLocalIP() string {
+	// Prefer the interface selected by the OS route to the recovery router,
+	// matching UrsusFlasher's local_ip_for() behavior.
+	c, e := net.DialUDP("udp4", nil, mustUDPAddr(defaultRouterIP, 9))
+	if e == nil {
+		if a, ok := c.LocalAddr().(*net.UDPAddr); ok {
+			ip := a.IP.To4()
+			_ = c.Close()
+			if ip != nil && ip[0] == 192 && ip[1] == 168 && ip[2] == 1 && ip[3] != 1 {
+				return ip.String()
+			}
+		} else {
+			_ = c.Close()
+		}
+	}
+
+	// Fallback for hosts whose routing table is not yet settled during cable
+	// bring-up: consider only active non-loopback 192.168.1.x interfaces.
+	ifs, _ := net.Interfaces()
+	for _, iface := range ifs {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, _ := iface.Addrs()
+		for _, addr := range addrs {
+			ipnet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip := ipnet.IP.To4()
+			if ip != nil && ip[0] == 192 && ip[1] == 168 && ip[2] == 1 && ip[3] != 1 {
+				return ip.String()
+			}
+		}
+	}
+	return ""
+}
+
 func (a *App) networkIP() (string, error) {
 	ip := detectLocalIP()
 	if ip != "" {
