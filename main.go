@@ -538,7 +538,7 @@ func scanXmodemReply(data []byte, consecutiveCAN *int) xmodemReply {
 			*consecutiveCAN = 0
 			return xmodemReplyACK
 		case 0x18: // CAN: require a real CAN CAN cancellation, not one noisy byte.
-			*consecutiveCAN++
+			(*consecutiveCAN)++
 			if *consecutiveCAN >= 2 {
 				return xmodemReplyCancel
 			}
@@ -1433,6 +1433,7 @@ func (a *App) tftpLoad(s Serial, path, remote string, addr uint64) (string, erro
 func (a *App) loadChunkWithKnownLocal(s Serial, path, remote, local string) error {
 	return a.tftpLoadKnownLocal(s, path, remote, loadAddr, local, true)
 }
+
 func findMTD16InDirectory(dir string) (string, error) {
 	patterns := []string{"mtd16.bin.gz", "mtd16_*.bin.gz", "mtd16.gz", "mtd16.bin", "mtd16_*.bin"}
 	var hits []string
