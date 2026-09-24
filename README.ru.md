@@ -49,6 +49,9 @@ Python, pyserial и TFTP-утилиты не нужны: на каждую пл�
 - `main.go`, `main_probe.go`, `lang.go` — мастера восстановления, меню, командная строка (`probe`,
   `export`, `--lang`).
 - `term.go`, `term_run.go` — UART-терминал: история, пейджер, ручной XMODEM.
+- `stock_access.go` — stock Web assist для UART-входа Porting probe на Nokia MD/MF (реквизиты
+  только в памяти).
+- `console_ui.go` — цветной вывод и блок сетевых пререквизитов.
 - `serial_*.go`, `console_*.go`, `udp_*.go` — нативный COM-порт, raw-консоль и обработка сетевого
   шума для Windows и Linux.
 - `probe/` — исследование в режиме только чтения:

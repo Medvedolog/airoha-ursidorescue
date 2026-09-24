@@ -1,4 +1,4 @@
-# Porting Collector (probe mode) — UrsidoRescue 0.2.0
+# Porting Collector (probe mode) — UrsidoRescue 0.2.0 (current: test16)
 
 Read-only discovery of an Airoha device over UART. The result is a porting bundle:
 `ursus-probe-<vendor>-<model>-<soc>-<timestamp>.zip` with `profile.json` (ursus-profile-v1),
@@ -29,6 +29,15 @@ Default probe mode is strict: no command that can write flash is sent.
   `U-Boot>` and `AN75xx>`/`EN75xx>` prompts get U-Boot commands.
 - **Keys** (never lines): Ctrl-C/Esc to stop U-Boot autoboot during its countdown, Enter to
   activate an OpenWrt console, `x` to BootROM only with `--bootrom`, `--stop-key`, login answers.
+- **Stock Linux login (Nokia XG-040G-MD/MF).** At a stock `Login:` the interactive probe (and the CLI
+  with `--stock-lan-assist`) waits up to 90 s for the stock Web UI on `192.168.1.1` while it keeps
+  draining the UART, logs in to it, checks the model and reads the current Telnet/FTP credentials.
+  It then logs in over UART as the UID-0 service account, or as the Telnet account followed by `su`,
+  and claims UID 0 only when `id -u` returns `0` (the only `id` form the guard allows). Credentials
+  stay in memory: they are never printed or written to the transcript, UART log or bundle. If UID 0
+  is not reached and stock FTP is off, the interactive probe asks one explicit `y/N` to enable FTP
+  through the stock Web UI: a **stock-settings change** (FTP stays on), no MTD/firmware write. The
+  CLI never enables FTP. Result fields: `linux_uid0`, `stock_lan_assist`, `stock_service_provisioned`.
 - **Reads into RAM** (`mtd read`, `hash`; `ubi read` only in the attach mode) only when
   `loadaddr` lies inside a DRAM bank and 32 MiB below U-Boot's relocation address (from `bdinfo`).
 - **Identity.** A recursive sanitizer removes MAC, serial, GPON/PLOAM, credential values from
@@ -60,6 +69,7 @@ drives the port you open; it holds no credentials and never guesses any.
     ... probe --bootrom                            # answer "Press x", verify XMODEM 'C'
     ... probe --ram-uboot md|mf                    # bricked Nokia: load our RAM U-Boot, then probe
     ... probe --linux-user root --linux-password X # when Linux asks for a login
+    ... probe --stock-lan-assist                   # stock Nokia MD/MF: fetch credentials via Web, UART UID0 login
     ... probe --sample 64k --stop-key tpl --redact --timeout 10m
     ... probe --wake                               # device already running at a prompt
     ... probe --ubi-attach                         # ADVANCED, not read-only

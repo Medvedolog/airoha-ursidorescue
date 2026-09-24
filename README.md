@@ -35,6 +35,8 @@ Sizes and SHA256 are pinned in `main.go`; `--selftest` checks them.
 
 - `main.go`, `main_probe.go`, `lang.go` — recovery workflows, menus, CLI (`probe`, `export`, `--lang`)
 - `term.go`, `term_run.go` — UART terminal: history, pager, manual XMODEM
+- `stock_access.go` — stock Web assist for the Porting probe's UART login on Nokia MD/MF (credentials in memory only)
+- `console_ui.go` — coloured operator output and the network prerequisites block
 - `serial_*.go`, `console_*.go`, `udp_*.go` — native serial port, raw console and network-noise handling for Windows and Linux
 - `probe/` — read-only discovery: command allowlist (`guard.go`), collector, parsers, DTB parser,
   ursus-profile-v1 analysis, reports and bundle export; tested against a simulated board
