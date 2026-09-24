@@ -1,3 +1,29 @@
+# UrsidoRescue 0.2.0-test12
+
+Status: **simulation PASS / HW PARTIAL.** Real Nokia XG-040G-MF testing of test11 reached the
+second BootROM XMODEM stage and transferred 1152/2539 FIP blocks before one received CAN byte made
+the host abort the entire session. No NAND erase/write had started.
+
+## 0.2.0-test12
+
+- XMODEM no longer treats one noisy CAN byte as cancellation. A receiver abort requires CAN CAN;
+  a single CAN followed by ACK is accepted as a noisy line event.
+- NAK or CRC-request 'C' causes an immediate retry of only the current block instead of waiting out
+  the old 12-second deadline.
+- Per-block ACK wait is reduced to 2 seconds with 8 bounded attempts; EOT uses 6 x 2-second attempts.
+  Any final host-side XMODEM failure sends CAN CAN CAN so the peer is not left in an ambiguous session.
+- LAN recovery adopts UrsusFlasher-style resilience: route-aware PC IPv4 selection, three bounded
+  attempts of only the current TFTP transfer, backoff/resync of the same RAM U-Boot session, and
+  mandatory RAM SHA256/CRC verification after every successful retry.
+- ICMP ping is no longer a hard preflight gate. The actual TFTP transfer plus RAM verification is
+  the proof that the selected Ethernet path works.
+- The TFTP server is cancellable and bounded: stale failed attempts release UDP/1069 before retry;
+  RRQ, option negotiation and block ACK waits have finite deadlines.
+- Windows stale-peer UDP reset/abort errors are treated as recoverable network noise, matching the
+  collision policy used by UrsusFlasher.
+- Stock restore retries only the current 8 MiB RAM upload; already completed NAND chunks are never
+  replayed by the transport retry layer. BL2-last policy is unchanged.
+
 # UrsidoRescue 0.2.0-test11
 
 Status: **simulation PASS / HW PARTIAL.** Real Nokia XG-040G-MF / AN7583 testing of test10

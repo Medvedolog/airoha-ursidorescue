@@ -7,6 +7,28 @@ func TestCRC16Xmodem(t *testing.T) {
 		t.Fatalf("got %04x", got)
 	}
 }
+
+func TestXmodemReplyNoiseAndCancel(t *testing.T) {
+	can := 0
+	if got := scanXmodemReply([]byte{0x18}, &can); got != xmodemReplyNone || can != 1 {
+		t.Fatalf("single CAN must not cancel: reply=%v can=%d", got, can)
+	}
+	if got := scanXmodemReply([]byte{0x06}, &can); got != xmodemReplyACK || can != 0 {
+		t.Fatalf("ACK after one noisy CAN must win: reply=%v can=%d", got, can)
+	}
+	can = 0
+	if got := scanXmodemReply([]byte{0x18, 0x18}, &can); got != xmodemReplyCancel {
+		t.Fatalf("CAN CAN must cancel: reply=%v", got)
+	}
+	can = 0
+	if got := scanXmodemReply([]byte{'C'}, &can); got != xmodemReplyRetry {
+		t.Fatalf("CRC request must trigger immediate retry: reply=%v", got)
+	}
+	can = 0
+	if got := scanXmodemReply([]byte{0x15}, &can); got != xmodemReplyRetry {
+		t.Fatalf("NAK must trigger immediate retry: reply=%v", got)
+	}
+}
 func TestPrompt(t *testing.T) {
 	good := [][]byte{
 		[]byte("\r\nU-Boot> \r\n"),
