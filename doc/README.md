@@ -1,6 +1,6 @@
 # UrsidoRescue — документация / documentation
 
-Версия: **0.2.0-test13** · статус: simulation candidate / HW PARTIAL (см. [../STATUS.md](../STATUS.md))
+Версия: **0.2.0-test14** · статус: simulation candidate / HW PARTIAL (см. [../STATUS.md](../STATUS.md))
 
 ## Русский
 
@@ -22,7 +22,7 @@
 | [ARCHITECTURE_EN.md](ARCHITECTURE_EN.md) | Source layout, modules, NAND layout, build, CI, releases, tests |
 | [CHANGELOG_EN.md](CHANGELOG_EN.md) | Change history |
 
-Porting Collector reference (EN): [../PROBE.md](../PROBE.md).
+Главный README: [../README.ru.md](../README.ru.md) (RU) · [../README.md](../README.md) (EN). Porting Collector reference (EN): [../PROBE.md](../PROBE.md).
 
 > LAB / UART test builds. 3.3 V TTL UART, GND/TX/RX only — never connect VCC.
 > ЛАБОРАТОРНЫЕ UART-сборки. 3.3 В TTL, только GND/TX/RX — VCC не подключать никогда.

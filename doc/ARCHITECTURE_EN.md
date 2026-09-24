@@ -1,6 +1,6 @@
 # UrsidoRescue architecture
 
-[Русская версия](ARCHITECTURE_RU.md) · [Contents](README.md) · version 0.2.0-test13
+[Русская версия](ARCHITECTURE_RU.md) · [Contents](README.md) · version 0.2.0-test14
 
 ## Overview
 
@@ -189,7 +189,7 @@ messages (physical restore, expert 3/4).
 - **Main package:** XMODEM CRC16, prompt detection, bad blocks and good spans, language choice, ANSI
   decoder, line editor and history, Windows key translation, ASCII gate (including Cyrillic from
   Windows), fullscreen-ANSI detection (including across reads), pager, batched escape sequences,
-  local Ctrl+Q, XMODEM receive and bad-CRC rejection, XMODEM reply parsing (noise, single `CAN`,
+  local Ctrl+Q, XMODEM receive and bad-CRC rejection, the one-transfer limit being exactly 128 MiB, XMODEM reply parsing (noise, single `CAN`,
   `CAN CAN`), the EOT handoff classifier, the prompt after the AN7583 ANSI bootmenu.
 - **probe:** allowlist (destructive commands blocked, read-only allowed, UBI attach not read-only),
   internal templates and "nothing else writes lines", no destructive literals in probe code, all

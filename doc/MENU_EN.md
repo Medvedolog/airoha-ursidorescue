@@ -1,6 +1,6 @@
 # UrsidoRescue menus: every item in detail
 
-[Русская версия](MENU_RU.md) · [Contents](README.md) · version 0.2.0-test13
+[Русская версия](MENU_RU.md) · [Contents](README.md) · version 0.2.0-test14
 
 This page explains what every menu item does, in which order, which commands reach the router and
 where the program stops by itself. Wiring and network setup are in [GUIDE_EN.md](GUIDE_EN.md).
@@ -247,7 +247,7 @@ entering the BootROM again and repeating. A broken BL2 on top of a half-written 
 
 1. Path to the image; the size must be **exactly** `0x10000000` (256 MiB). The SHA256 is printed.
 2. Profile → RAM U-Boot.
-3. `mtd bad bl2` and `mtd bad ubi`: in 0.2.0-test13 **any** bad block → stop. A raw image carries
+3. `mtd bad bl2` and `mtd bad ubi`: in 0.2.0-test14 **any** bad block → stop. A raw image carries
    another chip's bad-block layout; writing it over a NAND with bad blocks without understanding
    the format is unsafe.
 4. Network; the image is split in `work/physical-<time>/` into `bl2.bin` and 8 MiB `ubi-NN.bin`.
@@ -276,12 +276,14 @@ touching flash, e.g. to take a backup or sysupgrade from there.
 
 1. Profile → RAM U-Boot. Profile and NAND vendor are printed.
 2. `mtd bad bl2`, `mtd bad ubi`: bad-block lists.
-3. `ubi part ubi` + `ubi info layout`: the UBI volume list (on attach failure, only a message).
-4. `printenv`: the RAM U-Boot environment.
+3. `mtd list`: the MTD layout.
+4. The "UBI attach skipped" note: normal diagnostics does **not** send `ubi part`, because an attach
+   may change UBI metadata or the fastmap. An intentional attach has its own ADVANCED mode:
+   Porting → A or `probe --ubi-attach`.
+5. `printenv`: the RAM U-Boot environment.
 
-No `erase`/`write` commands are run. However, `ubi part` is a UBI attach, and UBI itself may write
-metadata while attaching (fastmap, auto-resize, block moves). That is why the strict Porting
-Collector does not run `ubi part`. For a result with no writes at all, use item 7.
+Diagnostics is fully read-only: no NAND/UBI write, erase or attach (since test14; before that it
+ran `ubi part ubi` + `ubi info layout`).
 
 ### 6. Build a log bundle for a report
 
@@ -396,7 +398,7 @@ when you need a command no wizard offers.
 1. Profile → RAM U-Boot → `ubi part ubi` → prints `ubi info layout`.
 2. Name of an **existing** volume (only `A–Z a–z 0–9 _ . -`); `ubi check <name>`: no volume → stop.
    No volumes are created and no sizes change.
-3. A file up to 128 MiB (the error message wrongly says "64 MiB"; the real limit is `0x08000000`).
+3. A file up to 128 MiB (`0x08000000`).
    Size and SHA256 are printed.
 4. TFTP + RAM check → confirmation `WRITE UBI VOLUME <name>` → `ubi write` → `ubi read 0x98000000` →
    `crc32`.

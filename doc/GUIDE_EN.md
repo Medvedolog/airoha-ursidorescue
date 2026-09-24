@@ -1,6 +1,6 @@
 # UrsidoRescue operator guide
 
-[Русская версия](GUIDE_RU.md) · [Contents](README.md) · version 0.2.0-test13
+[Русская версия](GUIDE_RU.md) · [Contents](README.md) · version 0.2.0-test14
 
 ## 0. Before you start
 
@@ -31,7 +31,7 @@ Port settings (the program sets them): 115200, 8N1, no flow control.
 3. Contents:
 
 ```
-UrsidoRescue-0.2.0-test13/
+UrsidoRescue-0.2.0-test14/
   UrsidoRescue.exe            Windows x64
   UrsidoRescue-linux-amd64    Linux x86_64
   UrsidoRescue-linux-arm64    Linux aarch64 (Raspberry Pi 4/5, ARM laptops)
@@ -152,7 +152,7 @@ The language is asked at start. Preset it with `--lang ru|en` (anywhere on the c
 
 | flag | meaning |
 |---|---|
-| `--uart PORT` | port (`COM6`, `/dev/ttyUSB0`). Required on the Windows command line (automatic port choice for `probe` exists only on Linux, although the interactive menu does find COM ports on Windows); on Linux optional when there is exactly one port |
+| `--uart PORT` | port (`COM6`, `/dev/ttyUSB0`). Optional: `probe` finds ports the same way as the menu (`QueryDosDeviceW` on Windows). No port → an error with exit code 2; exactly one → selected automatically; several → a numbered list is printed, exit code 2, re-run with `--uart PORT` |
 | `--output DIR` | session directory (default `work/probe-<time>`) |
 | `--uboot-only` / `--linux-only` / `--no-linux` | limit environments (the first two exclude each other) |
 | `--bootrom` | answer `Press x` and check the XMODEM `C` |

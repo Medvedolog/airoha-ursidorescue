@@ -41,6 +41,7 @@ Releases by CI.
 | 0.2.0-test11 | `260419f` | 10:36 | U-Boot prompt after the ANSI bootmenu |
 | 0.2.0-test12 | `0b07944` | 11:03 | XMODEM and LAN/TFTP hardening |
 | 0.2.0-test13 | `03336da`, `d799a8f` | no (no tag) | AN7583 EOT handoff |
+| 0.2.0-test14 | `28f14c4` | yes | read-only diagnostics, 128 MiB limit, COM in the CLI |
 
 ---
 
@@ -48,9 +49,36 @@ Releases by CI.
 
 - Added `doc/` with Russian and English documentation: about the project and the Ursus family,
   operator guide, every menu in detail, architecture, and this complete changelog.
+- Added `README.ru.md`, the Russian version of the main README, linked from the English `README.md`.
 - `PROBE.md`: the Porting Collector main-menu number is now 7. Number 8 has been stale since test5.
 
 ---
+
+## 0.2.0-test14 (2026-09-24 11:31)
+
+Commit `28f14c4`, tag `v0.2.0-test14`, pre-release. CI run #32 on this commit fully PASSed,
+Windows build and publishing included.
+
+Status: **simulation candidate / HW PARTIAL**. A code-only release: it closes three mismatches
+between the code and the documentation found while writing it. No files under `doc/` changed in
+this release.
+
+- **Diagnostics is now fully read-only** (main menu 5, expert 5):
+  - `ubi part ubi` and `ubi info layout` are no longer run;
+  - `mtd bad bl2`, `mtd bad ubi`, `mtd list` (new) and `printenv` remain;
+  - the output says plainly that the UBI attach was skipped and points to the separate ADVANCED
+    mode: Porting → A or `--ubi-attach`;
+  - it ends with "Read-only diagnostics finished. No NAND/UBI write, erase, or attach was
+    performed".
+- **One-transfer limit in messages** of expert 3 and 4 is derived from `maxGenericRAMFile`:
+  `0x08000000` is always shown as 128 MiB (previously a wrong "64 MiB"). The version in the message
+  comes from `appVersion`.
+- **CLI `probe` finds ports the same way as the menu** on every platform; on Windows via
+  `QueryDosDeviceW`:
+  - 0 ports: a clear error;
+  - 1 port: selected automatically;
+  - several: a numbered list of the real COM ports and a request for `--uart PORT`, exit code 2.
+- **Tests:** `TestGenericRAMFileLimitIs128MiB`.
 
 ## 0.2.0-test13 (2026-09-24 11:18–11:19)
 

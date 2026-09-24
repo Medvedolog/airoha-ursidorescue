@@ -1,6 +1,6 @@
 # Руководство оператора UrsidoRescue
 
-[English version](GUIDE_EN.md) · [Оглавление](README.md) · версия 0.2.0-test13
+[English version](GUIDE_EN.md) · [Оглавление](README.md) · версия 0.2.0-test14
 
 ## 0. Прежде чем начать
 
@@ -32,7 +32,7 @@
 3. Внутри:
 
 ```
-UrsidoRescue-0.2.0-test13/
+UrsidoRescue-0.2.0-test14/
   UrsidoRescue.exe            Windows x64
   UrsidoRescue-linux-amd64    Linux x86_64
   UrsidoRescue-linux-arm64    Linux aarch64 (Raspberry Pi 4/5, ARM-ноутбуки)
@@ -159,7 +159,7 @@ Linux:    ./UrsidoRescue-linux-amd64
 
 | флаг | смысл |
 |---|---|
-| `--uart PORT` | порт (`COM6`, `/dev/ttyUSB0`). На Windows в командной строке обязателен (автовыбор порта для `probe` сделан только для Linux, хотя интерактивное меню находит COM-порты и на Windows); на Linux можно опустить, если порт ровно один |
+| `--uart PORT` | порт (`COM6`, `/dev/ttyUSB0`). Можно опустить: `probe` ищет порты так же, как меню (на Windows — `QueryDosDeviceW`). Ни одного порта — ошибка с кодом 2; ровно один — выбирается автоматически; несколько — печатается нумерованный список, код выхода 2, нужно повторить команду с `--uart PORT` |
 | `--output DIR` | каталог сессии (по умолчанию `work/probe-<время>`) |
 | `--uboot-only` / `--linux-only` / `--no-linux` | ограничить среды (первые два взаимоисключающие) |
 | `--bootrom` | ответить на `Press x` и проверить `C` от XMODEM |
