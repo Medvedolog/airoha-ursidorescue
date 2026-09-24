@@ -597,11 +597,20 @@ func (t *uartTerm) xmodemSendInteractive() {
 	t.readByte()
 	t.logSent("<XMODEM send " + filepath.Base(abs) + ">")
 	// xmodemSend prints its own progress and logs the raw bytes via a.logBytes.
-	if e := t.a.xmodemSend(t.s, abs, "manual"); e != nil {
+	res, e := t.a.xmodemSend(t.s, abs, "manual")
+	if e != nil {
 		fmt.Printf(L("\r\nXMODEM отправка не удалась: %v\r\n", "\r\nXMODEM send failed: %v\r\n"), e)
 		return
 	}
-	fmt.Print(L("\r\nXMODEM отправка завершена.\r\n", "\r\nXMODEM send complete.\r\n"))
+	if len(res.Trailing) > 0 {
+		_, _ = os.Stdout.Write(res.Trailing)
+	}
+	if res.EOTAck {
+		fmt.Print(L("\r\nXMODEM отправка завершена и EOT подтверждён.\r\n", "\r\nXMODEM send complete; EOT acknowledged.\r\n"))
+	} else {
+		fmt.Print(L("\r\nВсе блоки XMODEM подтверждены; EOT ACK не получен. Проверьте состояние устройства в терминале.\r\n",
+			"\r\nAll XMODEM data blocks were ACKed; EOT ACK was not received. Verify the device state in the terminal.\r\n"))
+	}
 }
 
 func (t *uartTerm) xmodemRecvInteractive() {
