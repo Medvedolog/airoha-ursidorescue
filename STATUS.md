@@ -1,10 +1,18 @@
-# UrsidoRescue 0.2.0-test3
+# UrsidoRescue 0.2.0-test4
 
 Status: **simulation PASS / HW HOLD.** Unit tests, a simulated AN7581 board and a pseudo-terminal
 U-Boot pass (also with -race); nothing in 0.2.x has run on real hardware yet. First hardware runs
 should be probes on a board you can afford to recover.
 
 UART testers only: 3.3V TTL, GND/TX/RX only, never connect VCC.
+
+## 0.2.0-test4
+
+- New interactive UART terminal (Expert mode, item 1): local line editing with
+  command history (↑/↓), cursor keys/Home/End, a raw passthrough toggle, manual
+  XMODEM send and receive (XMODEM-CRC, 128/1K), and full session logging
+  (device output plus every operator-sent line). The old transparent shell is
+  still there as item 6. It has no device credentials and guesses none.
 
 ## 0.2.0-test3 (review fixes before the first hardware probe)
 

@@ -44,6 +44,12 @@ Main menu → 8. PORTING / HARDWARE DISCOVERY:
 1 full probe · 2 BootROM (observe / x-handshake / RAM U-Boot for MD/MF) · 3 U-Boot · 4 Linux ·
 5 flash/MTD/UBI · 6 DTB · 7 network · 8 export · 9 view · A advanced UBI attach · N new session.
 
+## Interactive terminal
+
+Expert mode → item 1 is a UART terminal with ↑/↓ command history, line editing,
+manual XMODEM send/receive and full logging. It only drives the port you open;
+it holds no credentials and never guesses any. Item 6 is the old raw passthrough.
+
 ## Command line
 
     UrsidoRescue probe --uart COM6                 # Windows

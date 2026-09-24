@@ -28,7 +28,7 @@ import (
 
 const (
 	appName               = "UrsidoRescue"
-	appVersion            = "0.2.0-test3"
+	appVersion            = "0.2.0-test4"
 	defaultRouterIP       = "192.168.1.1"
 	defaultLocalIP        = "192.168.1.254"
 	defaultTFTPPort       = 1069
@@ -1846,7 +1846,7 @@ func (a *App) physicalRestoreWizard() error {
 		return e
 	}
 	if len(blbad) > 0 || len(bad) > 0 {
-		return fmt.Errorf(L("восстановление physical image в 0.2.0-test3 требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test3 requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
+		return fmt.Errorf(L("восстановление physical image в 0.2.0-test4 требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test4 requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
 	}
 	local, e := a.networkIP()
 	if e != nil {
@@ -2009,15 +2009,20 @@ func (a *App) diagnosticsWizard() error {
 func (a *App) expertMenu() error {
 	for {
 		fmt.Println(L("\nЭкспертный режим", "\nExpert mode"))
-		fmt.Println(L("  1. UART Shell (прозрачный терминал, ничего не отправляет сам)", "  1. UART Shell (transparent terminal, sends nothing by itself)"))
+		fmt.Println(L("  1. UART-терминал (история ↑/↓, ручной XMODEM, лог)", "  1. UART terminal (↑/↓ history, manual XMODEM, logging)"))
 		fmt.Println(L("  2. Запустить RAM U-Boot и оставить prompt", "  2. Start RAM U-Boot and leave the prompt"))
 		fmt.Println(L("  3. Записать существующий UBI volume из файла", "  3. Write an existing UBI volume from a file"))
 		fmt.Println(L("  4. Записать raw range в MTD bl2/ubi", "  4. Write a raw range into MTD bl2/ubi"))
 		fmt.Println(L("  5. Диагностика", "  5. Diagnostics"))
+		fmt.Println(L("  6. UART Shell (прозрачный терминал, ничего не отправляет сам)", "  6. UART Shell (transparent passthrough, sends nothing by itself)"))
 		fmt.Println(L("  0. Назад", "  0. Back"))
 		v := a.ask(L("Выбор: ", "Choice: "))
 		switch v {
 		case "1":
+			if e := a.runTerminal(); e != nil {
+				return e
+			}
+		case "6":
 			if e := a.uartShell(); e != nil {
 				return e
 			}
@@ -2149,7 +2154,7 @@ func (a *App) expertUBIVolume() error {
 	}
 	st, _ := os.Stat(path)
 	if st.Size() > maxGenericRAMFile {
-		return errors.New(L("файл volume >64 MiB за один раз не поддерживается в 0.2.0-test3", "expert one-shot volume file >64 MiB is not supported in 0.2.0-test3"))
+		return errors.New(L("файл volume >64 MiB за один раз не поддерживается в 0.2.0-test4", "expert one-shot volume file >64 MiB is not supported in 0.2.0-test4"))
 	}
 	sha, _ := shaFile(path)
 	fmt.Printf("WRITE EXISTING UBI VOLUME %s size=%d SHA256=%s\n", name, st.Size(), sha)
@@ -2301,7 +2306,7 @@ func (a *App) makeSupportBundle() (string, error) {
 }
 
 func (a *App) selftest() error {
-	if appVersion != "0.2.0-test3" {
+	if appVersion != "0.2.0-test4" {
 		return errors.New("version")
 	}
 	if _, e := probe.CheckUBoot("saveenv"); e == nil {
