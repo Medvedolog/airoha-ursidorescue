@@ -7,12 +7,72 @@ func TestCRC16Xmodem(t *testing.T) {
 		t.Fatalf("got %04x", got)
 	}
 }
-func TestPrompt(t *testing.T) {
-	if !promptPresent([]byte("\r\nU-Boot> \r\n")) {
-		t.Fatal("prompt")
+
+func TestXmodemReplyNoiseAndCancel(t *testing.T) {
+	can := 0
+	if got := scanXmodemReply([]byte{0x18}, &can); got != xmodemReplyNone || can != 1 {
+		t.Fatalf("single CAN must not cancel: reply=%v can=%d", got, can)
 	}
-	if promptPresent([]byte("foo > bar")) {
-		t.Fatal("false prompt")
+	if got := scanXmodemReply([]byte{0x06}, &can); got != xmodemReplyACK || can != 0 {
+		t.Fatalf("ACK after one noisy CAN must win: reply=%v can=%d", got, can)
+	}
+	can = 0
+	if got := scanXmodemReply([]byte{0x18, 0x18}, &can); got != xmodemReplyCancel {
+		t.Fatalf("CAN CAN must cancel: reply=%v", got)
+	}
+	can = 0
+	if got := scanXmodemReply([]byte{'C'}, &can); got != xmodemReplyRetry {
+		t.Fatalf("CRC request must trigger immediate retry: reply=%v", got)
+	}
+	can = 0
+	if got := scanXmodemReply([]byte{0x15}, &can); got != xmodemReplyRetry {
+		t.Fatalf("NAK must trigger immediate retry: reply=%v", got)
+	}
+	can = 0
+	if got := scanXmodemReply([]byte{'C', 0x06}, &can); got != xmodemReplyACK {
+		t.Fatalf("ACK in the same read must win over earlier C noise: reply=%v", got)
+	}
+}
+
+func TestXmodemEOTHandoffClassifier(t *testing.T) {
+	can := 0
+	if got, handoff := scanXmodemEOTReply([]byte{0x15}, &can); got != xmodemReplyRetry || handoff {
+		t.Fatalf("EOT NAK must request one more EOT: reply=%v handoff=%v", got, handoff)
+	}
+	can = 0
+	if got, handoff := scanXmodemEOTReply([]byte("NOTICE: BL31 starting\r\n"), &can); got != xmodemReplyNone || !handoff {
+		t.Fatalf("boot text after EOT must be treated as next-stage handoff: reply=%v handoff=%v", got, handoff)
+	}
+	can = 0
+	if got, handoff := scanXmodemEOTReply([]byte{'C', 'C', 'C'}, &can); got != xmodemReplyNone || !handoff {
+		t.Fatalf("next receiver C stream after EOT must be handoff evidence: reply=%v handoff=%v", got, handoff)
+	}
+	can = 0
+	if got, handoff := scanXmodemEOTReply([]byte{0x06}, &can); got != xmodemReplyACK || handoff {
+		t.Fatalf("EOT ACK must remain definitive: reply=%v handoff=%v", got, handoff)
+	}
+}
+func TestPrompt(t *testing.T) {
+	good := [][]byte{
+		[]byte("\r\nU-Boot> \r\n"),
+		[]byte("AN7583> "),
+		[]byte("\x1b[2J\x1b[H    *** U-Boot Boot Menu ***\x1b[20;1HAN7583> \x1b[?25h"),
+		[]byte("menu text without newline\x1b[24;1H=> "),
+	}
+	for _, in := range good {
+		if !promptPresent(in) {
+			t.Fatalf("prompt not detected in %q", in)
+		}
+	}
+	bad := [][]byte{
+		[]byte("foo > bar"),
+		[]byte("AN7583> still printing"),
+		[]byte("echo U-Boot> not-a-prompt"),
+	}
+	for _, in := range bad {
+		if promptPresent(in) {
+			t.Fatalf("false prompt in %q", in)
+		}
 	}
 }
 func TestBadBlocks(t *testing.T) {

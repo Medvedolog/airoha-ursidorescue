@@ -28,7 +28,7 @@ import (
 
 const (
 	appName               = "UrsidoRescue"
-	appVersion            = "0.2.0-test10"
+	appVersion            = "0.2.0-test13"
 	defaultRouterIP       = "192.168.1.1"
 	defaultLocalIP        = "192.168.1.254"
 	defaultTFTPPort       = 1069
@@ -452,8 +452,8 @@ const (
 	phaseFIP
 )
 
-func (a *App) waitReceiver(s Serial, timeout time.Duration, keepExisting bool) (ReceiverPhase, Profile, []byte, error) {
-	if !keepExisting {
+func (a *App) waitReceiver(s Serial, timeout time.Duration, keepExisting bool, initial []byte) (ReceiverPhase, Profile, []byte, error) {
+	if !keepExisting && len(initial) == 0 {
 		_ = s.ResetInput()
 	}
 	a.event(L("Ожидание BootROM Press x / CCC. Если устройство уже печатает C, НЕ перезагружайте его.", "Waiting for BootROM Press x / CCC. If the device already prints C, do NOT reboot it."))
@@ -463,46 +463,65 @@ func (a *App) waitReceiver(s Serial, timeout time.Duration, keepExisting bool) (
 	lastX := time.Time{}
 	press := false
 	buf := make([]byte, 4096)
+
+	consume := func(d []byte, alreadyLogged bool) (ReceiverPhase, Profile, bool) {
+		if len(d) == 0 {
+			return phaseUnknown, Profile{}, false
+		}
+		if alreadyLogged {
+			_, _ = os.Stdout.Write(d)
+		} else {
+			a.logBytes(d, true)
+		}
+		tail = append(tail, d...)
+		if len(tail) > 65536 {
+			tail = tail[len(tail)-65536:]
+		}
+		low := strings.ToLower(string(tail))
+		if strings.Contains(low, "press x") {
+			press = true
+		}
+		if press && time.Since(lastX) > 2*time.Second && cCount == 0 {
+			a.event(L("Press x обнаружен; отправляю x", "Press x seen; sending x"))
+			_ = s.Write([]byte("x"))
+			lastX = time.Now()
+		}
+		for _, b := range d {
+			if b == 'C' {
+				cCount++
+				if cCount >= 3 {
+					ph := phasePreloader
+					if strings.Contains(low, "press x to load bl31") || strings.Contains(low, "dram flow done") || strings.Contains(low, "load bl31 + u-boot fip") {
+						ph = phaseFIP
+					}
+					p, ok := inferProfile(tail)
+					if !ok {
+						p = Profile{ID: "auto"}
+					}
+					return ph, p, true
+				}
+			} else if b == 9 || b == 10 || b == 13 || b == 32 || b < 0x20 {
+			} else {
+				cCount = 0
+			}
+		}
+		return phaseUnknown, Profile{}, false
+	}
+
+	if ph, p, ok := consume(initial, true); ok {
+		return ph, p, tail, nil
+	}
 	for time.Now().Before(deadline) {
 		n, e := s.Read(buf, 500*time.Millisecond)
 		if e != nil {
 			return phaseUnknown, Profile{}, tail, e
 		}
-		if n > 0 {
-			d := append([]byte(nil), buf[:n]...)
-			a.logBytes(d, true)
-			tail = append(tail, d...)
-			if len(tail) > 65536 {
-				tail = tail[len(tail)-65536:]
-			}
-			low := strings.ToLower(string(tail))
-			if strings.Contains(low, "press x") {
-				press = true
-			}
-			if press && time.Since(lastX) > 2*time.Second && cCount == 0 {
-				a.event(L("Press x обнаружен; отправляю x", "Press x seen; sending x"))
-				_ = s.Write([]byte("x"))
-				lastX = time.Now()
-			}
-			for _, b := range d {
-				if b == 'C' {
-					cCount++
-					if cCount >= 3 {
-						ph := phasePreloader
-						if strings.Contains(low, "press x to load bl31") || strings.Contains(low, "dram flow done") || strings.Contains(low, "load bl31 + u-boot fip") {
-							ph = phaseFIP
-						}
-						p, ok := inferProfile(tail)
-						if !ok {
-							p = Profile{ID: "auto"}
-						}
-						return ph, p, tail, nil
-					}
-				} else if b == 9 || b == 10 || b == 13 || b == 32 || b < 0x20 {
-				} else {
-					cCount = 0
-				}
-			}
+		if n == 0 {
+			continue
+		}
+		d := append([]byte(nil), buf[:n]...)
+		if ph, p, ok := consume(d, false); ok {
+			return ph, p, tail, nil
 		}
 	}
 	return phaseUnknown, Profile{}, tail, errors.New(L("тайм-аут ожидания BootROM XMODEM", "timeout waiting for BootROM XMODEM"))
@@ -522,10 +541,87 @@ func crc16Xmodem(data []byte) uint16 {
 	}
 	return crc
 }
-func (a *App) xmodemSend(s Serial, path, label string) error {
+
+type xmodemReply int
+
+const (
+	xmodemReplyNone xmodemReply = iota
+	xmodemReplyACK
+	xmodemReplyRetry
+	xmodemReplyCancel
+)
+
+type xmodemResult struct {
+	EOTAck   bool
+	Trailing []byte
+}
+
+func scanXmodemReply(data []byte, consecutiveCAN *int) xmodemReply {
+	retry := false
+	for _, b := range data {
+		switch b {
+		case 0x06: // ACK wins even if C/NAK noise preceded it in the same UART read.
+			*consecutiveCAN = 0
+			return xmodemReplyACK
+		case 0x18:
+			(*consecutiveCAN)++
+			if *consecutiveCAN >= 2 {
+				return xmodemReplyCancel
+			}
+		case 0x15, 'C':
+			*consecutiveCAN = 0
+			retry = true
+		default:
+			*consecutiveCAN = 0
+		}
+	}
+	if retry {
+		return xmodemReplyRetry
+	}
+	return xmodemReplyNone
+}
+
+func scanXmodemEOTReply(data []byte, consecutiveCAN *int) (xmodemReply, bool) {
+	retry := false
+	handoff := false
+	for _, b := range data {
+		switch b {
+		case 0x06:
+			*consecutiveCAN = 0
+			return xmodemReplyACK, false
+		case 0x18:
+			(*consecutiveCAN)++
+			if *consecutiveCAN >= 2 {
+				return xmodemReplyCancel, false
+			}
+		case 0x15:
+			*consecutiveCAN = 0
+			retry = true
+		default:
+			*consecutiveCAN = 0
+			// At EOT, ASCII 'C' is not a valid EOT response. It can be the
+			// next XMODEM receiver or ordinary boot text ("NOTICE", etc.).
+			// Any non-whitespace/non-NUL output means stop injecting EOT and
+			// let the caller prove the next stage from UART.
+			if b != 0 && b != '\r' && b != '\n' && b != '\t' && b != ' ' {
+				handoff = true
+			}
+		}
+	}
+	if handoff {
+		return xmodemReplyNone, true
+	}
+	if retry {
+		return xmodemReplyRetry, false
+	}
+	return xmodemReplyNone, false
+}
+
+func (a *App) xmodemSend(s Serial, path, label string) (xmodemResult, error) {
+	var result xmodemResult
 	f, e := os.Open(path)
 	if e != nil {
-		return e
+		return result, e
 	}
 	defer f.Close()
 	st, _ := f.Stat()
@@ -536,57 +632,71 @@ func (a *App) xmodemSend(s Serial, path, label string) error {
 	payload := make([]byte, 128)
 	resp := make([]byte, 256)
 	_ = s.ResetInput()
+
+	dataComplete := false
+	defer func() {
+		if !dataComplete {
+			// Only abort while still inside the data phase. Once the final
+			// block was ACKed, the peer may already have jumped to the next
+			// stage and CAN bytes would then be injected into that new stage.
+			_ = s.Write([]byte{0x18, 0x18, 0x18})
+		}
+	}()
+
 	for idx := int64(0); idx < blocks; idx++ {
 		for i := range payload {
 			payload[i] = 0x1a
 		}
 		n, er := f.Read(payload)
 		if er != nil && er != io.EOF {
-			return er
+			return result, er
 		}
 		c := crc16Xmodem(payload)
 		pkt := make([]byte, 0, 133)
 		pkt = append(pkt, 0x01, seq, 0xff-seq)
 		pkt = append(pkt, payload...)
 		pkt = append(pkt, byte(c>>8), byte(c))
+
 		accepted := false
-		for attempt := 1; attempt <= 10 && !accepted; attempt++ {
+		for attempt := 1; attempt <= 8 && !accepted; attempt++ {
 			if e = s.Write(pkt); e != nil {
-				return e
+				return result, e
 			}
-			dl := time.Now().Add(12 * time.Second)
-			for time.Now().Before(dl) {
-				nr, er := s.Read(resp, 400*time.Millisecond)
+			deadline := time.Now().Add(2 * time.Second)
+			retryNow := false
+			consecutiveCAN := 0
+			for time.Now().Before(deadline) {
+				nr, er := s.Read(resp, 150*time.Millisecond)
 				if er != nil {
-					return er
+					return result, er
 				}
 				if nr == 0 {
 					continue
 				}
 				a.logBytes(resp[:nr], false)
-				for _, b := range resp[:nr] {
-					if b == 0x06 {
-						accepted = true
-						break
-					}
-					if b == 0x18 {
-						return fmt.Errorf(L("BootROM отменил XMODEM %s", "BootROM cancelled XMODEM %s"), label)
-					}
-					if b == 0x15 || b == 'C' {
-						break
-					}
+				switch scanXmodemReply(resp[:nr], &consecutiveCAN) {
+				case xmodemReplyACK:
+					accepted = true
+				case xmodemReplyRetry:
+					retryNow = true
+				case xmodemReplyCancel:
+					return result, fmt.Errorf(L("BootROM подтвердил отмену XMODEM %s (CAN CAN)", "BootROM confirmed XMODEM cancellation %s (CAN CAN)"), label)
 				}
-				if accepted || bytes.Contains(resp[:nr], []byte{0x15}) {
+				if accepted || retryNow {
 					break
 				}
 			}
 			if !accepted {
-				a.event(fmt.Sprintf(L("XMODEM повтор блока %d/%d, попытка %d/10", "XMODEM retry block %d/%d attempt %d/10"), idx+1, blocks, attempt))
+				reason := L("тайм-аут ACK", "ACK timeout")
+				if retryNow {
+					reason = L("NAK/C — повтор немедленно", "NAK/C — immediate retry")
+				}
+				a.event(fmt.Sprintf(L("XMODEM повтор блока %d/%d, попытка %d/8 (%s)", "XMODEM retry block %d/%d attempt %d/8 (%s)"), idx+1, blocks, attempt, reason))
+				time.Sleep(80 * time.Millisecond)
 			}
 		}
 		if !accepted {
-			_ = s.Write([]byte{0x18, 0x18, 0x18})
-			return fmt.Errorf(L("XMODEM блок %d не подтверждён", "XMODEM block %d not ACKed"), idx+1)
+			return result, fmt.Errorf(L("XMODEM блок %d не подтверждён после 8 попыток", "XMODEM block %d not ACKed after 8 attempts"), idx+1)
 		}
 		sent += int64(n)
 		seq++
@@ -594,38 +704,88 @@ func (a *App) xmodemSend(s Serial, path, label string) error {
 			fmt.Printf("\r[XMODEM] %s: %d/%d bytes (%d/%d)", label, sent, size, idx+1, blocks)
 		}
 	}
-	for attempt := 0; attempt < 10; attempt++ {
-		_ = s.Write([]byte{0x04})
-		dl := time.Now().Add(10 * time.Second)
-		for time.Now().Before(dl) {
-			n, e := s.Read(resp, 400*time.Millisecond)
-			if e != nil {
-				return e
+	dataComplete = true
+
+	// EOT is a transport close, not stronger evidence than the next-stage
+	// receiver/prompt. AN7583 has now been observed twice ACKing every FIP data
+	// block and then handing off without an EOT ACK. Avoid turning that valid
+	// handoff into a fatal error or sending CAN/EOT bytes into the new stage.
+	for attempt := 1; attempt <= 3; attempt++ {
+		if e = s.Write([]byte{0x04}); e != nil {
+			return result, e
+		}
+		deadline := time.Now().Add(1500 * time.Millisecond)
+		retryNow := false
+		consecutiveCAN := 0
+		for time.Now().Before(deadline) {
+			n, er := s.Read(resp, 150*time.Millisecond)
+			if er != nil {
+				return result, er
 			}
 			if n == 0 {
 				continue
 			}
-			a.logBytes(resp[:n], false)
-			if bytes.Contains(resp[:n], []byte{0x06}) {
+			d := append([]byte(nil), resp[:n]...)
+			a.logBytes(d, false)
+			result.Trailing = append(result.Trailing, d...)
+			if len(result.Trailing) > 65536 {
+				result.Trailing = result.Trailing[len(result.Trailing)-65536:]
+			}
+			reply, handoff := scanXmodemEOTReply(d, &consecutiveCAN)
+			switch reply {
+			case xmodemReplyACK:
 				fmt.Println()
 				a.event(L("XMODEM завершён: ", "XMODEM complete: ") + label)
-				return nil
+				result.EOTAck = true
+				return result, nil
+			case xmodemReplyRetry:
+				retryNow = true
+			case xmodemReplyCancel:
+				return result, fmt.Errorf(L("Receiver подтвердил отмену XMODEM %s на EOT (CAN CAN)", "Receiver confirmed XMODEM cancellation %s at EOT (CAN CAN)"), label)
 			}
-			if bytes.Contains(resp[:n], []byte{0x15}) {
+			if handoff {
+				fmt.Println()
+				a.event(L("Все XMODEM-блоки подтверждены; вместо EOT ACK уже виден вывод следующего этапа — проверяю handoff", "All XMODEM blocks were ACKed; next-stage output appeared instead of EOT ACK — verifying handoff"))
+				return result, nil
+			}
+			if retryNow {
 				break
 			}
 		}
+		if retryNow {
+			a.event(fmt.Sprintf(L("XMODEM EOT получил NAK, повтор %d/3", "XMODEM EOT got NAK, retry %d/3"), attempt))
+		} else {
+			a.event(fmt.Sprintf(L("XMODEM EOT без ACK, осторожный повтор %d/3", "XMODEM EOT without ACK, cautious retry %d/3"), attempt))
+		}
+		time.Sleep(80 * time.Millisecond)
 	}
-	return fmt.Errorf(L("XMODEM EOT не подтверждён: %s", "XMODEM EOT not ACKed: %s"), label)
+	fmt.Println()
+	a.event(L("Все XMODEM-блоки подтверждены, но EOT ACK не пришёл — не отменяю сессию, проверяю следующий этап по UART", "All XMODEM blocks were ACKed but EOT ACK was not received — not aborting; verifying the next UART stage"))
+	return result, nil
 }
 
-var promptRE = regexp.MustCompile(`(?m)(?:^|[\r\n])(?:AN7581|AN7583|U-Boot)>[ \t]*(?:$|[\r\n])|(?:^|[\r\n])=>[ \t]*(?:$|[\r\n])`)
+var ansiCSIForPromptRE = regexp.MustCompile("\x1b\\[[0-?]*[ -/]*[@-~]")
 
 func promptPresent(b []byte) bool {
-	if len(b) > 4096 {
-		b = b[len(b)-4096:]
+	// U-Boot bootmenu is screen-oriented: it may position the cursor with ANSI
+	// instead of emitting a CR/LF before the command prompt. Looking only for a
+	// line-start prompt therefore misses a real "AN7583> " after menu exit.
+	if len(b) > 8192 {
+		b = b[len(b)-8192:]
 	}
-	return promptRE.Match(b)
+	clean := ansiCSIForPromptRE.ReplaceAll(b, nil)
+	clean = bytes.TrimRight(clean, " \t\r\n\x00")
+	for _, suffix := range [][]byte{
+		[]byte("AN7581>"),
+		[]byte("AN7583>"),
+		[]byte("U-Boot>"),
+		[]byte("=>"),
+	} {
+		if bytes.HasSuffix(clean, suffix) {
+			return true
+		}
+	}
+	return false
 }
 func (a *App) waitQuiet(s Serial, quiet, timeout time.Duration) []byte {
 	end := time.Now().Add(timeout)
@@ -648,7 +808,7 @@ func (a *App) waitQuiet(s Serial, quiet, timeout time.Duration) []byte {
 	}
 	return out
 }
-func (a *App) waitUBootPrompt(s Serial, timeout time.Duration) ([]byte, error) {
+func (a *App) waitUBootPrompt(s Serial, timeout time.Duration, initial []byte) ([]byte, error) {
 	a.event(L("Ожидание RAM U-Boot; Enter не отправляется, чтобы не выбрать bootmenu", "Waiting for RAM U-Boot; Enter is not sent so no bootmenu entry gets selected"))
 	end := time.Now().Add(timeout)
 	var out, tail []byte
@@ -657,16 +817,17 @@ func (a *App) waitUBootPrompt(s Serial, timeout time.Duration) ([]byte, error) {
 	menu := false
 	lastBreak := time.Time{}
 	breaks := 0
-	for time.Now().Before(end) {
-		n, e := s.Read(buf, 120*time.Millisecond)
-		if e != nil {
-			return out, e
+	menuEscapes := 0
+
+	consume := func(d []byte, alreadyLogged bool) (bool, error) {
+		if len(d) == 0 {
+			return false, nil
 		}
-		if n == 0 {
-			continue
+		if alreadyLogged {
+			_, _ = os.Stdout.Write(d)
+		} else {
+			a.logBytes(d, true)
 		}
-		d := append([]byte(nil), buf[:n]...)
-		a.logBytes(d, true)
 		out = append(out, d...)
 		tail = append(tail, d...)
 		if len(tail) > 65536 {
@@ -677,7 +838,7 @@ func (a *App) waitUBootPrompt(s Serial, timeout time.Duration) ([]byte, error) {
 			a.waitQuiet(s, 450*time.Millisecond, 4*time.Second)
 			_ = s.ResetInput()
 			a.event(L("Устойчивый U-Boot prompt получен", "Stable U-Boot prompt reached"))
-			return out, nil
+			return true, nil
 		}
 		if strings.Contains(low, "u-boot 20") || strings.Contains(low, "hit any key to stop autoboot") {
 			seen = true
@@ -686,26 +847,49 @@ func (a *App) waitUBootPrompt(s Serial, timeout time.Duration) ([]byte, error) {
 			menu = true
 			seen = true
 		}
-		if seen && time.Since(lastBreak) >= 200*time.Millisecond && breaks < 40 {
-			_ = s.Write([]byte{0x03})
+		if seen && time.Since(lastBreak) >= 250*time.Millisecond {
 			if menu {
-				_ = s.Write([]byte{0x1b})
+				if menuEscapes < 6 {
+					_ = s.Write([]byte{0x1b})
+					menuEscapes++
+				}
+			} else if breaks < 20 {
+				_ = s.Write([]byte{0x03})
+				breaks++
 			}
 			lastBreak = time.Now()
-			breaks++
 		}
 		if strings.Contains(low, "mtd erase ubi") || strings.Contains(low, "erasing 0x") {
-			return out, errors.New(L("до prompt замечена разрушительная автозагрузка", "destructive autoboot observed before prompt"))
+			return false, errors.New(L("до prompt замечена разрушительная автозагрузка", "destructive autoboot observed before prompt"))
 		}
 		if strings.Contains(low, "starting kernel") || strings.Contains(low, "booting linux on physical cpu") {
-			return out, errors.New(L("автозагрузка ушла в Linux до prompt", "autoboot escaped into Linux before prompt"))
+			return false, errors.New(L("автозагрузка ушла в Linux до prompt", "autoboot escaped into Linux before prompt"))
 		}
 		if strings.Contains(low, "press x to load bl31") && !seen {
-			return out, errors.New(L("после FIP устройство вернулось в BootROM", "device returned to BootROM after FIP"))
+			return false, errors.New(L("после FIP устройство вернулось в BootROM", "device returned to BootROM after FIP"))
+		}
+		return false, nil
+	}
+
+	if done, e := consume(initial, true); done || e != nil {
+		return out, e
+	}
+	for time.Now().Before(end) {
+		n, e := s.Read(buf, 120*time.Millisecond)
+		if e != nil {
+			return out, e
+		}
+		if n == 0 {
+			continue
+		}
+		d := append([]byte(nil), buf[:n]...)
+		if done, er := consume(d, false); done || er != nil {
+			return out, er
 		}
 	}
 	return out, errors.New(L("тайм-аут ожидания U-Boot prompt", "U-Boot prompt timeout"))
 }
+
 func sendLine(s Serial, line string) error {
 	if strings.ContainsAny(line, "\r\n") || line == "" {
 		return errors.New("invalid U-Boot command")
@@ -885,7 +1069,7 @@ func (a *App) acquireRAMUBoot(preferred Profile) (Serial, Profile, []byte, error
 	_ = log
 	fmt.Println(L("\nЕсли сейчас уже видите 'Press x to load BL31 + U-Boot FIP' и CCC — ничего не перезагружайте.", "\nIf you already see 'Press x to load BL31 + U-Boot FIP' and CCC, do not reboot anything."))
 	fmt.Println(L("Иначе выключите Nokia, подключите UART, удерживайте Reset и подайте питание для BootROM recovery.", "Otherwise power the Nokia off, connect the UART, hold Reset and power it on for BootROM recovery."))
-	phase, det, trans, e := a.waitReceiver(s, 180*time.Second, true)
+	phase, det, trans, e := a.waitReceiver(s, 180*time.Second, true, nil)
 	if e != nil {
 		s.Close()
 		a.closeLog()
@@ -926,12 +1110,13 @@ func (a *App) acquireRAMUBoot(preferred Profile) (Serial, Profile, []byte, error
 	fip := filepath.Join(a.root, filepath.FromSlash(p.RAMFIPRel))
 	if phase == phasePreloader {
 		a.event(L("Текущий receiver классифицирован как PRELOADER stage", "Current receiver classified as the PRELOADER stage"))
-		if e = a.xmodemSend(s, pre, p.SoC+" preloader"); e != nil {
+		preResult, xe := a.xmodemSend(s, pre, p.SoC+" preloader")
+		if xe != nil {
 			s.Close()
 			a.closeLog()
-			return nil, Profile{}, trans, e
+			return nil, Profile{}, trans, xe
 		}
-		ph2, det2, t2, e2 := a.waitReceiver(s, 180*time.Second, false)
+		ph2, det2, t2, e2 := a.waitReceiver(s, 180*time.Second, true, preResult.Trailing)
 		trans = append(trans, t2...)
 		if e2 != nil {
 			s.Close()
@@ -950,17 +1135,21 @@ func (a *App) acquireRAMUBoot(preferred Profile) (Serial, Profile, []byte, error
 	if phase == phaseFIP {
 		a.event(L("Устройство уже находится на BL31+U-Boot FIP XMODEM stage; preloader повторно НЕ отправляется", "The device is already at the BL31+U-Boot FIP XMODEM stage; the preloader is NOT sent again"))
 	}
-	if e = a.xmodemSend(s, fip, p.SoC+" RAM BL31+U-Boot FIP"); e != nil {
+	fipResult, xe := a.xmodemSend(s, fip, p.SoC+" RAM BL31+U-Boot FIP")
+	if xe != nil {
 		s.Close()
 		a.closeLog()
-		return nil, Profile{}, trans, e
+		return nil, Profile{}, trans, xe
 	}
-	boot, e := a.waitUBootPrompt(s, 180*time.Second)
+	boot, e := a.waitUBootPrompt(s, 180*time.Second, fipResult.Trailing)
 	trans = append(trans, boot...)
 	if e != nil {
 		s.Close()
 		a.closeLog()
 		return nil, Profile{}, trans, e
+	}
+	if !fipResult.EOTAck {
+		a.event(L("EOT ACK отсутствовал, но устойчивый RAM U-Boot prompt доказал успешный handoff", "EOT ACK was absent, but a stable RAM U-Boot prompt proved the handoff"))
 	}
 	ver, e := a.ubootCommand(s, "version", 30*time.Second)
 	if e != nil {
@@ -1024,37 +1213,58 @@ func parseRRQ(p []byte) (op uint16, name, mode string, opts map[string]string, e
 	}
 	return
 }
-func runTFTPServer(bindIP string, port int, source, expectedName, allowedHost string, ready chan struct{}, done chan tftpResult) {
+func tftpCancelled(cancel <-chan struct{}) bool {
+	if cancel == nil {
+		return false
+	}
+	select {
+	case <-cancel:
+		return true
+	default:
+		return false
+	}
+}
+
+func runTFTPServer(bindIP string, port int, source, expectedName, allowedHost string, cancel <-chan struct{}, ready chan error, done chan tftpResult) {
 	res := tftpResult{}
+	finish := func(err error) {
+		res.err = err
+		done <- res
+	}
 	addr, er := net.ResolveUDPAddr("udp4", fmt.Sprintf("%s:%d", bindIP, port))
 	if er != nil {
-		res.err = er
-		close(ready)
-		done <- res
+		ready <- er
+		finish(er)
 		return
 	}
 	c, er := net.ListenUDP("udp4", addr)
 	if er != nil {
-		res.err = er
-		close(ready)
-		done <- res
+		ready <- er
+		finish(er)
 		return
 	}
 	defer c.Close()
-	close(ready)
+	ready <- nil
+
 	buf := make([]byte, 65535)
-	deadline := time.Now().Add(180 * time.Second)
+	requestDeadline := time.Now().Add(30 * time.Second)
 	var peer *net.UDPAddr
 	opts := map[string]string{}
-	for time.Now().Before(deadline) {
-		_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for time.Now().Before(requestDeadline) {
+		if tftpCancelled(cancel) {
+			finish(errors.New("TFTP cancelled"))
+			return
+		}
+		_ = c.SetReadDeadline(time.Now().Add(time.Second))
 		n, a, e := c.ReadFromUDP(buf)
 		if e != nil {
 			if ne, ok := e.(net.Error); ok && ne.Timeout() {
 				continue
 			}
-			res.err = e
-			done <- res
+			if isExpectedUDPNoise(e) {
+				continue
+			}
+			finish(e)
 			return
 		}
 		if allowedHost != "" && a.IP.String() != allowedHost {
@@ -1069,10 +1279,10 @@ func runTFTPServer(bindIP string, port int, source, expectedName, allowedHost st
 		break
 	}
 	if peer == nil {
-		res.err = errors.New("TFTP RRQ timeout")
-		done <- res
+		finish(errors.New("TFTP RRQ timeout"))
 		return
 	}
+
 	bs := 512
 	if x := opts["blksize"]; x != "" {
 		if n, e := strconv.Atoi(x); e == nil {
@@ -1086,47 +1296,76 @@ func runTFTPServer(bindIP string, port int, source, expectedName, allowedHost st
 		bs = 1468
 	}
 	res.blockSize = bs
+
 	if _, ok := opts["blksize"]; ok {
 		oack := append([]byte{0, 6}, []byte("blksize\x00"+strconv.Itoa(bs)+"\x00")...)
-		for {
+		negotiated := false
+		for retry := 1; retry <= 8 && !negotiated; retry++ {
+			if tftpCancelled(cancel) {
+				finish(errors.New("TFTP cancelled"))
+				return
+			}
 			_, _ = c.WriteToUDP(oack, peer)
-			_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+			_ = c.SetReadDeadline(time.Now().Add(time.Second))
 			n, a, e := c.ReadFromUDP(buf)
 			if e != nil {
-				continue
+				if ne, ok := e.(net.Error); ok && ne.Timeout() {
+					continue
+				}
+				if isExpectedUDPNoise(e) {
+					continue
+				}
+				finish(e)
+				return
 			}
 			if a.String() == peer.String() && n >= 4 && binary.BigEndian.Uint16(buf[:2]) == 4 && binary.BigEndian.Uint16(buf[2:4]) == 0 {
-				break
+				negotiated = true
 			}
 		}
+		if !negotiated {
+			finish(errors.New("TFTP option negotiation timeout"))
+			return
+		}
 	}
+
 	f, e := os.Open(source)
 	if e != nil {
-		res.err = e
-		done <- res
+		finish(e)
 		return
 	}
 	defer f.Close()
+
 	block := uint16(1)
 	data := make([]byte, bs)
 	for {
 		n, e := f.Read(data)
 		if e != nil && e != io.EOF {
-			res.err = e
-			done <- res
+			finish(e)
 			return
 		}
 		pkt := make([]byte, 4+n)
 		binary.BigEndian.PutUint16(pkt[:2], 3)
 		binary.BigEndian.PutUint16(pkt[2:4], block)
 		copy(pkt[4:], data[:n])
+
 		acked := false
-		for retry := 0; retry < 30 && !acked; retry++ {
+		for retry := 1; retry <= 10 && !acked; retry++ {
+			if tftpCancelled(cancel) {
+				finish(errors.New("TFTP cancelled"))
+				return
+			}
 			_, _ = c.WriteToUDP(pkt, peer)
-			_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+			_ = c.SetReadDeadline(time.Now().Add(time.Second))
 			rn, ra, re := c.ReadFromUDP(buf)
 			if re != nil {
-				continue
+				if ne, ok := re.(net.Error); ok && ne.Timeout() {
+					continue
+				}
+				if isExpectedUDPNoise(re) {
+					continue
+				}
+				finish(re)
+				return
 			}
 			if ra.String() != peer.String() || rn < 4 {
 				continue
@@ -1134,8 +1373,7 @@ func runTFTPServer(bindIP string, port int, source, expectedName, allowedHost st
 			op := binary.BigEndian.Uint16(buf[:2])
 			ack := binary.BigEndian.Uint16(buf[2:4])
 			if op == 5 {
-				res.err = errors.New("TFTP client ERROR")
-				done <- res
+				finish(errors.New("TFTP client ERROR"))
 				return
 			}
 			if op == 4 && ack == block {
@@ -1143,24 +1381,44 @@ func runTFTPServer(bindIP string, port int, source, expectedName, allowedHost st
 			}
 		}
 		if !acked {
-			res.err = fmt.Errorf("TFTP timeout block %d", block)
-			done <- res
+			finish(fmt.Errorf("TFTP timeout block %d", block))
 			return
 		}
 		res.bytes += int64(n)
 		if n < bs {
-			done <- res
+			finish(nil)
 			return
 		}
 		block++
 	}
 }
+
 func detectLocalIP() string {
+	// Prefer the interface selected by the OS route to the recovery router,
+	// matching UrsusFlasher's local_ip_for() behavior.
+	c, e := net.DialUDP("udp4", nil, mustUDPAddr(defaultRouterIP, 9))
+	if e == nil {
+		if a, ok := c.LocalAddr().(*net.UDPAddr); ok {
+			ip := a.IP.To4()
+			_ = c.Close()
+			if ip != nil && ip[0] == 192 && ip[1] == 168 && ip[2] == 1 && ip[3] != 1 {
+				return ip.String()
+			}
+		} else {
+			_ = c.Close()
+		}
+	}
+
+	// Fallback for hosts whose routing table is not yet settled during cable
+	// bring-up: consider only active non-loopback 192.168.1.x interfaces.
 	ifs, _ := net.Interfaces()
-	for _, i := range ifs {
-		addrs, _ := i.Addrs()
-		for _, a := range addrs {
-			ipnet, ok := a.(*net.IPNet)
+	for _, iface := range ifs {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, _ := iface.Addrs()
+		for _, addr := range addrs {
+			ipnet, ok := addr.(*net.IPNet)
 			if !ok {
 				continue
 			}
@@ -1172,6 +1430,7 @@ func detectLocalIP() string {
 	}
 	return ""
 }
+
 func (a *App) networkIP() (string, error) {
 	ip := detectLocalIP()
 	if ip != "" {
@@ -1194,54 +1453,137 @@ func mustUDPAddr(ip string, port int) *net.UDPAddr {
 	a, _ := net.ResolveUDPAddr("udp4", fmt.Sprintf("%s:%d", ip, port))
 	return a
 }
-func (a *App) tftpLoad(s Serial, path, remote string, addr uint64) (string, error) {
+func (a *App) resyncUBootAfterNetError(s Serial) error {
+	transcript := make([]byte, 0, 8192)
+	lastBreak := time.Time{}
+	for attempt := 0; attempt < 4; attempt++ {
+		if attempt == 0 || time.Since(lastBreak) >= 500*time.Millisecond {
+			_ = s.Write([]byte{0x03})
+			lastBreak = time.Now()
+		}
+		deadline := time.Now().Add(1500 * time.Millisecond)
+		buf := make([]byte, 2048)
+		for time.Now().Before(deadline) {
+			n, e := s.Read(buf, 150*time.Millisecond)
+			if e != nil {
+				return e
+			}
+			if n == 0 {
+				continue
+			}
+			a.logBytes(buf[:n], true)
+			transcript = append(transcript, buf[:n]...)
+			if len(transcript) > 8192 {
+				transcript = transcript[len(transcript)-8192:]
+			}
+			if promptPresent(transcript) {
+				a.waitQuiet(s, 120*time.Millisecond, 500*time.Millisecond)
+				_ = s.ResetInput()
+				return nil
+			}
+		}
+	}
+	return errors.New(L("не удалось восстановить U-Boot prompt после сетевой ошибки", "could not resynchronize U-Boot prompt after network error"))
+}
+
+func (a *App) tftpLoadKnownLocal(s Serial, path, remote string, addr uint64, local string, verify bool) error {
 	st, e := os.Stat(path)
 	if e != nil {
-		return "", e
+		return e
 	}
 	if st.Size() > maxGenericRAMFile {
-		return "", fmt.Errorf(L("файл слишком велик для одной передачи в RAM: %d", "file too large for one-shot RAM transfer: %d"), st.Size())
+		return fmt.Errorf(L("файл слишком велик для одной передачи в RAM: %d", "file too large for one-shot RAM transfer: %d"), st.Size())
 	}
+
+	var last error
+	for attempt := 1; attempt <= 3; attempt++ {
+		// Re-apply the complete network tuple for every attempt. A failed U-Boot
+		// network command may leave ARP/net state stale even though the prompt is alive.
+		if e = a.configureUBootNet(s, local); e != nil {
+			return e
+		}
+
+		ready := make(chan error, 1)
+		done := make(chan tftpResult, 1)
+		cancel := make(chan struct{})
+		go runTFTPServer(local, defaultTFTPPort, path, remote, defaultRouterIP, cancel, ready, done)
+		if e = <-ready; e != nil {
+			last = e
+			a.event(fmt.Sprintf(L("TFTP server не стартовал, попытка %d/3: %v", "TFTP server failed to start, attempt %d/3: %v"), attempt, e))
+			if attempt < 3 {
+				time.Sleep(time.Duration(attempt) * time.Second)
+				continue
+			}
+			break
+		}
+
+		a.event(fmt.Sprintf(L("TFTP %s: попытка %d/3, %s -> 0x%x", "TFTP %s: attempt %d/3, %s -> 0x%x"), remote, attempt, local, addr))
+		out, cmdErr := a.ubootCommand(s, fmt.Sprintf("tftpboot 0x%x %s", addr, remote), 2*time.Minute)
+		if cmdErr != nil {
+			close(cancel)
+			res := <-done
+			if res.err != nil && !strings.Contains(res.err.Error(), "cancelled") {
+				last = fmt.Errorf("%v; TFTP server: %w", cmdErr, res.err)
+			} else {
+				last = cmdErr
+			}
+			a.event(fmt.Sprintf(L("Сетевая коллизия/сбой TFTP, повторяю только текущую передачу (%d/3): %v", "Network collision/TFTP failure; retrying only the current transfer (%d/3): %v"), attempt, last))
+			if attempt < 3 {
+				if re := a.resyncUBootAfterNetError(s); re != nil {
+					return fmt.Errorf("%w; resync: %v", last, re)
+				}
+				time.Sleep(time.Duration(attempt) * time.Second)
+				continue
+			}
+			break
+		}
+
+		res := <-done
+		if res.err != nil {
+			last = res.err
+		} else if res.bytes != st.Size() {
+			last = fmt.Errorf("TFTP bytes %d != %d", res.bytes, st.Size())
+		} else {
+			low := strings.ToLower(string(out))
+			if !strings.Contains(low, "bytes transferred") && !strings.Contains(low, "done") {
+				last = errors.New(L("U-Boot не подтвердил TFTP", "U-Boot did not confirm TFTP"))
+			} else if verify {
+				last = a.verifyRAM(s, path, addr)
+			} else {
+				last = nil
+			}
+		}
+		if last == nil {
+			a.event(fmt.Sprintf(L("TFTP PASS: %s, %d bytes, block=%d", "TFTP PASS: %s, %d bytes, block=%d"), remote, res.bytes, res.blockSize))
+			return nil
+		}
+
+		a.event(fmt.Sprintf(L("TFTP проверка не прошла; повторяю только текущую передачу (%d/3): %v", "TFTP verification failed; retrying only the current transfer (%d/3): %v"), attempt, last))
+		if attempt < 3 {
+			if re := a.resyncUBootAfterNetError(s); re != nil {
+				return fmt.Errorf("%w; resync: %v", last, re)
+			}
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+	}
+	return fmt.Errorf(L("TFTP не прошёл после 3 попыток: %w", "TFTP failed after 3 attempts: %w"), last)
+}
+
+func (a *App) tftpLoad(s Serial, path, remote string, addr uint64) (string, error) {
 	local, e := a.networkIP()
 	if e != nil {
 		return "", e
 	}
-	ready := make(chan struct{})
-	done := make(chan tftpResult, 1)
-	go runTFTPServer(local, defaultTFTPPort, path, remote, defaultRouterIP, ready, done)
-	<-ready
-	if _, e = a.ubootCommand(s, "setenv ipaddr "+defaultRouterIP, 15*time.Second); e != nil {
-		return local, e
-	}
-	if _, e = a.ubootCommand(s, "setenv serverip "+local, 15*time.Second); e != nil {
-		return local, e
-	}
-	_, _ = a.ubootCommand(s, "setenv netmask 255.255.255.0", 15*time.Second)
-	_, _ = a.ubootCommand(s, fmt.Sprintf("setenv tftpdstp %d", defaultTFTPPort), 15*time.Second)
-	_, _ = a.ubootCommand(s, "setenv autoload no", 15*time.Second)
-	if _, e = a.ubootCommand(s, "ping "+local, 30*time.Second); e != nil {
-		return local, fmt.Errorf(L("U-Boot не пингует ПК: %w", "U-Boot ping PC failed: %w"), e)
-	}
-	out, e := a.ubootCommand(s, fmt.Sprintf("tftpboot 0x%x %s", addr, remote), 5*time.Minute)
-	if e != nil {
-		return local, e
-	}
-	res := <-done
-	if res.err != nil {
-		return local, res.err
-	}
-	if res.bytes != st.Size() {
-		return local, fmt.Errorf("TFTP bytes %d != %d", res.bytes, st.Size())
-	}
-	low := strings.ToLower(string(out))
-	if !strings.Contains(low, "bytes transferred") && !strings.Contains(low, "done") {
-		return local, errors.New(L("U-Boot не подтвердил TFTP", "U-Boot did not confirm TFTP"))
-	}
-	if e = a.verifyRAM(s, path, addr); e != nil {
-		return local, e
-	}
-	return local, nil
+	// Actual transfer + RAM hash/CRC is the network preflight. Do not fail the
+	// operation merely because an ICMP ping was lost during link/ARP convergence.
+	e = a.tftpLoadKnownLocal(s, path, remote, addr, local, true)
+	return local, e
 }
+
+func (a *App) loadChunkWithKnownLocal(s Serial, path, remote, local string) error {
+	return a.tftpLoadKnownLocal(s, path, remote, loadAddr, local, true)
+}
+
 func (a *App) verifyRAM(s Serial, path string, addr uint64) error {
 	st, _ := os.Stat(path)
 	sha, _ := shaFile(path)
@@ -1552,41 +1894,6 @@ func crcRange(path string, off, size int64) (uint32, error) {
 	_, e = io.CopyN(h, f, size)
 	return h.Sum32(), e
 }
-func (a *App) loadChunkWithKnownLocal(s Serial, path, remote, local string) error {
-	ready := make(chan struct{})
-	done := make(chan tftpResult, 1)
-	go runTFTPServer(local, defaultTFTPPort, path, remote, defaultRouterIP, ready, done)
-	<-ready
-	out, e := a.ubootCommand(s, fmt.Sprintf("tftpboot 0x%x %s", loadAddr, remote), 5*time.Minute)
-	if e != nil {
-		return e
-	}
-	res := <-done
-	if res.err != nil {
-		return res.err
-	}
-	st, _ := os.Stat(path)
-	if res.bytes != st.Size() {
-		return fmt.Errorf("TFTP bytes %d != %d", res.bytes, st.Size())
-	}
-	low := strings.ToLower(string(out))
-	if !strings.Contains(low, "bytes transferred") && !strings.Contains(low, "done") {
-		return errors.New(L("TFTP не подтверждён", "TFTP not confirmed"))
-	}
-	crc, e := crcFile(path)
-	if e != nil {
-		return e
-	}
-	cout, e := a.ubootCommand(s, fmt.Sprintf("crc32 0x%x 0x%x", loadAddr, st.Size()), 60*time.Second)
-	if e != nil {
-		return e
-	}
-	if !regexp.MustCompile(fmt.Sprintf(`(?i)(?:0x)?%08x`, crc)).Match(cout) {
-		return errors.New(L("CRC части в RAM не совпал", "RAM chunk CRC mismatch"))
-	}
-	return nil
-}
-
 func findMTD16InDirectory(dir string) (string, error) {
 	patterns := []string{"mtd16.bin.gz", "mtd16_*.bin.gz", "mtd16.gz", "mtd16.bin", "mtd16_*.bin"}
 	var hits []string
@@ -1855,7 +2162,7 @@ func (a *App) physicalRestoreWizard() error {
 		return e
 	}
 	if len(blbad) > 0 || len(bad) > 0 {
-		return fmt.Errorf(L("восстановление physical image в 0.2.0-test10 требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test10 requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
+		return fmt.Errorf(L("восстановление physical image в 0.2.0-test13 требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test13 requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
 	}
 	local, e := a.networkIP()
 	if e != nil {
@@ -2124,7 +2431,7 @@ func (a *App) expertUBIVolume() error {
 	}
 	st, _ := os.Stat(path)
 	if st.Size() > maxGenericRAMFile {
-		return errors.New(L("файл volume >64 MiB за один раз не поддерживается в 0.2.0-test10", "expert one-shot volume file >64 MiB is not supported in 0.2.0-test10"))
+		return errors.New(L("файл volume >64 MiB за один раз не поддерживается в 0.2.0-test13", "expert one-shot volume file >64 MiB is not supported in 0.2.0-test13"))
 	}
 	sha, _ := shaFile(path)
 	fmt.Printf("WRITE EXISTING UBI VOLUME %s size=%d SHA256=%s\n", name, st.Size(), sha)
@@ -2276,7 +2583,7 @@ func (a *App) makeSupportBundle() (string, error) {
 }
 
 func (a *App) selftest() error {
-	if appVersion != "0.2.0-test10" {
+	if appVersion != "0.2.0-test13" {
 		return errors.New("version")
 	}
 	if _, e := probe.CheckUBoot("saveenv"); e == nil {
