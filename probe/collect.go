@@ -625,7 +625,6 @@ func (c *collector) automaticStockLogin() bool {
 }
 
 func (c *collector) login() {
-	s := c.s
 	if c.o.LinuxUser == "" && c.automaticStockLogin() {
 		return
 	}
