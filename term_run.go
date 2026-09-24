@@ -23,10 +23,10 @@ type uartTerm struct {
 	shownW    int  // rune width of the input line currently on screen (line mode)
 	lineShown bool // an input line is drawn and needs erasing before device output
 
-	pagerEnabled   bool
-	pagerWaiting   bool
-	pagerLines     int
-	pagerPending   []byte
+	pagerEnabled    bool
+	pagerWaiting    bool
+	pagerLines      int
+	pagerPending    []byte
 	lastASCIINotice time.Time
 }
 
@@ -259,7 +259,6 @@ func (t *uartTerm) readLoop(done chan<- error) {
 		t.deviceOutput(d)
 	}
 }
-
 
 func (t *uartTerm) warnNonASCII() {
 	t.mu.Lock()

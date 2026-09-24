@@ -135,7 +135,6 @@ func TestRenderPortableAndCursor(t *testing.T) {
 	}
 }
 
-
 func TestFilterASCIICommandInput(t *testing.T) {
 	in := append([]byte("ip addr "), []byte{0xd0, 0xb9, '\r'}...)
 	got, blocked := filterASCIICommandInput(in)
