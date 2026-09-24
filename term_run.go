@@ -50,6 +50,8 @@ func (a *App) runTerminalOn(s Serial) error {
 		"\nUART terminal 115200 8N1 — raw passthrough (verbatim output, copyable)."))
 	fmt.Println(L("Ctrl+] — меню: l — построчный ввод с историей ↑/↓, s/r — XMODEM отправка/приём, g — лог, q — выход.",
 		"Ctrl+] — menu: l line-input with ↑/↓ history, s/r XMODEM send/receive, g log, q quit."))
+	fmt.Println(L("Ctrl+Q — быстрый выход. В Windows QuickEdit/clipboard остаётся включён.",
+		"Ctrl+Q — quick exit. On Windows QuickEdit/clipboard stays enabled."))
 	fmt.Println(L("Всё пишется в лог.", "Everything is logged."))
 	state, e := consoleRaw()
 	if e != nil {
@@ -72,19 +74,22 @@ func (a *App) runTerminalOn(s Serial) error {
 		if err != nil {
 			return err
 		}
+		if t.raw {
+			// Forward whole console chunks, not one UART write per byte. This keeps
+			// ANSI arrow/history sequences together and makes pasted text fast.
+			if err := t.writeRawInput(ib[:n]); err != nil {
+				return err
+			}
+			if t.quit {
+				return nil
+			}
+			continue
+		}
 		for _, b := range ib[:n] {
-			if t.raw {
-				// Raw passthrough: forward every byte verbatim (clean paste),
-				// except Ctrl+] which opens the menu.
-				if b == 0x1d {
-					t.menu()
-				} else {
-					_ = t.s.Write([]byte{b})
-				}
-				if t.quit {
-					return nil
-				}
-				continue
+			if b == 0x11 { // Ctrl+Q is always local; never send it to the router.
+				t.quit = true
+				fmt.Print(L("\r\n[выход из UART-терминала: Ctrl+Q]\r\n", "\r\n[UART terminal exit: Ctrl+Q]\r\n"))
+				return nil
 			}
 			for _, ev := range t.dec.push(b) {
 				t.onKey(ev)
@@ -92,6 +97,46 @@ func (a *App) runTerminalOn(s Serial) error {
 					return nil
 				}
 			}
+		}
+	}
+	return nil
+}
+
+// writeRawInput forwards normal console input in the same chunks in which it
+// arrived. Ctrl+] opens the local menu and Ctrl+Q leaves the terminal; neither
+// control byte is sent to the router.
+func (t *uartTerm) writeRawInput(p []byte) error {
+	for len(p) > 0 {
+		i := -1
+		for n, b := range p {
+			if b == 0x1d || b == 0x11 {
+				i = n
+				break
+			}
+		}
+		if i < 0 {
+			return t.s.Write(p)
+		}
+		if i > 0 {
+			if err := t.s.Write(p[:i]); err != nil {
+				return err
+			}
+		}
+		ctrl := p[i]
+		p = p[i+1:]
+		if ctrl == 0x11 {
+			t.quit = true
+			fmt.Print(L("\r\n[выход из UART-терминала: Ctrl+Q]\r\n", "\r\n[UART terminal exit: Ctrl+Q]\r\n"))
+			return nil
+		}
+		var choice byte
+		if len(p) > 0 {
+			choice = p[0]
+			p = p[1:]
+		}
+		t.menuChoice(choice)
+		if t.quit {
+			return nil
 		}
 	}
 	return nil
@@ -193,7 +238,9 @@ func (t *uartTerm) logSent(line string) {
 }
 
 // menu leaves raw single-key handling for a short prompt.
-func (t *uartTerm) menu() {
+func (t *uartTerm) menu() { t.menuChoice(0) }
+
+func (t *uartTerm) menuChoice(prefetched byte) {
 	t.mu.Lock()
 	if !t.raw && t.lineShown {
 		t.eraseLineLocked()
@@ -205,7 +252,10 @@ func (t *uartTerm) menu() {
 	}
 	fmt.Print(L("\r\n[меню ("+mode+"): l=прозрачный/построчный, s=XMODEM отпр, r=XMODEM приём, g=лог, q=выход, Enter=назад] ",
 		"\r\n[menu ("+mode+"): l=raw/line, s=XMODEM send, r=XMODEM recv, g=log, q=quit, Enter=back] "))
-	c := t.readByte()
+	c := prefetched
+	if c == 0 {
+		c = t.readByte()
+	}
 	fmt.Print("\r\n")
 	switch c {
 	case 's', 'S':

@@ -20,9 +20,19 @@ func consoleRaw() (*consoleState, error) {
 	if r == 0 {
 		return nil, syscall.GetLastError()
 	}
-	// Clear ECHO_INPUT|LINE_INPUT|PROCESSED_INPUT|QUICK_EDIT_MODE and set
-	// VIRTUAL_TERMINAL_INPUT so arrow/Home/End keys arrive as ANSI sequences.
-	mode := (old &^ (0x0002 | 0x0004 | 0x0001 | 0x0040)) | 0x0200
+	// Keep raw keyboard delivery for UART, but leave QuickEdit enabled so the
+	// Windows console still supports native selection/copy/paste. EXTENDED_FLAGS
+	// is required when changing QUICK_EDIT_MODE.
+	const (
+		enableProcessedInput = 0x0001
+		enableLineInput      = 0x0002
+		enableEchoInput      = 0x0004
+		enableQuickEditMode  = 0x0040
+		enableExtendedFlags  = 0x0080
+		enableVTInput        = 0x0200
+	)
+	mode := old &^ (enableProcessedInput | enableLineInput | enableEchoInput)
+	mode |= enableVTInput | enableExtendedFlags | enableQuickEditMode
 	r, _, _ = pSetConsoleMode.Call(uintptr(h), uintptr(mode))
 	if r == 0 {
 		return nil, syscall.GetLastError()

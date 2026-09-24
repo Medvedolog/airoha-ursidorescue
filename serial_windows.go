@@ -51,7 +51,7 @@ var (
 	pPurgeComm        = k32.NewProc("PurgeComm")
 	pReadFile         = k32.NewProc("ReadFile")
 	pWriteFile        = k32.NewProc("WriteFile")
-	pFlushFileBuffers = k32.NewProc("FlushFileBuffers")
+	pQueryDosDeviceW = k32.NewProc("QueryDosDeviceW")
 	pCloseHandle      = k32.NewProc("CloseHandle")
 )
 
@@ -143,14 +143,28 @@ func (s *windowsSerial) Write(p []byte) error {
 		}
 		p = p[int(got):]
 	}
-	pFlushFileBuffers.Call(uintptr(s.h))
 	return nil
 }
 func listSerialPorts() []string {
-	// No registry dependency: probe conventional COM1..COM64 names at selection time.
-	out := make([]string, 0, 64)
-	for i := 1; i <= 64; i++ {
-		out = append(out, fmt.Sprintf("COM%d", i))
+	// Query the DOS device namespace so the menu shows only COM ports that
+	// actually exist. This detects USB-UART and virtual COM drivers without
+	// opening the port or disturbing another application that owns it.
+	out := make([]string, 0, 16)
+	target := make([]uint16, 4096)
+	for i := 1; i <= 256; i++ {
+		name := fmt.Sprintf("COM%d", i)
+		p, err := syscall.UTF16PtrFromString(name)
+		if err != nil {
+			continue
+		}
+		r, _, _ := pQueryDosDeviceW.Call(
+			uintptr(unsafe.Pointer(p)),
+			uintptr(unsafe.Pointer(&target[0])),
+			uintptr(len(target)),
+		)
+		if r != 0 {
+			out = append(out, name)
+		}
 	}
 	return out
 }

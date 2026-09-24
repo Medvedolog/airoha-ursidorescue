@@ -398,31 +398,34 @@ func (a *App) choosePort() (string, error) {
 		return a.portOverride, nil
 	}
 	ports := listSerialPorts()
-	if runtime.GOOS == "linux" {
-		fmt.Println(L("Найденные UART:", "UART ports found:"))
-		for i, p := range ports {
-			fmt.Printf("  %d. %s\n", i+1, p)
-		}
-		if len(ports) == 0 {
-			fmt.Println(L("  (автообнаружение пусто; можно ввести путь вручную)", "  (none detected; you can type a path)"))
-		}
-	} else {
-		fmt.Println(L("Windows: введите COM-порт (например COM10). Число 1..64 также принимается как COM<n>.", "Windows: enter the COM port (e.g. COM10). A number 1..64 is taken as COM<n>."))
+	fmt.Println(L("Найденные UART:", "UART ports found:"))
+	for i, p := range ports {
+		fmt.Printf("  %d. %s\n", i+1, p)
 	}
-	v := a.ask(L("UART порт: ", "UART port: "))
-	if runtime.GOOS == "linux" {
-		if n, e := strconv.Atoi(v); e == nil && n >= 1 && n <= len(ports) {
+	if len(ports) == 0 {
+		fmt.Println(L("  (автообнаружение пусто; можно ввести порт вручную)", "  (none detected; you can type a port manually)"))
+	}
+	prompt := L("UART порт (номер пункта или имя): ", "UART port (list number or name): ")
+	if len(ports) == 1 {
+		prompt = L("UART порт [1]: ", "UART port [1]: ")
+	}
+	v := a.ask(prompt)
+	if v == "" && len(ports) == 1 {
+		return ports[0], nil
+	}
+	if n, e := strconv.Atoi(v); e == nil {
+		if n >= 1 && n <= len(ports) {
 			return ports[n-1], nil
 		}
-		if strings.HasPrefix(v, "/dev/") {
-			return v, nil
+		if runtime.GOOS == "windows" && n >= 1 && n <= 256 {
+			return fmt.Sprintf("COM%d", n), nil
 		}
+	}
+	if runtime.GOOS == "linux" && strings.HasPrefix(v, "/dev/") {
+		return v, nil
 	}
 	if runtime.GOOS == "windows" {
 		u := strings.ToUpper(v)
-		if n, e := strconv.Atoi(v); e == nil && n >= 1 && n <= 64 {
-			return fmt.Sprintf("COM%d", n), nil
-		}
 		if matched, _ := regexp.MatchString(`^COM[0-9]+$`, u); matched {
 			return u, nil
 		}

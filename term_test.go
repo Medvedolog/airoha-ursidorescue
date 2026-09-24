@@ -135,6 +135,44 @@ func TestRenderPortableAndCursor(t *testing.T) {
 	}
 }
 
+type captureSerial struct {
+	writes [][]byte
+}
+
+func (s *captureSerial) Name() string      { return "capture" }
+func (s *captureSerial) Close() error      { return nil }
+func (s *captureSerial) ResetInput() error { return nil }
+func (s *captureSerial) Read([]byte, time.Duration) (int, error) { return 0, nil }
+func (s *captureSerial) Write(p []byte) error {
+	s.writes = append(s.writes, append([]byte(nil), p...))
+	return nil
+}
+
+func TestRawInputBatchesEscapeSequence(t *testing.T) {
+	s := &captureSerial{}
+	tr := &uartTerm{s: s, raw: true}
+	if err := tr.writeRawInput([]byte("\x1b[B")); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.writes) != 1 || !bytes.Equal(s.writes[0], []byte("\x1b[B")) {
+		t.Fatalf("writes = %q; want one atomic down-arrow sequence", s.writes)
+	}
+}
+
+func TestRawInputCtrlQStopsLocally(t *testing.T) {
+	s := &captureSerial{}
+	tr := &uartTerm{s: s, raw: true}
+	if err := tr.writeRawInput([]byte("abc\x11ignored")); err != nil {
+		t.Fatal(err)
+	}
+	if !tr.quit {
+		t.Fatal("Ctrl+Q did not stop the terminal")
+	}
+	if len(s.writes) != 1 || string(s.writes[0]) != "abc" {
+		t.Fatalf("writes = %q; Ctrl+Q or trailing bytes reached UART", s.writes)
+	}
+}
+
 // xSender is a fake XMODEM sender driving xmodemReceive over an in-memory link.
 type xSender struct {
 	toRx   chan byte // bytes the receiver reads
