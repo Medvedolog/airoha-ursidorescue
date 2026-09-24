@@ -157,6 +157,9 @@ type UBIInfo struct {
 	DataOffset   *Fact          `json:"data_offset,omitempty"`
 	VolumeCount  *Fact          `json:"volume_count,omitempty"`
 	Volumes      []UBIVolumeOut `json:"volumes,omitempty"`
+	// OfflineHeaders are the EC/VID headers parsed from a raw sample.
+	OfflineHeaders *UBIHeaders `json:"offline_headers,omitempty"`
+	Note           string      `json:"note,omitempty"`
 }
 
 // UBIVolumeOut is a merged volume.

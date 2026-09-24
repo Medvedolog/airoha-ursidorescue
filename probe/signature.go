@@ -18,7 +18,7 @@ type Signature struct {
 
 // FIPHeader is a parsed TF-A FIP table of contents.
 type FIPHeader struct {
-	Serial  uint32     `json:"serial"`
+	Serial  uint32     `json:"toc_serial"`
 	Flags   uint64     `json:"flags"`
 	Entries []FIPEntry `json:"entries"`
 }
@@ -193,4 +193,51 @@ func printable(b []byte) bool {
 		}
 	}
 	return true
+}
+
+// UBIHeaders is what the first page(s) of a UBI PEB say, parsed offline from
+// a raw sample. Nothing is attached, so nothing can be written.
+type UBIHeaders struct {
+	Version      uint8  `json:"version"`
+	EraseCounter uint64 `json:"erase_counter"`
+	VIDHdrOffset uint32 `json:"vid_header_offset"`
+	DataOffset   uint32 `json:"data_offset"`
+	ImageSeq     uint32 `json:"image_seq"`
+	ECCRCOK      bool   `json:"ec_crc_ok"`
+	VIDPresent   bool   `json:"vid_present"`
+	VolID        uint32 `json:"vol_id,omitempty"`
+	LNum         uint32 `json:"lnum,omitempty"`
+	VolType      string `json:"vol_type,omitempty"`
+}
+
+// ubiCRC is UBI's crc32 (initial 0xFFFFFFFF, no final inversion).
+func ubiCRC(b []byte) uint32 { return ^crc32.ChecksumIEEE(b) }
+
+// ParseUBIHeaders decodes the EC header at 0 and, if it is in the sample,
+// the VID header at vid_hdr_offset.
+func ParseUBIHeaders(b []byte) (UBIHeaders, bool) {
+	var h UBIHeaders
+	if len(b) < 64 || !bytes.HasPrefix(b, []byte("UBI#")) {
+		return h, false
+	}
+	be := binary.BigEndian
+	h.Version = b[4]
+	h.EraseCounter = be.Uint64(b[8:])
+	h.VIDHdrOffset = be.Uint32(b[16:])
+	h.DataOffset = be.Uint32(b[20:])
+	h.ImageSeq = be.Uint32(b[24:])
+	h.ECCRCOK = ubiCRC(b[:60]) == be.Uint32(b[60:])
+	v := int(h.VIDHdrOffset)
+	if v > 0 && v+64 <= len(b) && bytes.HasPrefix(b[v:], []byte("UBI!")) {
+		h.VIDPresent = true
+		switch b[v+5] {
+		case 1:
+			h.VolType = "dynamic"
+		case 2:
+			h.VolType = "static"
+		}
+		h.VolID = be.Uint32(b[v+8:])
+		h.LNum = be.Uint32(b[v+12:])
+	}
+	return h, true
 }

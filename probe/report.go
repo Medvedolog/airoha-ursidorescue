@@ -43,10 +43,11 @@ func hx(p *uint64) string {
 
 // WriteReports writes ursusboot-porting-report.md and ursusflasher-device-draft.json.
 func WriteReports(dir string, p *Profile) error {
-	if err := os.WriteFile(filepath.Join(dir, "ursusboot-porting-report.md"), []byte(ursusBootReport(p)), 0o644); err != nil {
+	md := macRE.ReplaceAllString(ursusBootReport(p), "xx:xx:xx:xx:xx:xx")
+	if err := os.WriteFile(filepath.Join(dir, "ursusboot-porting-report.md"), []byte(md), 0o644); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(ursusFlasherDraft(p), "", "  ")
+	b, _, err := sanitizedJSON(ursusFlasherDraft(p))
 	if err != nil {
 		return err
 	}

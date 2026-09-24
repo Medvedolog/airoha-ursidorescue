@@ -1,4 +1,4 @@
-# Porting Collector (probe mode) — UrsidoRescue 0.2.0 (test2)
+# Porting Collector (probe mode) — UrsidoRescue 0.2.0
 
 Read-only discovery of an Airoha device over UART. The result is a porting bundle:
 `ursus-probe-<vendor>-<model>-<soc>-<timestamp>.zip` with `profile.json` (ursus-profile-v1),
@@ -6,23 +6,43 @@ Read-only discovery of an Airoha device over UART. The result is a porting bundl
 
 ## Safety
 
-- Every command goes through a whitelist (`probe/guard.go`). Commands are matched by their full
-  name, case-sensitively; U-Boot abbreviations (`sa`, `mtd wr`), `;`, `&&`, `|`, `$`, quotes and
-  newlines are refused. erase / write / saveenv / env save / ubi create|remove|write / sf write|update
-  are never sent. `--unsafe` does not change this.
-- Keys the probe may send without a command: Ctrl-C/Esc to stop U-Boot autoboot (only during
-  the countdown), Enter to activate a Linux console, `x` to BootROM only with `--bootrom`.
-- Reads into RAM (`ubi read`, `mtd read`, `hash`) only when `loadaddr` lies inside a DRAM bank
-  and at least 32 MiB below U-Boot's relocation address (from `bdinfo`); otherwise they are skipped.
-- `ubi part` is issued only for partitions whose first page carries a UBI header. UBI attach can
-  still scrub blocks internally; the profile records this as a warning.
-- Unknown bootloaders (e.g. vendor `bldr>`) get no commands at all.
+Default probe mode is strict: no command that can write flash is sent.
+
+- **What reaches the device.** A line is written in exactly two ways: a command that passed the
+  allowlist (`probe/guard.go`), re-checked right before it is written; or one of three fixed
+  internal templates (`probe/internal.go`): the hush test `echo URSIDO_HUSH_$?`, the return-code
+  marker `echo URSIDO_<n>_RC_$?`, and the Linux wrapper
+  `echo URSIDO_B_<n>; <allowlisted command> 2>&1; echo URSIDO_E_<n>_$?`. A test fails the build
+  if anything else writes a line.
+- **Allowlist.** Full command names, case-sensitive; U-Boot abbreviations (`sa`, `mtd wr`),
+  `;`, `&&`, `|`, `$`, quotes and newlines are refused. erase / write / saveenv / env save /
+  ubi create|remove|write / sf write|update are never sent. `--unsafe` changes nothing.
+- **No UBI attach.** `ubi part` is refused in strict mode: attaching UBI can write (volume
+  auto-resize, fastmap auto-conversion, scrubbing). UBI geometry comes offline from the raw EC/VID
+  headers of the `mtd dump` sample, volumes from `ubinfo -a` when Linux boots.
+  `--ubi-attach` / menu item A is a separate ADVANCED mode that is **not** read-only; the profile
+  then says `strict_read_only: false` and warns.
+- **Unknown devices are passive.** Keys are sent to a bootloader only after its U-Boot banner was
+  seen (or for UrsidoRescue's own RAM U-Boot). Commands go to a Linux shell only after a kernel
+  boot / OpenWrt console was seen. Otherwise a prompt is recorded as unconfirmed and gets nothing.
+  `--wake` allows one Ctrl-C for a device that is already running; even then only `=>`,
+  `U-Boot>` and `AN75xx>`/`EN75xx>` prompts get U-Boot commands.
+- **Keys** (never lines): Ctrl-C/Esc to stop U-Boot autoboot during its countdown, Enter to
+  activate an OpenWrt console, `x` to BootROM only with `--bootrom`, `--stop-key`, login answers.
+- **Reads into RAM** (`mtd read`, `hash`; `ubi read` only in the attach mode) only when
+  `loadaddr` lies inside a DRAM bank and 32 MiB below U-Boot's relocation address (from `bdinfo`).
+- **Identity.** A recursive sanitizer removes MAC, serial, GPON/PLOAM, credential values from
+  `profile.json`, the report and the UrsusFlasher draft (keys stay with `<redacted>`), including
+  `board.json` `macaddr` fields. Raw logs in the bundle are unredacted unless `--redact`.
+- **`--redact`** masks text files (MACs, `key=value` and JSON `"key": "value"` identity fields)
+  and leaves binary files out (DTB, raw flash samples, listed in `REDACTED.txt`), because they can
+  hold MAC/serial/calibration data. Review a bundle before publishing it.
 
 ## Menu
 
 Main menu → 8. PORTING / HARDWARE DISCOVERY:
 1 full probe · 2 BootROM (observe / x-handshake / RAM U-Boot for MD/MF) · 3 U-Boot · 4 Linux ·
-5 flash/MTD/UBI · 6 DTB · 7 network · 8 export · 9 view · N new session.
+5 flash/MTD/UBI · 6 DTB · 7 network · 8 export · 9 view · A advanced UBI attach · N new session.
 
 ## Command line
 
@@ -33,6 +53,8 @@ Main menu → 8. PORTING / HARDWARE DISCOVERY:
     ... probe --ram-uboot md|mf                    # bricked Nokia: load our RAM U-Boot, then probe
     ... probe --linux-user root --linux-password X # when Linux asks for a login
     ... probe --sample 64k --stop-key tpl --redact --timeout 10m
+    ... probe --wake                               # device already running at a prompt
+    ... probe --ubi-attach                         # ADVANCED, not read-only
     ... export [--input DIR] [--redact]
 
 Flow of a full probe: power the device on after start. The probe interrupts U-Boot autoboot,
@@ -47,8 +69,8 @@ Exit codes: 0 ok · 1 failure · 2 UART unavailable · 3 BootROM not detected ·
 UART markers with timestamps (Press x, CCC, BL2/BL31/BL33, U-Boot, AN7581/AN7583, kernel);
 U-Boot: version, help (capabilities), bdinfo, printenv, mtd list, mtd bad, nand/mmc info, dm tree,
 mii/mdio, gpio status, control DTB (md.b); raw samples of the first 4 KiB (or 64 KiB) of each
-partition and the last 4 KiB of partitions up to 8 MiB via `mtd dump`; UBI geometry and volumes;
-FIP ToC parsing and SHA256 of boot volumes. Linux: uname, cpuinfo, cmdline, meminfo, /proc/mtd,
+partition and the last 4 KiB of partitions up to 8 MiB via `mtd dump`; UBI geometry from those
+samples; FIP ToC parsing and SHA256 of boot partitions (UBI volumes only in the attach mode). Linux: uname, cpuinfo, cmdline, meminfo, /proc/mtd,
 /sys/class/mtd, ubinfo, dmesg, fw_printenv, board.json, /sys/firmware/fdt, ip link/addr, ethtool,
 debug gpio.
 

@@ -155,9 +155,17 @@ func Analyze(dir string, ao AnalyzeOptions) (*Profile, error) {
 		return p, err
 	}
 	a.artifacts()
-	b, err := json.MarshalIndent(p, "", "  ")
+	// Last line of defence: no identity value leaves through profile.json,
+	// whatever source a future field copies from.
+	b, removed, err := sanitizedJSON(p)
 	if err != nil {
 		return p, err
+	}
+	if removed > 0 {
+		p.warn("%d identity value(s) were removed from profile.json by the sanitizer", removed)
+		if b, _, err = sanitizedJSON(p); err != nil {
+			return p, err
+		}
 	}
 	if err := os.WriteFile(filepath.Join(dir, "profile.json"), b, 0o644); err != nil {
 		return p, err
@@ -172,26 +180,27 @@ type analysis struct {
 	s src
 	p *Profile
 
-	log       string
-	boot      BootLog
-	ubSource  string
-	ubPrefix  string
-	ubConf    string
-	env       map[string]string
-	fwenv     map[string]string
-	bd        BDInfo
-	help      map[string]string
-	ubDevs    []MTDDevice
-	procMTD   []ProcMTD
-	sysMTD    map[int]map[string]string
-	dmesg     string
-	metas     []DTMeta
-	samples   []SampleRecord
-	hashes    []map[string]any
-	ubiU      []UBIDevice
-	ubiL      *UBIDevice
-	ubootSeen bool
-	linuxSeen bool
+	log         string
+	boot        BootLog
+	ubSource    string
+	ubPrefix    string
+	ubConf      string
+	env         map[string]string
+	fwenv       map[string]string
+	bd          BDInfo
+	help        map[string]string
+	ubDevs      []MTDDevice
+	procMTD     []ProcMTD
+	sysMTD      map[int]map[string]string
+	dmesg       string
+	metas       []DTMeta
+	samples     []SampleRecord
+	hashes      []map[string]any
+	ubiU        []UBIDevice
+	ubiL        *UBIDevice
+	ubootSeen   bool
+	linuxSeen   bool
+	ubiAttached bool
 }
 
 func (a *analysis) load() {
@@ -217,6 +226,7 @@ func (a *analysis) load() {
 		a.p.warn("U-Boot data comes from UrsidoRescue's own RAM U-Boot: its environment, device tree and partition table are assumptions, not device facts (flash chip probing is real)")
 	}
 	a.ubootSeen = s.commandOK("uboot/version.txt")
+	a.ubiAttached = len(s.glob("ubi/uboot-*-attach.txt")) > 0
 	a.env = ParsePrintenv(s.text("uboot/env.txt"))
 	a.fwenv = ParsePrintenv(s.text("linux/fw_printenv.txt"))
 	a.bd = ParseBDInfo(s.text("uboot/bdinfo.txt"))
@@ -997,15 +1007,27 @@ func (a *analysis) ubi() {
 	if a.ubiL != nil {
 		devs = append(devs, vsrc{"linux:ubinfo+dmesg", Medium, *a.ubiL})
 	}
-	if len(devs) == 0 {
-		for _, e := range p.MTD {
-			for _, c := range e.Contents {
-				if c.Signature.Format == "ubi" {
-					p.UBI.Detected = true
-					p.UBI.MTD = &Fact{Value: e.Name, Source: []string{c.Source + ":sample"}, Confidence: Medium, Note: "UBI header found in raw sample; not attached"}
-				}
+	// Offline: EC/VID headers from the raw head sample of a UBI partition.
+	for _, e := range p.MTD {
+		for _, c := range e.Contents {
+			if c.Kind != "head" || c.Signature.Format != "ubi" {
+				continue
 			}
+			h, ok := ParseUBIHeaders(a.s.bytes(c.File))
+			if !ok || !h.ECCRCOK {
+				continue
+			}
+			d := UBIDevice{MTD: e.Name, VIDHdrOffset: uint64(h.VIDHdrOffset), DataOffset: uint64(h.DataOffset)}
+			if e.EraseSize != nil && uint64(h.DataOffset) < *e.EraseSize {
+				d.PEBSize = *e.EraseSize
+				d.LEBSize = *e.EraseSize - uint64(h.DataOffset)
+			}
+			devs = append(devs, vsrc{c.Source + ":sample-ubi-headers", Medium, d})
+			p.UBI.OfflineHeaders = &h
+			break
 		}
+	}
+	if len(devs) == 0 {
 		return
 	}
 	p.UBI.Detected = true
@@ -1079,8 +1101,11 @@ func (a *analysis) ubi() {
 		}
 		p.UBI.Volumes = append(p.UBI.Volumes, vo)
 	}
-	if len(a.ubiU) > 0 {
-		p.warn("U-Boot 'ubi part' was used to attach UBI: UBI itself may scrub or move blocks while attaching; the probe attached only partitions whose first PEB carries a UBI header")
+	if len(a.ubiU) > 0 || a.ubiAttached {
+		p.warn("ADVANCED MODE: U-Boot 'ubi part' was run; attaching UBI may write to flash (volume auto-resize, fastmap, scrubbing), so this probe was NOT strictly read-only")
+	}
+	if len(a.ubiU) == 0 && a.ubiL == nil && p.UBI.OfflineHeaders != nil {
+		p.UBI.Note = "geometry from raw EC/VID headers only (UBI was not attached); volumes need Linux ubinfo or the advanced attach mode"
 	}
 }
 
@@ -1337,8 +1362,10 @@ func (a *analysis) network() {
 	}
 	var bj map[string]any
 	if json.Unmarshal(a.s.bytes("linux/board.json"), &bj) == nil {
+		// board.json carries macaddr fields (network, network_device, wlan).
 		if nw, ok := bj["network"]; ok {
-			n["openwrt_board_json_network"] = nw
+			clean, _ := sanitize(nw)
+			n["openwrt_board_json_network"] = clean
 		}
 		if md, ok := bj["model"]; ok {
 			n["openwrt_board_json_model"] = md
@@ -1440,6 +1467,7 @@ func (a *analysis) completeness() {
 	p.Completeness["uboot"] = a.ubootSeen
 	p.Completeness["linux"] = a.linuxSeen
 	p.Completeness["bootrom"] = p.BootROM["detected"]
+	p.Completeness["strict_read_only"] = !a.ubiAttached
 	if len(p.Conflicts) > 0 {
 		p.Completeness["conflicts"] = len(p.Conflicts)
 	}

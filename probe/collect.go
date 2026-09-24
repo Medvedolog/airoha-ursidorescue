@@ -49,19 +49,28 @@ type Options struct {
 	RAMHint          uint64 // a load address known for this board; still checked against bdinfo
 	UBootSource      string // "device" (default) or "ursido-ram-uboot"
 	AtUBootPrompt    string // the session already sits at this U-Boot prompt
+	// UBIAttach is the advanced, NOT read-only mode: U-Boot "ubi part" may
+	// write to flash (volume auto-resize, fastmap, scrubbing). Off by default.
+	UBIAttach bool
+	// Wake lets the probe send one Ctrl-C when the line is silent, to find a
+	// prompt on a device that is already running. Off by default: on an
+	// unknown device the first pass is passive.
+	Wake bool
 }
 
 // Outcome is what a run reached.
 type Outcome struct {
-	UARTData        bool     `json:"uart_data"`
-	BootROM         bool     `json:"bootrom"`
-	BootROMXmodem   bool     `json:"bootrom_xmodem"`
-	UBoot           bool     `json:"uboot"`
-	OtherBootloader string   `json:"other_bootloader,omitempty"`
-	Linux           bool     `json:"linux"`
-	LinuxLoginBlock bool     `json:"linux_login_required,omitempty"`
-	Blocked         int      `json:"blocked"`
-	Notes           []string `json:"notes,omitempty"`
+	UARTData          bool     `json:"uart_data"`
+	BootROM           bool     `json:"bootrom"`
+	BootROMXmodem     bool     `json:"bootrom_xmodem"`
+	UBoot             bool     `json:"uboot"`
+	OtherBootloader   string   `json:"other_bootloader,omitempty"`
+	Linux             bool     `json:"linux"`
+	LinuxLoginBlock   bool     `json:"linux_login_required,omitempty"`
+	UBIAttached       bool     `json:"ubi_attached,omitempty"`
+	UnconfirmedPrompt string   `json:"unconfirmed_prompt,omitempty"`
+	Blocked           int      `json:"blocked"`
+	Notes             []string `json:"notes,omitempty"`
 }
 
 type collector struct {
@@ -79,6 +88,7 @@ type collector struct {
 	kicked                 bool
 	linuxKicked            bool
 	sampled                map[string]bool
+	ubiAttached            bool
 	uartParams             map[string]any
 }
 
@@ -135,7 +145,9 @@ func (c *collector) run() {
 	s := c.s
 	if c.o.AtUBootPrompt != "" {
 		c.res.UBoot = true
-		c.collectUBoot(NewUBoot(s, c.o.AtUBootPrompt, c.o.UBootSource))
+		u := NewUBoot(s, c.o.AtUBootPrompt, c.o.UBootSource)
+		u.AllowUBIAttach = c.o.UBIAttach
+		c.collectUBoot(u)
 		c.ubDone = true
 		c.wantLX = false
 		return
@@ -188,8 +200,9 @@ func (c *collector) step() {
 		c.noInterrupt = true
 		c.note(L("[WARN] загрузчик выполняет erase/write при автозагрузке; probe не вмешивается", "[WARN] the bootloader runs erase/write during autoboot; the probe does not interfere"))
 	}
-	if c.wantUB && !c.ubDone && !c.noInterrupt && s.Seen("linux") == 0 &&
-		(s.Seen("autoboot") > 0 || s.Seen("bootmenu") > 0 || (s.Seen("uboot") > 0 && s.Seen("tcboot") == 0)) {
+	// Keys go to a bootloader only after its U-Boot banner was seen: an
+	// "autoboot"-looking line from an unknown loader is not enough.
+	if c.wantUB && !c.ubDone && !c.noInterrupt && s.Seen("linux") == 0 && c.ubootEvidence() {
 		c.interruptAutoboot()
 		return
 	}
@@ -201,7 +214,7 @@ func (c *collector) step() {
 		c.tryPrompt(false)
 		return
 	}
-	if ClassifyPrompt(lastLine(s.Tail())) == PromptLogin && s.Seen("login") > c.handledLogin && c.wantLX && !c.lxDone {
+	if ClassifyPrompt(lastLine(s.Tail())) == PromptLogin && s.Seen("login") > c.handledLogin && c.wantLX && !c.lxDone && (c.linuxEvidence() || c.o.Wake) {
 		c.handledLogin = s.Seen("login")
 		_, _ = s.Drain(s.T.Quiet, 2*time.Second)
 		c.login()
@@ -220,13 +233,49 @@ func (c *collector) step() {
 	countdown := markerByID("autoboot").re.MatchString(last) || markerByID("bootmenu").re.MatchString(last)
 	if !c.kicked && quiet > s.T.IdleKick && !countdown {
 		c.kicked = true
-		// Ctrl-C is harmless at every prompt: it only discards the current line.
-		_ = s.sendKeys("Ctrl-C (idle: look for a prompt)", []byte{0x03})
+		if !c.o.Wake {
+			// Passive by default: nothing is sent to a device whose firmware
+			// has not identified itself.
+			if s.RxBytes() == 0 {
+				s.Info(L("С UART ничего не приходит. Включите устройство; проверьте GND/TX/RX (TX↔RX) и 115200. Если устройство уже работает и стоит в prompt — запустите с --wake.", "Nothing arrives on the UART. Power the device on; check GND/TX/RX (TX↔RX) and 115200 baud. If it is already running at a prompt, run with --wake."))
+			} else {
+				c.tryPrompt(true)
+			}
+			return
+		}
+		// --wake: one Ctrl-C to redraw a prompt of an already running device.
+		_ = s.sendKeys("Ctrl-C (--wake: look for a prompt)", []byte{0x03})
 		_, _ = s.Drain(s.T.Quiet, 3*time.Second)
 		if !c.tryPrompt(true) && s.RxBytes() == 0 {
 			s.Info(L("С UART ничего не приходит. Проверьте GND/TX/RX (TX↔RX), 115200, и питание устройства.", "Nothing arrives on the UART. Check GND/TX/RX (TX↔RX), 115200 baud and device power."))
 		}
 	}
+}
+
+// knownUBootPromptRE are prompts that identify U-Boot on their own (for --wake
+// on a device whose banner was not captured). Any other "xxx>" stays unconfirmed.
+var knownUBootPromptRE = regexp.MustCompile(`^(?:=>|U-Boot ?>|[AE]N75[0-9]{2} ?>)$`)
+
+// ubootEvidence: the device printed a U-Boot banner (and not vendor tcboot),
+// or the U-Boot is UrsidoRescue's own RAM U-Boot.
+func (c *collector) ubootEvidence() bool {
+	if c.o.UBootSource == "ursido-ram-uboot" {
+		return true
+	}
+	return c.s.Seen("uboot") > 0 && c.s.Seen("tcboot") == 0
+}
+
+// linuxEvidence: a Linux kernel boot or an OpenWrt console was seen.
+func (c *collector) linuxEvidence() bool {
+	return c.s.Seen("linux") > 0 || c.s.Seen("console_activate") > 0
+}
+
+func (c *collector) unconfirmedPrompt(line string) {
+	if c.res.UnconfirmedPrompt == line {
+		return
+	}
+	c.res.UnconfirmedPrompt = line
+	c.note(fmt.Sprintf(L("prompt %q без подтверждения (нет баннера U-Boot/Linux) — команды не отправляются; используйте --wake только если уверены, что это U-Boot или Linux", "prompt %q is unconfirmed (no U-Boot/Linux banner) — no commands sent; use --wake only if you know it is U-Boot or Linux"), line))
 }
 
 // tryPrompt classifies the current last line and collects what it offers.
@@ -238,6 +287,10 @@ func (c *collector) tryPrompt(idle bool) bool {
 		if !c.wantUB || c.ubDone {
 			return true
 		}
+		if !c.ubootEvidence() && !(c.o.Wake && knownUBootPromptRE.MatchString(line)) {
+			c.unconfirmedPrompt(line)
+			return true
+		}
 		c.enterUBoot(line)
 		return true
 	case PromptOtherBootloader:
@@ -246,18 +299,22 @@ func (c *collector) tryPrompt(idle bool) bool {
 			c.note(L("найден не-U-Boot загрузчик (", "non-U-Boot bootloader found (") + line + L("); команды ему не отправляются", "); no commands are sent to it"))
 		}
 		return true
-	case PromptLinuxShell:
-		if c.wantLX && !c.lxDone {
+	case PromptLinuxShell, PromptLogin, PromptPassword:
+		if !c.wantLX || c.lxDone {
+			return true
+		}
+		if !c.linuxEvidence() && !c.o.Wake {
+			c.unconfirmedPrompt(line)
+			return true
+		}
+		switch ClassifyPrompt(line) {
+		case PromptLinuxShell:
 			c.enterLinux()
-		}
-		return true
-	case PromptLogin:
-		if c.wantLX && !c.lxDone {
+		case PromptLogin:
 			c.login()
+		default:
+			_ = s.sendKeys("Ctrl-C (leave password prompt)", []byte{0x03})
 		}
-		return true
-	case PromptPassword:
-		_ = s.sendKeys("Ctrl-C (leave password prompt)", []byte{0x03})
 		return true
 	}
 	_ = idle
@@ -303,6 +360,7 @@ func (c *collector) interruptAutoboot() {
 
 func (c *collector) enterUBoot(prompt string) {
 	u := NewUBoot(c.s, prompt, c.o.UBootSource)
+	u.AllowUBIAttach = c.o.UBIAttach
 	out, _, err := u.Exec("version", 0)
 	if err != nil || !strings.Contains(out, "U-Boot") {
 		c.note(fmt.Sprintf(L("prompt %q не подтверждён как U-Boot; команды не отправляются", "prompt %q not confirmed as U-Boot; no commands are sent"), prompt))
@@ -558,10 +616,11 @@ func (c *collector) collectUBoot(u *UBoot) {
 		} else {
 			c.note(L("в этом U-Boot нет 'mtd dump' — сэмплы разделов через U-Boot не сняты", "this U-Boot has no 'mtd dump' — no partition samples taken through U-Boot"))
 		}
-		if window && has("ubi") {
+		if c.o.UBIAttach && has("ubi") {
+			if !window {
+				addr = 0
+			}
 			c.ubootUBI(u, devs, addr, has)
-		} else if has("ubi") {
-			c.ubootUBI(u, devs, 0, has)
 		}
 		if window {
 			c.hashBootParts(u, devs, addr, has)
@@ -586,7 +645,11 @@ func (c *collector) collectUBoot(u *UBoot) {
 			c.ubRun(u, "pinmux status -a", "gpio/uboot-pinmux-status.txt", 0)
 		}
 	}
-	s.Info(L("U-Boot probe завершён; flash не изменялась.", "U-Boot probe finished; flash was not changed."))
+	if c.ubiAttached {
+		s.Info(L("U-Boot probe завершён. ВНИМАНИЕ: выполнялся ubi part — UBI мог записать во flash (advanced-режим).", "U-Boot probe finished. WARNING: ubi part was run — UBI may have written to flash (advanced mode)."))
+	} else {
+		s.Info(L("U-Boot probe завершён; команд записи не отправлялось.", "U-Boot probe finished; no write commands were sent."))
+	}
 }
 
 func safeName(s string) string {
@@ -771,6 +834,9 @@ func (c *collector) ubootUBI(u *UBoot, devs []MTDDevice, addr uint64, has func(s
 		if !mtdNameArg.MatchString(name) {
 			continue
 		}
+		c.note(L("ADVANCED: ubi part "+name+" — UBI attach может записать во flash", "ADVANCED: ubi part "+name+" — UBI attach may write to flash"))
+		c.ubiAttached = true
+		c.res.UBIAttached = true
 		if _, ok := c.ubRun(u, "ubi part "+name, "ubi/uboot-"+safeName(name)+"-attach.txt", c.s.T.CommandLong); !ok {
 			continue
 		}

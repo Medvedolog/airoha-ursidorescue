@@ -344,9 +344,9 @@ func (s *Session) sendKeys(label string, b []byte) error {
 	return s.Port.Write(b)
 }
 
-// sendLine types a line slowly enough for bootloaders without FIFOs. Callers
-// must already have passed the text through the guard.
-func (s *Session) sendLine(line string) error {
+// writeLine types a line slowly enough for bootloaders without FIFOs. Only
+// sendCommand and sendInternal (internal.go) may call it.
+func (s *Session) writeLine(line string) error {
 	if strings.ContainsAny(line, "\r\n") || line == "" {
 		return errors.New("invalid line")
 	}

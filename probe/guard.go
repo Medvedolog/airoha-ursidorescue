@@ -1,7 +1,8 @@
 // Package probe is the read-only hardware discovery ("Porting Collector") of
-// UrsidoRescue. Nothing in this package may change flash contents: every
-// command it sends to a bootloader or a Linux shell passes through the
-// allowlist in this file, and the package does not import any recovery code.
+// UrsidoRescue. In its default (strict) mode nothing may change flash
+// contents: every command sent to a bootloader or a Linux shell passes the
+// allowlist in this file, the only other lines are the fixed templates in
+// internal.go, and the package does not import any recovery code.
 package probe
 
 import (
@@ -282,9 +283,17 @@ func mdRule(a []string) string {
 	return ""
 }
 
-// CheckUBoot validates one U-Boot command line for probe mode and returns the
-// canonical form (single spaces) that is the only thing ever sent.
-func CheckUBoot(cmd string) (string, error) {
+// CheckUBoot validates one U-Boot command line for the strict (zero-write)
+// probe and returns the canonical form (single spaces) that is the only thing
+// ever sent. "ubi part" is refused here: attaching UBI may write to flash
+// (auto-resize of a volume, fastmap auto-conversion, scrubbing).
+func CheckUBoot(cmd string) (string, error) { return checkUBoot(cmd, false) }
+
+// CheckUBootAttach is CheckUBoot for the explicit, non-read-only advanced
+// mode that may attach UBI in U-Boot.
+func CheckUBootAttach(cmd string) (string, error) { return checkUBoot(cmd, true) }
+
+func checkUBoot(cmd string, allowAttach bool) (string, error) {
 	const target = "U-Boot"
 	if strings.ContainsAny(cmd, "\r\n\t") {
 		return "", blocked(target, cmd, "control characters or newline")
@@ -302,6 +311,9 @@ func CheckUBoot(cmd string) (string, error) {
 	}
 	if r := rule(f[1:]); r != "" {
 		return "", blocked(target, cmd, r)
+	}
+	if f[0] == "ubi" && f[1] == "part" && !allowAttach {
+		return "", blocked(target, cmd, "ubi part may write to flash (auto-resize, fastmap); only allowed with the explicit UBI-attach mode")
 	}
 	return strings.Join(f, " "), nil
 }

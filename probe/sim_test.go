@@ -158,6 +158,21 @@ func simFIP() []byte {
 	return b
 }
 
+// simUBIHeaders is a valid EC header (CRC ok) plus a VID header at 2048.
+func simUBIHeaders() []byte {
+	b := make([]byte, 2112)
+	be := binary.BigEndian
+	copy(b, "UBI#\x01")
+	be.PutUint64(b[8:], 3)
+	be.PutUint32(b[16:], 2048)
+	be.PutUint32(b[20:], 4096)
+	be.PutUint32(b[24:], 0x1234)
+	be.PutUint32(b[60:], ^crc32.ChecksumIEEE(b[:60]))
+	copy(b[2048:], "UBI!\x01\x01")
+	be.PutUint32(b[2056:], 0x7fffefff)
+	return b
+}
+
 // ---------------- simulated device ----------------
 
 type simDev struct {
@@ -343,9 +358,7 @@ func (d *simDev) flash(name string, off, n uint64) []byte {
 		b[i] = byte((off + uint64(i)) * 13)
 	}
 	if name == "ubi" && off == 0 && n >= 64 {
-		copy(b, "UBI#\x01\x00\x00\x00")
-		binary.BigEndian.PutUint32(b[16:], 2048)
-		binary.BigEndian.PutUint32(b[20:], 4096)
+		copy(b, simUBIHeaders())
 	}
 	return b
 }
@@ -549,7 +562,7 @@ func (d *simDev) linuxCmd(cmd string) (string, int) {
 	case "grep -H . /tmp/sysinfo/model /tmp/sysinfo/board_name":
 		return "/tmp/sysinfo/model:Nokia XG-040G-MD\n/tmp/sysinfo/board_name:nokia,xg-040g-md\n", 0
 	case "cat /etc/board.json":
-		return `{"model":{"id":"nokia,xg-040g-md","name":"Nokia XG-040G-MD"},"network":{"lan":{"ports":["lan1"],"protocol":"static"},"wan":{"device":"wan","protocol":"dhcp"}}}` + "\n", 0
+		return `{"model":{"id":"nokia,xg-040g-md","name":"Nokia XG-040G-MD"},"network":{"lan":{"ports":["lan1"],"protocol":"static","macaddr":"00:11:22:33:44:55"},"wan":{"device":"wan","protocol":"dhcp","macaddr":"00:11:22:33:44:56"}},"network_device":{"eth0":{"macaddr":"00:11:22:33:44:57"}},"system":{"serial":"ABC123456"}}` + "\n", 0
 	case "dmesg":
 		return "[    2.000000] spi-nand spi0.0: Fudan SPI NAND was found.\n[    2.000100] spi-nand spi0.0: 256 MiB, block size: 128 KiB, page size: 2048, OOB size: 128\n" +
 			"[    5.000000] ubi0: attaching mtd1\n[    5.100000] ubi0: PEB size: 131072 bytes (128 KiB), LEB size: 126976 bytes\n[    5.100001] ubi0: min./max. I/O unit sizes: 2048/2048, sub-page size 2048\n[    5.100002] ubi0: VID header offset: 2048 (aligned 2048), data offset: 4096\n[    5.100003] ubi0: good PEBs: 2046, bad PEBs: 1, corrupted PEBs: 0\n", 0

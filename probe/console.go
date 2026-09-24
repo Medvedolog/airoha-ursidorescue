@@ -60,7 +60,16 @@ type UBoot struct {
 	Prompt string
 	Hush   bool
 	Source string // "device" or "ursido-ram-uboot"
-	seq    int
+	// AllowUBIAttach permits "ubi part" (advanced, not read-only mode).
+	AllowUBIAttach bool
+	seq            int
+}
+
+func (u *UBoot) check(cmd string) (string, error) {
+	if u.AllowUBIAttach {
+		return CheckUBootAttach(cmd)
+	}
+	return CheckUBoot(cmd)
 }
 
 // NewUBoot wraps a session already sitting at a U-Boot prompt.
@@ -103,18 +112,18 @@ func (u *UBoot) readUntilPrompt(timeout time.Duration) ([]byte, error) {
 func (u *UBoot) DetectHush() {
 	_, _ = u.s.Drain(u.s.T.Quiet/2, u.s.T.Quiet*3)
 	defer u.s.command()()
-	if err := u.s.sendLine("echo URSIDO_HUSH_$?"); err != nil {
+	if err := u.s.sendInternal(internalHush()); err != nil {
 		return
 	}
 	out, _ := u.readUntilPrompt(u.s.T.CommandDef)
 	u.Hush = regexp.MustCompile(`URSIDO_HUSH_[0-9]+`).Match(out)
-	u.s.transcript(TranscriptEntry{Transport: "u-boot", Command: "echo URSIDO_HUSH_$?", Response: string(out), Result: fmt.Sprintf("hush=%v", u.Hush)})
+	u.s.transcript(TranscriptEntry{Transport: "u-boot/internal", Command: internalHush(), Response: string(out), Result: fmt.Sprintf("hush=%v", u.Hush)})
 }
 
 // Exec runs one allowlisted command and returns its output without the
 // echoed command line and the trailing prompt; rc is -1 if unknown.
 func (u *UBoot) Exec(cmd string, timeout time.Duration) (string, int, error) {
-	canon, err := CheckUBoot(cmd)
+	canon, err := u.check(cmd)
 	if err != nil {
 		u.s.block(err)
 		return "", -1, err
@@ -130,7 +139,7 @@ func (u *UBoot) Exec(cmd string, timeout time.Duration) (string, int, error) {
 		u.s.mute = true
 		defer func() { u.s.mute = false }()
 	}
-	if err = u.s.sendLine(canon); err != nil {
+	if err = u.s.sendCommand(canon, u.check); err != nil {
 		return "", -1, err
 	}
 	raw, err := u.readUntilPrompt(timeout)
@@ -139,7 +148,7 @@ func (u *UBoot) Exec(cmd string, timeout time.Duration) (string, int, error) {
 	if err == nil && u.Hush {
 		u.seq++
 		marker := fmt.Sprintf("URSIDO_%d_RC", u.seq)
-		if e := u.s.sendLine("echo " + marker + "_$?"); e == nil {
+		if e := u.s.sendInternal(internalRC(u.seq)); e == nil {
 			st, e2 := u.readUntilPrompt(u.s.T.CommandDef)
 			if m := regexp.MustCompile(marker + `_([0-9]+)`).FindSubmatch(st); e2 == nil && len(m) == 2 {
 				rc, _ = strconv.Atoi(string(m[1]))
@@ -223,6 +232,10 @@ func (l *Linux) Exec(cmd string, timeout time.Duration) (string, int, error) {
 	l.seq++
 	b := fmt.Sprintf("URSIDO_B_%d", l.seq)
 	e := fmt.Sprintf("URSIDO_E_%d", l.seq)
+	if _, err = CheckLinux(canon); err != nil {
+		l.s.block(err)
+		return "", -1, err
+	}
 	started := l.s.now()
 	_, _ = l.s.Drain(l.s.T.Quiet/2, l.s.T.Quiet*3)
 	defer l.s.command()()
@@ -231,8 +244,8 @@ func (l *Linux) Exec(cmd string, timeout time.Duration) (string, int, error) {
 		l.s.mute = true
 		defer func() { l.s.mute = false }()
 	}
-	// The wrapper is fixed text around an already-validated command.
-	if err = l.s.sendLine("echo " + b + "; " + canon + " 2>&1; echo " + e + "_$?"); err != nil {
+	// The wrapper is a fixed template around an already-validated command.
+	if err = l.s.sendInternal(internalLinux(l.seq, canon)); err != nil {
 		return "", -1, err
 	}
 	endRE := regexp.MustCompile(e + `_([0-9]+)`)

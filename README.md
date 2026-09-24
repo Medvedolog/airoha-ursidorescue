@@ -3,7 +3,7 @@
 Native Windows/Linux UART tool for Airoha routers (Nokia XG-040G-MD / AN7581, XG-040G-MF / AN7583):
 BootROM XMODEM recovery with a RAM U-Boot, stock / FIP / physical-NAND restore, recovery ITB boot,
 diagnostics, a transparent UART shell, and a read-only **Porting Collector** that profiles unknown
-Airoha devices (see [PROBE.md](PROBE.md)). Russian / English UI.
+Airoha devices (see [PROBE.md](PROBE.md)). Russian / English UI. Status: simulation PASS / HW HOLD (see STATUS.md).
 
 No Python, pyserial or TFTP utilities are needed; one static binary per platform.
 

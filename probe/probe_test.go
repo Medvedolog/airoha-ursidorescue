@@ -64,7 +64,6 @@ func TestGuardAllowsReadOnlyUBoot(t *testing.T) {
 		"help mtd":                            "help mtd",
 		"printenv":                            "printenv",
 		"bdinfo":                              "bdinfo",
-		"ubi part ubi":                        "ubi part ubi",
 		"ubi info layout":                     "ubi info layout",
 		"mtd dump ubi 0x0 0x1000":             "mtd dump ubi 0x0 0x1000",
 		"md.b 0x9de7aa30 0x40":                "md.b 0x9de7aa30 0x40",
@@ -77,6 +76,64 @@ func TestGuardAllowsReadOnlyUBoot(t *testing.T) {
 		got, err := CheckUBoot(in)
 		if err != nil || got != want {
 			t.Errorf("CheckUBoot(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+}
+
+// Review item 1: attaching UBI may write (auto-resize, fastmap), so the strict
+// guard refuses it and only the explicit attach mode allows it.
+func TestGuardUBIAttachIsNotReadOnly(t *testing.T) {
+	for _, c := range []string{"ubi part ubi", "ubi  part ubi", "ubi part ubi 2048"} {
+		if _, err := CheckUBoot(c); err == nil {
+			t.Errorf("strict guard allowed %q", c)
+		}
+	}
+	if got, err := CheckUBootAttach("ubi  part ubi"); err != nil || got != "ubi part ubi" {
+		t.Errorf("attach mode: %q %v", got, err)
+	}
+	if _, err := CheckUBootAttach("ubi write 0x90000000 fip 0x100"); err == nil {
+		t.Error("attach mode allowed ubi write")
+	}
+}
+
+// Review item 4: every line written to a device is either guard-approved or a
+// fixed internal template; nothing else calls writeLine.
+func TestInternalTemplates(t *testing.T) {
+	good := []string{internalHush(), internalRC(7), internalLinux(3, "cat /proc/mtd"),
+		internalLinux(4, "dd if=/dev/mtd1 bs=4096 count=1 | od -An -v -tx1")}
+	for _, l := range good {
+		if err := checkInternal(l); err != nil {
+			t.Errorf("%q: %v", l, err)
+		}
+	}
+	bad := []string{"echo URSIDO_HUSH_$?; reboot", "echo URSIDO_1_RC_$? && saveenv", "saveenv",
+		"echo URSIDO_B_1; reboot 2>&1; echo URSIDO_E_1_$?", "echo URSIDO_B_1; cat /proc/mtd 2>&1; echo URSIDO_E_2_$?",
+		"echo URSIDO_B_1; cat  /proc/mtd 2>&1; echo URSIDO_E_1_$?", "echo URSIDO_B_1; cat /proc/mtd; reboot 2>&1; echo URSIDO_E_1_$?"}
+	for _, l := range bad {
+		if err := checkInternal(l); err == nil {
+			t.Errorf("internal template accepted %q", l)
+		}
+	}
+}
+
+func TestOnlyInternalWritesLines(t *testing.T) {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pkg := range pkgs {
+		for name, f := range pkg.Files {
+			ast.Inspect(f, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "writeLine" && filepath.Base(name) != "internal.go" {
+					t.Errorf("%s: writeLine called outside internal.go", fset.Position(call.Pos()))
+				}
+				return true
+			})
 		}
 	}
 }
@@ -477,7 +534,12 @@ func TestUnknownDeviceProfile(t *testing.T) {
 
 // ---------------- full simulated run ----------------
 
-func TestFullProbeOnSimulatedBoard(t *testing.T) {
+func TestFullProbeOnSimulatedBoard(t *testing.T) { runFullSim(t, false) }
+
+// The advanced mode may attach UBI; it must say so everywhere.
+func TestFullProbeWithUBIAttach(t *testing.T) { runFullSim(t, true) }
+
+func runFullSim(t *testing.T, attach bool) {
 	dir := filepath.Join(t.TempDir(), "probe")
 	dev := newSim(false)
 	var console bytes.Buffer
@@ -485,16 +547,26 @@ func TestFullProbeOnSimulatedBoard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := Collect(s, Options{Layers: AllLayers(), Timeout: 60 * time.Second})
+	out := Collect(s, Options{Layers: AllLayers(), Timeout: 60 * time.Second, UBIAttach: attach})
 	s.Close()
 	if !out.UBoot || !out.Linux || out.Blocked != 0 {
 		t.Fatalf("outcome %+v\nnotes %v\n--- console tail ---\n%s", out, out.Notes, tailStr(console.String(), 3000))
 	}
 	// Every command the device saw must be one the guard allows.
+	check := CheckUBoot
+	if attach {
+		check = CheckUBootAttach
+	}
 	for _, c := range dev.UCmds {
-		if _, err := CheckUBoot(c); err != nil {
+		if _, err := check(c); err != nil {
 			t.Errorf("device received non-allowlisted U-Boot command %q", c)
 		}
+		if !attach && strings.HasPrefix(c, "ubi ") {
+			t.Errorf("strict probe sent %q", c)
+		}
+	}
+	if out.UBIAttached != attach {
+		t.Errorf("UBIAttached=%v", out.UBIAttached)
 	}
 	for _, c := range dev.LCmds {
 		if _, err := CheckLinux(c); err != nil {
@@ -545,8 +617,20 @@ func TestFullProbeOnSimulatedBoard(t *testing.T) {
 			fipStage = &p.BootChain[i]
 		}
 	}
-	if fipStage == nil || fipStage.Location != "ubi:fip" || fipStage.FIP == nil || len(fipStage.FIP.Entries) != 2 || fipStage.Hash["scope"] != "whole object read into RAM by U-Boot" {
-		t.Errorf("fip stage %+v", fipStage)
+	if attach {
+		if fipStage == nil || fipStage.Location != "ubi:fip" || fipStage.FIP == nil || len(fipStage.FIP.Entries) != 2 || fipStage.Hash["scope"] != "whole object read into RAM by U-Boot" {
+			t.Errorf("fip stage %+v", fipStage)
+		}
+		if p.Completeness["strict_read_only"] != false || !strings.Contains(strings.Join(p.Warnings, "\n"), "NOT strictly read-only") {
+			t.Errorf("attach mode not reported: %v %v", p.Completeness, p.Warnings)
+		}
+	} else {
+		if p.Completeness["strict_read_only"] != true || p.UBI.OfflineHeaders == nil || p.UBI.VIDHdrOffset.Confidence != High {
+			t.Errorf("strict: %v %+v %+v", p.Completeness, p.UBI.OfflineHeaders, p.UBI.VIDHdrOffset)
+		}
+		if strings.Contains(console.String(), "UBI мог записать") || !strings.Contains(console.String(), "команд записи не отправлялось") {
+			t.Error("strict run printed the wrong closing message")
+		}
 	}
 	if p.Capabilities["commands"].(map[string]bool)["mtd"] != true {
 		t.Errorf("caps %+v", p.Capabilities)
@@ -554,10 +638,13 @@ func TestFullProbeOnSimulatedBoard(t *testing.T) {
 	if len(p.Identity) == 0 {
 		t.Error("identity locations missing")
 	}
-	pj, _ := os.ReadFile(filepath.Join(dir, "profile.json"))
-	for _, secret := range []string{"00:11:22:33:44:55", "ABC123456"} {
-		if bytes.Contains(pj, []byte(secret)) {
-			t.Errorf("profile.json contains device identity %q", secret)
+	// board.json in the simulator carries macaddr in network and network_device.
+	for _, f := range []string{"profile.json", "ursusboot-porting-report.md", "ursusflasher-device-draft.json", "network/network.json"} {
+		b, _ := os.ReadFile(filepath.Join(dir, f))
+		for _, secret := range []string{"00:11:22:33:44:5", "ABC123456"} {
+			if bytes.Contains(b, []byte(secret)) {
+				t.Errorf("%s contains device identity %q", f, secret)
+			}
 		}
 	}
 	for _, f := range []string{"uart.log", "transcript.jsonl", "uboot/version.txt", "uboot/help.txt", "uboot/bdinfo.txt", "uboot/env.txt", "uboot/mtd-list.txt",
@@ -581,13 +668,23 @@ func TestFullProbeOnSimulatedBoard(t *testing.T) {
 	}
 	zr, _ := zip.OpenReader(red)
 	defer zr.Close()
+	sawNote := false
 	for _, f := range zr.File {
 		rc, _ := f.Open()
 		b, _ := io.ReadAll(rc)
 		rc.Close()
-		if isText(f.Name) && (bytes.Contains(b, []byte("00:11:22:33:44:55")) || bytes.Contains(b, []byte("ABC123456"))) {
+		if isBinary(f.Name) {
+			t.Errorf("redacted bundle contains binary %s", f.Name)
+		}
+		if strings.HasSuffix(f.Name, "/REDACTED.txt") {
+			sawNote = bytes.Contains(b, []byte("dt/fdt.dtb"))
+		}
+		if bytes.Contains(b, []byte("00:11:22:33:44:5")) || bytes.Contains(b, []byte("ABC123456")) {
 			t.Errorf("redacted bundle leaks identity in %s", f.Name)
 		}
+	}
+	if !sawNote {
+		t.Error("REDACTED.txt missing or incomplete")
 	}
 }
 
@@ -671,4 +768,91 @@ func ExampleCheckUBoot() {
 	// "mtd  list" -> "mtd list" blocked=false
 	// "sa" -> "" blocked=true
 	// "mtd wr bl2" -> "" blocked=true
+}
+
+// Review item 3: an unknown loader gets nothing — not even the idle Ctrl-C —
+// unless --wake is given, and even then an unrecognised "xxx>" gets no command.
+type recPort struct {
+	out  []byte
+	sent []byte
+}
+
+func (p *recPort) Name() string { return "rec" }
+func (p *recPort) Write(b []byte) error {
+	p.sent = append(p.sent, b...)
+	if bytes.Contains(b, []byte{0x03}) {
+		p.out = append(p.out, "\r\nfoo> "...)
+	}
+	return nil
+}
+func (p *recPort) Read(b []byte, timeout time.Duration) (int, error) {
+	if len(p.out) == 0 {
+		time.Sleep(timeout)
+		return 0, nil
+	}
+	n := copy(b, p.out)
+	p.out = p.out[n:]
+	return n, nil
+}
+
+func TestUnknownLoaderIsPassive(t *testing.T) {
+	for _, wake := range []bool{false, true} {
+		port := &recPort{out: []byte("\r\nVendorLoader 1.0\r\nHit any key to stop autoboot: 3\r\nfoo> ")}
+		s, _ := NewSession(t.TempDir(), port, nil, fastTiming)
+		o := Collect(s, Options{Layers: AllLayers(), Timeout: 1500 * time.Millisecond, Wake: wake})
+		s.Close()
+		want := ""
+		if wake {
+			want = "\x03"
+		}
+		if string(port.sent) != want {
+			t.Errorf("wake=%v: sent %q, want %q", wake, port.sent, want)
+		}
+		if o.UBoot || o.UnconfirmedPrompt != "foo>" {
+			t.Errorf("wake=%v: outcome %+v", wake, o)
+		}
+	}
+}
+
+func TestWakeAcceptsOnlyKnownUBootPrompts(t *testing.T) {
+	for p, ok := range map[string]bool{"=>": true, "U-Boot>": true, "AN7581>": true, "EN7523 >": true, "foo>": false, "ONT>": false, "WAP>": false} {
+		if knownUBootPromptRE.MatchString(p) != ok {
+			t.Errorf("%q", p)
+		}
+	}
+}
+
+// Review item 2: board.json macaddr/serial must not reach profile.json,
+// the reports or the draft.
+func TestSanitizerDropsIdentity(t *testing.T) {
+	in := map[string]any{"network": map[string]any{"lan": map[string]any{"macaddr": "00:11:22:33:44:55", "ports": []any{"lan1"}}},
+		"note": "addr 00:11:22:33:44:55 here", "fip": map[string]any{"uuid": "47d4086d-4cfe-9846-9b95-2950cbbd5a00"},
+		"flash": map[string]any{"device_id": "0xa1e1"}, "serial#": "X", "gpon_sn": "Y", "wlan0_mac": "Z", "ethaddr": "W"}
+	out, n := sanitize(in)
+	b, _ := json.Marshal(out)
+	for _, bad := range []string{"00:11:22:33:44:55", `"X"`, `"Y"`, `"Z"`, `"W"`} {
+		if bytes.Contains(b, []byte(bad)) {
+			t.Errorf("leaked %s: %s", bad, b)
+		}
+	}
+	for _, keep := range []string{"47d4086d-4cfe-9846-9b95-2950cbbd5a00", "0xa1e1", "lan1"} {
+		if !bytes.Contains(b, []byte(keep)) {
+			t.Errorf("sanitizer removed non-identity value %s", keep)
+		}
+	}
+	if n != 6 {
+		t.Errorf("changed %d values", n)
+	}
+}
+
+func TestOfflineUBIHeaders(t *testing.T) {
+	h, ok := ParseUBIHeaders(simUBIHeaders())
+	if !ok || !h.ECCRCOK || h.VIDHdrOffset != 2048 || h.DataOffset != 4096 || !h.VIDPresent || h.VolID != 0x7fffefff || h.VolType != "dynamic" {
+		t.Fatalf("%+v", h)
+	}
+	bad := simUBIHeaders()
+	bad[16] ^= 1
+	if h, _ := ParseUBIHeaders(bad); h.ECCRCOK {
+		t.Fatal("corrupted EC header passed CRC")
+	}
 }

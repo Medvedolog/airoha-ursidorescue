@@ -166,21 +166,25 @@ func probeUsage() string {
   ursidorescue probe [--uart ПОРТ] [--output КАТАЛОГ] [--no-linux | --uboot-only | --linux-only]
                      [--bootrom] [--ram-uboot md|mf] [--timeout 5m] [--sample 4k|64k]
                      [--linux-user U] [--linux-password P] [--stop-key S] [--redact] [--no-export] [--unsafe]
+                     [--wake] [--ubi-attach]
   ursidorescue export [--input КАТАЛОГ] [--output КАТАЛОГ] [--redact]
   общий флаг: --lang ru|en (или переменная URSIDO_LANG)
 
-probe строго только читает: erase/write/saveenv/изменения UBI не отправляются никогда.
---unsafe принимается, но это НЕ ослабляет.
+probe строго только читает: erase/write/saveenv/ubi part не отправляются. Неизвестному загрузчику
+не отправляется ничего; --wake разрешает один Ctrl-C для уже работающего устройства.
+--ubi-attach (ADVANCED, НЕ read-only) разрешает U-Boot ubi part. --unsafe ничего не ослабляет.
 коды выхода: 0 ok, 1 ошибка, 2 UART недоступен, 3 BootROM не найден, 4 U-Boot не найден,
              5 Linux недоступен, 6 профиль неполный, 7 заблокировано нарушение безопасности`, `usage:
   ursidorescue probe [--uart PORT] [--output DIR] [--no-linux | --uboot-only | --linux-only]
                      [--bootrom] [--ram-uboot md|mf] [--timeout 5m] [--sample 4k|64k]
                      [--linux-user U] [--linux-password P] [--stop-key S] [--redact] [--no-export] [--unsafe]
+                     [--wake] [--ubi-attach]
   ursidorescue export [--input DIR] [--output DIR] [--redact]
   common flag: --lang ru|en (or the URSIDO_LANG variable)
 
-probe is strictly read-only: no erase/write/saveenv/UBI changes are ever sent.
---unsafe is accepted but does NOT relax that.
+probe is strictly read-only: no erase/write/saveenv/ubi part is sent. An unknown bootloader gets
+nothing; --wake allows one Ctrl-C for a device that is already running.
+--ubi-attach (ADVANCED, NOT read-only) allows U-Boot ubi part. --unsafe relaxes nothing.
 exit codes: 0 ok, 1 failure, 2 UART unavailable, 3 BootROM not detected, 4 U-Boot not detected,
             5 Linux unavailable, 6 profile incomplete, 7 safety violation blocked`)
 }
@@ -203,6 +207,8 @@ func (a *App) cliProbe(args []string) int {
 	redact := fs.Bool("redact", false, "")
 	noExport := fs.Bool("no-export", false, "")
 	unsafe := fs.Bool("unsafe", false, "")
+	wake := fs.Bool("wake", false, "")
+	ubiAttach := fs.Bool("ubi-attach", false, "")
 	if err := fs.Parse(args); err != nil || fs.NArg() > 0 {
 		fmt.Fprintln(os.Stderr, probeUsage())
 		return exitProbeFail
@@ -239,7 +245,11 @@ func (a *App) cliProbe(args []string) int {
 	req := probeRequest{port: p, dir: dir, ramUBoot: strings.ToLower(*ram), export: !*noExport, redact: *redact, opts: probe.Options{
 		Layers: probe.AllLayers(), NoLinux: *noLinux, UBootOnly: *ubootOnly, LinuxOnly: *linuxOnly, BootROMHandshake: *bootrom,
 		Timeout: *timeout, LinuxUser: *user, LinuxPassword: *pass, StopKey: *stop, SampleHead: head, Unsafe: *unsafe, RAMHint: 0,
+		Wake: *wake, UBIAttach: *ubiAttach,
 	}}
+	if *ubiAttach {
+		fmt.Println(L("[ADVANCED] --ubi-attach: U-Boot выполнит ubi part. Это НЕ read-only: UBI может изменить volume table (auto-resize), записать fastmap или перенести блоки.", "[ADVANCED] --ubi-attach: U-Boot will run ubi part. This is NOT read-only: UBI may change the volume table (auto-resize), write a fastmap or move blocks."))
+	}
 	res, err := a.runProbe(req)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[PROBE]", err)
@@ -334,6 +344,7 @@ func (a *App) portingMenu() error {
 		fmt.Println(L("  7. Собрать данные сети / PHY / коммутатора", "  7. Collect network / PHY / switch data"))
 		fmt.Println(L("  8. Экспортировать porting bundle Ursus", "  8. Export Ursus porting bundle"))
 		fmt.Println(L("  9. Показать собранный профиль", "  9. View collected profile"))
+		fmt.Println(L("  A. ADVANCED: U-Boot UBI attach (НЕ read-only)", "  A. ADVANCED: U-Boot UBI attach (NOT read-only)"))
 		fmt.Println(L("  N. Начать новую probe-сессию (текущая: ", "  N. Start a new probe session (current: ") + displayDir(a.probeDir) + ")")
 		fmt.Println(L("  0. Назад", "  0. Back"))
 		v := strings.ToUpper(a.ask(L("Выбор: ", "Choice: ")))
@@ -357,6 +368,8 @@ func (a *App) portingMenu() error {
 			err = a.menuExport()
 		case "9":
 			err = a.menuView()
+		case "A":
+			err = a.menuUBIAttach()
 		case "N":
 			fmt.Println(L("Новая сессия:", "New session:"), a.newProbeDir())
 		case "0":
@@ -379,13 +392,16 @@ func displayDir(d string) string {
 
 func (a *App) showProbeErr(err error) {
 	fmt.Println("\n[PROBE STOP]", err)
-	fmt.Println(L("Probe mode read-only: flash не изменялась.", "Probe mode is read-only: flash was not changed."))
+	fmt.Println(L("Команд записи во flash не отправлялось.", "No flash write commands were sent."))
 }
 
 func (a *App) probeAsk(prompt string) string { return a.ask(prompt) }
 
 func (a *App) menuProbe(o probe.Options, export bool) error {
 	o.Ask = a.probeAsk
+	if strings.ToLower(a.ask(L("Устройство уже включено и стоит в U-Boot/Linux prompt (разрешить один Ctrl-C)? [y/N]: ", "Is the device already on and sitting at a U-Boot/Linux prompt (allow one Ctrl-C)? [y/N]: "))) == "y" {
+		o.Wake = true
+	}
 	o.Timeout = 5 * time.Minute
 	fmt.Println(L("\nProbe только читает. Подключите UART (GND/TX/RX, 3.3V; VCC не подключать).", "\nThe probe only reads. Connect the UART (GND/TX/RX, 3.3V; never connect VCC)."))
 	fmt.Println(L("После запуска включите устройство. Если нужна Linux-часть, probe попросит перезагрузить его после U-Boot.", "After starting, power the device on. For the Linux part the probe will ask you to power-cycle it after U-Boot."))
@@ -430,6 +446,17 @@ func (a *App) menuBootROM() error {
 		return nil
 	}
 	return errors.New(L("неверный выбор", "invalid choice"))
+}
+
+// menuUBIAttach is the only way to let U-Boot attach UBI from the menu.
+func (a *App) menuUBIAttach() error {
+	fmt.Println(L("\\nADVANCED: U-Boot выполнит ubi part для раздела с UBI-заголовком, чтобы прочитать список томов и хеш FIP.", "\\nADVANCED: U-Boot will run ubi part on the partition with a UBI header to read the volume list and the FIP hash."))
+	fmt.Println(L("Это НЕ read-only: при attach UBI может изменить volume table (auto-resize), записать fastmap или перенести блоки.", "This is NOT read-only: attaching UBI may change the volume table (auto-resize), write a fastmap or move blocks."))
+	fmt.Println(L("Для списка томов без записи лучше загрузить Linux и взять ubinfo -a (обычный probe делает это сам).", "For the volume list without writes, boot Linux and use ubinfo -a (the normal probe does that)."))
+	if err := a.confirm("UBI ATTACH"); err != nil {
+		return err
+	}
+	return a.menuProbe(probe.Options{Layers: probe.Layers{UBoot: true, Flash: true}, UBootOnly: true, UBIAttach: true}, false)
 }
 
 func (a *App) menuExport() error {

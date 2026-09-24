@@ -87,9 +87,25 @@ completeness, and at the end of ursusboot-porting-report.md.
 // newline inside transcript.jsonl.
 var sensitiveLineRE = regexp.MustCompile(`(?im)(^|\\n|\\r)((?:eth[0-9]*addr|ethaddr|serial#?|serial_?(?:no|num(?:ber)?)|sn|gpon[a-z_]*|ploam[a-z_]*|[a-z_]*passw(?:or)?d[a-z_]*|loid[a-z_]*)=)([^\\\r\n"]*)`)
 
+// sensitiveJSONRE matches "key": "value" pairs (board.json and the same text
+// escaped inside transcript.jsonl) whose key names device identity.
+var sensitiveJSONRE = regexp.MustCompile(`(?i)(\\?"(?:macaddr|mac|mac_?address|hwaddr|ethaddr|serial[a-z_#]*|sn|gpon[a-z_]*|ploam[a-z_]*|[a-z_]*passw(?:or)?d[a-z_]*|psk|key|wpa_?key|loid[a-z_]*|imei|imsi|iccid)\\?"\s*:\s*\\?")([^"\\]*)`)
+
 func redactText(b []byte) []byte {
 	b = macRE.ReplaceAll(b, []byte("xx:xx:xx:xx:xx:xx"))
+	b = sensitiveJSONRE.ReplaceAll(b, []byte("${1}<redacted>"))
 	return sensitiveLineRE.ReplaceAll(b, []byte("${1}${2}<redacted>"))
+}
+
+// dtsMACRE matches MAC-carrying properties in a decompiled tree.
+var dtsMACRE = regexp.MustCompile(`(?m)^(\s*(?:local-)?mac-address = ).*;$`)
+
+func isBinary(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".bin", ".dtb", ".img", ".fip", ".itb":
+		return true
+	}
+	return false
 }
 
 func isText(name string) bool {
@@ -108,9 +124,9 @@ func Export(dir string, p *Profile, eo ExportOptions) (string, error) {
 	if eo.OutDir == "" {
 		eo.OutDir = filepath.Dir(filepath.Clean(dir))
 	}
-	red := "Raw files are included unredacted."
+	red := "Raw files are included unredacted: this bundle is NOT safe to publish as a whole."
 	if eo.Redact {
-		red = "This bundle was exported with --redact: MAC addresses and sensitive env values in text files are masked."
+		red = "Exported with --redact: MAC addresses and sensitive env values in text files are masked, and\n  binary files (DTB, raw flash samples) are left out (see REDACTED.txt), because they can hold\n  MAC/serial/calibration data that text masking cannot find."
 	}
 	name := BundleName(p, eo.Now())
 	rd := fmt.Sprintf(readme, name, p.Generator["tool"], p.Generator["version"], red, len(p.Conflicts))
@@ -118,6 +134,7 @@ func Export(dir string, p *Profile, eo ExportOptions) (string, error) {
 		return "", err
 	}
 	files := map[string][]byte{}
+	var omitted []string
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -134,14 +151,26 @@ func Export(dir string, p *Profile, eo ExportOptions) (string, error) {
 		if err != nil {
 			return err
 		}
-		if eo.Redact && isText(rel) {
-			b = redactText(b)
+		if eo.Redact {
+			switch {
+			case isBinary(rel):
+				omitted = append(omitted, rel)
+				return nil
+			case strings.HasSuffix(rel, ".dts"):
+				b = dtsMACRE.ReplaceAll(redactText(b), []byte("${1}<redacted>;"))
+			case isText(rel):
+				b = redactText(b)
+			}
 		}
 		files[rel] = b
 		return nil
 	})
 	if err != nil {
 		return "", err
+	}
+	if eo.Redact {
+		sort.Strings(omitted)
+		files["REDACTED.txt"] = []byte("Left out of this --redact bundle (binary; may contain device identity):\n" + strings.Join(omitted, "\n") + "\n")
 	}
 	names := make([]string, 0, len(files))
 	for k := range files {
