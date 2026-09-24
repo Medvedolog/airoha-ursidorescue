@@ -1,3 +1,27 @@
+# UrsidoRescue 0.2.0-test15
+
+Status: **simulation candidate / HW PARTIAL.** Real MF hardware on test14 reached stable RAM U-Boot,
+passed geometry/bad-block checks and transferred/verified multiple 8 MiB stock chunks. The log also
+showed that the network tuple was redundantly replayed before every chunk.
+
+## 0.2.0-test15
+
+- U-Boot network environment is configured once per normal recovery session, matching the proven
+  UrsusFlasher/MedveFlasher pattern. Subsequent stock/physical chunks reuse the same ethaddr/ipaddr/
+  serverip/netmask/TFTP state.
+- The network tuple is re-applied only after an actual TFTP/U-Boot network failure and prompt resync;
+  RAM verification retries do not churn network env.
+- Every LAN/TFTP workflow now prints an operator prerequisite block before starting: direct cable,
+  LAN2/LAN3 recommendation, Nokia/PC IPv4 expectations, UDP/1069, and an explicit request to disable
+  Wi-Fi, VPN, extra Ethernet, virtual adapters and tunnels. Active PC IPv4 interfaces are listed as
+  a non-blocking sanity check.
+- Console operator output now uses the UrsusBoot/UrsusFlasher brown/amber/sand/green/red ANSI palette
+  when attached to a terminal. NO_COLOR and redirected output remain plain text. Raw UART bytes and
+  UART log files are never colour-wrapped.
+- XMODEM EOT no longer retries on silence after a fully ACKed payload. Only an explicit EOT NAK
+  requests another EOT; otherwise control immediately passes to the stronger next-stage proof.
+- Documentation under doc/ is intentionally untouched in this code release.
+
 # UrsidoRescue 0.2.0-test14
 
 Status: **simulation candidate / HW PARTIAL.** This code-only follow-up does not touch the separate
