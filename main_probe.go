@@ -1,0 +1,545 @@
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+	"time"
+
+	"ursidorescue/probe"
+)
+
+// Probe exit codes (spec §32).
+const (
+	exitProbeOK         = 0
+	exitProbeFail       = 1
+	exitUARTUnavailable = 2
+	exitNoBootROM       = 3
+	exitNoUBoot         = 4
+	exitNoLinux         = 5
+	exitIncomplete      = 6
+	exitSafetyBlocked   = 7
+)
+
+func (a *App) newProbeDir() string {
+	d := filepath.Join(a.work, "probe-"+time.Now().Format("20060102-150405"))
+	a.probeDir = d
+	return d
+}
+
+func (a *App) currentProbeDir() string {
+	if a.probeDir == "" {
+		return a.newProbeDir()
+	}
+	return a.probeDir
+}
+
+func (a *App) analyzeProbe(dir string) (*probe.Profile, error) {
+	return probe.Analyze(dir, probe.AnalyzeOptions{Tool: appName, Version: appVersion})
+}
+
+type probeRequest struct {
+	port        string
+	dir         string
+	opts        probe.Options
+	ramUBoot    string // "", "md", "mf"
+	export      bool
+	redact      bool
+	interactive bool
+}
+
+type probeResult struct {
+	outcome probe.Outcome
+	profile *probe.Profile
+	bundle  string
+	code    int
+}
+
+// runProbe opens the UART, collects, analyses and exports. Everything it
+// sends goes through the probe package's allowlist; the optional RAM U-Boot
+// path loads UrsidoRescue's pinned stages into RAM only.
+func (a *App) runProbe(r probeRequest) (probeResult, error) {
+	var res probeResult
+	if err := os.MkdirAll(r.dir, 0o755); err != nil {
+		return res, err
+	}
+	var s Serial
+	if r.ramUBoot != "" {
+		p, ok := profiles[r.ramUBoot]
+		if !ok {
+			return res, fmt.Errorf(L("--ram-uboot: неизвестный профиль %q (md|mf)", "--ram-uboot: unknown profile %q (md|mf)"), r.ramUBoot)
+		}
+		a.portOverride = r.port
+		ser, got, trans, err := a.acquireRAMUBoot(p)
+		a.portOverride = ""
+		a.closeLog()
+		_ = os.MkdirAll(filepath.Join(r.dir, "bootrom"), 0o755)
+		_ = os.WriteFile(filepath.Join(r.dir, "bootrom", "ram-uboot-acquire.log"), trans, 0o644)
+		if err != nil {
+			res.code = exitNoBootROM
+			if ser != nil {
+				ser.Close()
+			}
+			return res, fmt.Errorf("RAM U-Boot: %w", err)
+		}
+		s = ser
+		r.opts.AtUBootPrompt = got.SoC + ">"
+		r.opts.UBootSource = "ursido-ram-uboot"
+		r.opts.RAMHint = loadAddr
+		br := map[string]any{"detected": true, "press_x": true, "xmodem": true, "entry_sequence": "press-x", "receiver_char": "C",
+			"preloader_ok": true, "fip_ok": true, "flash_written": false, "via": "UrsidoRescue RAM U-Boot " + got.RAMFIPRel,
+			"collected_at": time.Now().Format(time.RFC3339)}
+		b, _ := json.MarshalIndent(br, "", "  ")
+		_ = os.WriteFile(filepath.Join(r.dir, "bootrom", "bootrom.json"), b, 0o644)
+	} else {
+		port := r.port
+		if port == "" {
+			var err error
+			if port, err = a.choosePort(); err != nil {
+				res.code = exitUARTUnavailable
+				return res, err
+			}
+		}
+		ser, err := openSerial(port)
+		if err != nil {
+			res.code = exitUARTUnavailable
+			return res, fmt.Errorf(L("не удалось открыть %s: %w", "open %s: %w"), port, err)
+		}
+		s = ser
+	}
+	defer s.Close()
+	sess, err := probe.NewSession(r.dir, s, os.Stdout, probe.DefaultTiming)
+	if err != nil {
+		return res, err
+	}
+	res.outcome = probe.Collect(sess, r.opts)
+	sess.Close()
+	res.profile, err = a.analyzeProbe(r.dir)
+	if err != nil {
+		return res, err
+	}
+	if r.export {
+		res.bundle, err = probe.Export(r.dir, res.profile, probe.ExportOptions{OutDir: a.root, Redact: r.redact})
+		if err != nil {
+			return res, err
+		}
+	}
+	res.code = probeExitCode(res.outcome, res.profile, r)
+	return res, nil
+}
+
+func probeExitCode(o probe.Outcome, p *probe.Profile, r probeRequest) int {
+	switch {
+	case o.Blocked > 0:
+		return exitSafetyBlocked
+	case !o.UARTData:
+		return exitUARTUnavailable
+	case r.opts.BootROMHandshake && !o.BootROM:
+		return exitNoBootROM
+	case r.opts.UBootOnly && !o.UBoot:
+		return exitNoUBoot
+	case r.opts.LinuxOnly && !o.Linux:
+		return exitNoLinux
+	case !o.UBoot && !o.Linux:
+		if r.opts.LinuxOnly {
+			return exitNoLinux
+		}
+		return exitNoUBoot
+	}
+	if p != nil && p.Completeness["complete"] != true {
+		return exitIncomplete
+	}
+	return exitProbeOK
+}
+
+// ---------------- CLI (spec §31) ----------------
+
+func probeUsage() string {
+	return L(`использование:
+  ursidorescue probe [--uart ПОРТ] [--output КАТАЛОГ] [--no-linux | --uboot-only | --linux-only]
+                     [--bootrom] [--ram-uboot md|mf] [--timeout 5m] [--sample 4k|64k]
+                     [--linux-user U] [--linux-password P] [--stop-key S] [--redact] [--no-export] [--unsafe]
+  ursidorescue export [--input КАТАЛОГ] [--output КАТАЛОГ] [--redact]
+  общий флаг: --lang ru|en (или переменная URSIDO_LANG)
+
+probe строго только читает: erase/write/saveenv/изменения UBI не отправляются никогда.
+--unsafe принимается, но это НЕ ослабляет.
+коды выхода: 0 ok, 1 ошибка, 2 UART недоступен, 3 BootROM не найден, 4 U-Boot не найден,
+             5 Linux недоступен, 6 профиль неполный, 7 заблокировано нарушение безопасности`, `usage:
+  ursidorescue probe [--uart PORT] [--output DIR] [--no-linux | --uboot-only | --linux-only]
+                     [--bootrom] [--ram-uboot md|mf] [--timeout 5m] [--sample 4k|64k]
+                     [--linux-user U] [--linux-password P] [--stop-key S] [--redact] [--no-export] [--unsafe]
+  ursidorescue export [--input DIR] [--output DIR] [--redact]
+  common flag: --lang ru|en (or the URSIDO_LANG variable)
+
+probe is strictly read-only: no erase/write/saveenv/UBI changes are ever sent.
+--unsafe is accepted but does NOT relax that.
+exit codes: 0 ok, 1 failure, 2 UART unavailable, 3 BootROM not detected, 4 U-Boot not detected,
+            5 Linux unavailable, 6 profile incomplete, 7 safety violation blocked`)
+}
+
+func (a *App) cliProbe(args []string) int {
+	fs := flag.NewFlagSet("probe", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	port := fs.String("uart", "", "")
+	out := fs.String("output", "", "")
+	noLinux := fs.Bool("no-linux", false, "")
+	ubootOnly := fs.Bool("uboot-only", false, "")
+	linuxOnly := fs.Bool("linux-only", false, "")
+	bootrom := fs.Bool("bootrom", false, "")
+	ram := fs.String("ram-uboot", "", "")
+	timeout := fs.Duration("timeout", 5*time.Minute, "")
+	sample := fs.String("sample", "4k", "")
+	user := fs.String("linux-user", "", "")
+	pass := fs.String("linux-password", "", "")
+	stop := fs.String("stop-key", "", "")
+	redact := fs.Bool("redact", false, "")
+	noExport := fs.Bool("no-export", false, "")
+	unsafe := fs.Bool("unsafe", false, "")
+	if err := fs.Parse(args); err != nil || fs.NArg() > 0 {
+		fmt.Fprintln(os.Stderr, probeUsage())
+		return exitProbeFail
+	}
+	if *ubootOnly && *linuxOnly {
+		fmt.Fprintln(os.Stderr, L("--uboot-only и --linux-only взаимоисключающие", "--uboot-only and --linux-only exclude each other"))
+		return exitProbeFail
+	}
+	head := 4096
+	switch strings.ToLower(*sample) {
+	case "4k", "4096":
+	case "64k", "65536":
+		head = 65536
+	default:
+		fmt.Fprintln(os.Stderr, L("--sample должен быть 4k или 64k", "--sample must be 4k or 64k"))
+		return exitProbeFail
+	}
+	p := *port
+	if p == "" {
+		ports := existingPorts()
+		if len(ports) != 1 {
+			fmt.Fprintf(os.Stderr, L("нужен --uart (найдено: %s)\n", "--uart is required (found: %s)\n"), strings.Join(ports, ", "))
+			return exitUARTUnavailable
+		}
+		p = ports[0]
+	}
+	dir := *out
+	if dir == "" {
+		dir = a.newProbeDir()
+	}
+	if *unsafe {
+		fmt.Println(L("[SAFETY] --unsafe игнорируется: probe mode остаётся read-only.", "[SAFETY] --unsafe is ignored: probe mode stays read-only."))
+	}
+	req := probeRequest{port: p, dir: dir, ramUBoot: strings.ToLower(*ram), export: !*noExport, redact: *redact, opts: probe.Options{
+		Layers: probe.AllLayers(), NoLinux: *noLinux, UBootOnly: *ubootOnly, LinuxOnly: *linuxOnly, BootROMHandshake: *bootrom,
+		Timeout: *timeout, LinuxUser: *user, LinuxPassword: *pass, StopKey: *stop, SampleHead: head, Unsafe: *unsafe, RAMHint: 0,
+	}}
+	res, err := a.runProbe(req)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[PROBE]", err)
+		if res.code == 0 {
+			res.code = exitProbeFail
+		}
+		return res.code
+	}
+	printProbeSummary(res.profile)
+	fmt.Println(L("каталог probe:", "probe dir:"), dir)
+	if res.bundle != "" {
+		fmt.Println(L("бандл:", "bundle:"), res.bundle)
+	}
+	fmt.Println(L("код выхода:", "exit code:"), res.code)
+	return res.code
+}
+
+func (a *App) cliExport(args []string) int {
+	fs := flag.NewFlagSet("export", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	in := fs.String("input", "", "")
+	out := fs.String("output", "", "")
+	redact := fs.Bool("redact", false, "")
+	if err := fs.Parse(args); err != nil || fs.NArg() > 0 {
+		fmt.Fprintln(os.Stderr, probeUsage())
+		return exitProbeFail
+	}
+	dir := *in
+	if dir == "" {
+		dir = latestProbeDir(a.work)
+		if dir == "" {
+			fmt.Fprintln(os.Stderr, L("нет каталога probe в", "no probe directory under"), a.work, L("(укажите --input)", "(use --input)"))
+			return exitProbeFail
+		}
+	}
+	p, err := a.analyzeProbe(dir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[EXPORT]", err)
+		return exitProbeFail
+	}
+	od := *out
+	if od == "" {
+		od = a.root
+	}
+	z, err := probe.Export(dir, p, probe.ExportOptions{OutDir: od, Redact: *redact})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[EXPORT]", err)
+		return exitProbeFail
+	}
+	printProbeSummary(p)
+	fmt.Println(L("бандл:", "bundle:"), z)
+	return exitProbeOK
+}
+
+func latestProbeDir(work string) string {
+	m, _ := filepath.Glob(filepath.Join(work, "probe-*"))
+	var dirs []string
+	for _, d := range m {
+		if dirExists(d) {
+			dirs = append(dirs, d)
+		}
+	}
+	sort.Strings(dirs)
+	if len(dirs) == 0 {
+		return ""
+	}
+	return dirs[len(dirs)-1]
+}
+
+// existingPorts lists ports that are present (Linux) — on Windows COM names
+// cannot be enumerated without the registry, so --uart is required there.
+func existingPorts() []string {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	return listSerialPorts()
+}
+
+// ---------------- menu (spec §3) ----------------
+
+func (a *App) portingMenu() error {
+	for {
+		fmt.Println("\n────────────────────────────────")
+		fmt.Println(L(" ПОРТИРОВАНИЕ / ИССЛЕДОВАНИЕ ОБОРУДОВАНИЯ (только чтение)", " PORTING / HARDWARE DISCOVERY (read-only)"))
+		fmt.Println("────────────────────────────────")
+		fmt.Println(L("  1. Исследовать новое устройство Airoha (полный автоматический read-only probe)", "  1. Probe new Airoha device (full automatic read-only probe)"))
+		fmt.Println(L("  2. Собрать профиль BootROM", "  2. Collect BootROM profile"))
+		fmt.Println(L("  3. Собрать профиль U-Boot", "  3. Collect U-Boot profile"))
+		fmt.Println(L("  4. Собрать профиль Linux", "  4. Collect Linux profile"))
+		fmt.Println(L("  5. Собрать карту flash / MTD / UBI", "  5. Collect flash / MTD / UBI map"))
+		fmt.Println(L("  6. Собрать DTB / device tree", "  6. Collect DTB / device-tree"))
+		fmt.Println(L("  7. Собрать данные сети / PHY / коммутатора", "  7. Collect network / PHY / switch data"))
+		fmt.Println(L("  8. Экспортировать porting bundle Ursus", "  8. Export Ursus porting bundle"))
+		fmt.Println(L("  9. Показать собранный профиль", "  9. View collected profile"))
+		fmt.Println(L("  N. Начать новую probe-сессию (текущая: ", "  N. Start a new probe session (current: ") + displayDir(a.probeDir) + ")")
+		fmt.Println(L("  0. Назад", "  0. Back"))
+		v := strings.ToUpper(a.ask(L("Выбор: ", "Choice: ")))
+		var err error
+		switch v {
+		case "1":
+			err = a.menuProbe(probe.Options{Layers: probe.AllLayers()}, true)
+		case "2":
+			err = a.menuBootROM()
+		case "3":
+			err = a.menuProbe(probe.Options{Layers: probe.Layers{UBoot: true}, UBootOnly: true}, false)
+		case "4":
+			err = a.menuProbe(probe.Options{Layers: probe.Layers{Linux: true}, LinuxOnly: true}, false)
+		case "5":
+			err = a.menuProbe(probe.Options{Layers: probe.Layers{Flash: true}, FirstReachable: true}, false)
+		case "6":
+			err = a.menuProbe(probe.Options{Layers: probe.Layers{DT: true}, FirstReachable: true}, false)
+		case "7":
+			err = a.menuProbe(probe.Options{Layers: probe.Layers{Network: true}, FirstReachable: true}, false)
+		case "8":
+			err = a.menuExport()
+		case "9":
+			err = a.menuView()
+		case "N":
+			fmt.Println(L("Новая сессия:", "New session:"), a.newProbeDir())
+		case "0":
+			return nil
+		default:
+			fmt.Println(L("Неверный выбор.", "Invalid choice."))
+		}
+		if err != nil {
+			a.showProbeErr(err)
+		}
+	}
+}
+
+func displayDir(d string) string {
+	if d == "" {
+		return L("ещё не создана", "not created yet")
+	}
+	return d
+}
+
+func (a *App) showProbeErr(err error) {
+	fmt.Println("\n[PROBE STOP]", err)
+	fmt.Println(L("Probe mode read-only: flash не изменялась.", "Probe mode is read-only: flash was not changed."))
+}
+
+func (a *App) probeAsk(prompt string) string { return a.ask(prompt) }
+
+func (a *App) menuProbe(o probe.Options, export bool) error {
+	o.Ask = a.probeAsk
+	o.Timeout = 5 * time.Minute
+	fmt.Println(L("\nProbe только читает. Подключите UART (GND/TX/RX, 3.3V; VCC не подключать).", "\nThe probe only reads. Connect the UART (GND/TX/RX, 3.3V; never connect VCC)."))
+	fmt.Println(L("После запуска включите устройство. Если нужна Linux-часть, probe попросит перезагрузить его после U-Boot.", "After starting, power the device on. For the Linux part the probe will ask you to power-cycle it after U-Boot."))
+	res, err := a.runProbe(probeRequest{dir: a.currentProbeDir(), opts: o, export: export, interactive: true})
+	if err != nil {
+		return err
+	}
+	printProbeSummary(res.profile)
+	if res.bundle != "" {
+		fmt.Println("Porting bundle:", res.bundle)
+	}
+	fmt.Printf(L("Результат probe: код %d (%s)\n", "Probe result: code %d (%s)\n"), res.code, exitText(res.code))
+	return nil
+}
+
+func (a *App) menuBootROM() error {
+	fmt.Println(L("\nПрофиль BootROM:", "\nBootROM profile:"))
+	fmt.Println(L("  1. Только наблюдать (ничего не отправлять)", "  1. Observe only (send nothing)"))
+	fmt.Println(L("  2. Ответить x на 'Press x' и проверить XMODEM 'C'", "  2. Answer 'Press x' with x and check the XMODEM 'C'"))
+	fmt.Println(L("  3. Загрузить RAM U-Boot UrsidoRescue (только Nokia MD/MF) и собрать U-Boot/flash профиль", "  3. Load UrsidoRescue's RAM U-Boot (Nokia MD/MF only) and collect the U-Boot/flash profile"))
+	v := a.ask(L("Выбор [1]: ", "Choice [1]: "))
+	switch v {
+	case "", "1":
+		return a.menuProbe(probe.Options{Layers: probe.Layers{BootROM: true}, LinuxOnly: true, NoLinux: true, Timeout: 3 * time.Minute}, false)
+	case "2":
+		return a.menuProbe(probe.Options{Layers: probe.Layers{BootROM: true}, BootROMHandshake: true, LinuxOnly: true, NoLinux: true}, false)
+	case "3":
+		pref, err := chooseProfileInteractive(a)
+		if err != nil {
+			return err
+		}
+		if pref.ID == "auto" {
+			return errors.New(L("для RAM U-Boot выберите MD или MF явно", "for the RAM U-Boot choose MD or MF explicitly"))
+		}
+		o := probe.Options{Layers: probe.AllLayers(), Ask: a.probeAsk, Timeout: 5 * time.Minute}
+		res, err := a.runProbe(probeRequest{dir: a.currentProbeDir(), opts: o, ramUBoot: pref.ID, interactive: true})
+		if err != nil {
+			return err
+		}
+		printProbeSummary(res.profile)
+		fmt.Printf(L("Результат probe: код %d (%s)\n", "Probe result: code %d (%s)\n"), res.code, exitText(res.code))
+		return nil
+	}
+	return errors.New(L("неверный выбор", "invalid choice"))
+}
+
+func (a *App) menuExport() error {
+	dir := a.probeDir
+	if dir == "" {
+		dir = latestProbeDir(a.work)
+	}
+	if dir == "" {
+		return errors.New(L("нет собранных данных — сначала выполните probe", "nothing collected yet — run a probe first"))
+	}
+	p, err := a.analyzeProbe(dir)
+	if err != nil {
+		return err
+	}
+	redact := strings.ToLower(a.ask(L("Маскировать MAC/серийные номера в текстовых файлах? [y/N]: ", "Mask MAC addresses/serial numbers in text files? [y/N]: "))) == "y"
+	z, err := probe.Export(dir, p, probe.ExportOptions{OutDir: a.root, Redact: redact})
+	if err != nil {
+		return err
+	}
+	fmt.Println("Porting bundle:", z)
+	return nil
+}
+
+func (a *App) menuView() error {
+	dir := a.probeDir
+	if dir == "" {
+		dir = latestProbeDir(a.work)
+	}
+	if dir == "" {
+		return errors.New(L("нет собранных данных", "nothing collected yet"))
+	}
+	p, err := a.analyzeProbe(dir)
+	if err != nil {
+		return err
+	}
+	printProbeSummary(p)
+	fmt.Println(L("Полный профиль:", "Full profile:"), filepath.Join(dir, "profile.json"))
+	fmt.Println(L("Отчёт UrsusBoot:", "UrsusBoot report:"), filepath.Join(dir, "ursusboot-porting-report.md"))
+	return nil
+}
+
+func exitText(c int) string {
+	if uiLang == "ru" {
+		return map[int]string{0: "probe завершён", 1: "ошибка", 2: "UART недоступен", 3: "BootROM не найден", 4: "U-Boot не найден",
+			5: "Linux недоступен", 6: "профиль неполный", 7: "заблокировано нарушение безопасности"}[c]
+	}
+	return map[int]string{0: "probe completed", 1: "generic failure", 2: "UART unavailable", 3: "BootROM not detected", 4: "U-Boot not detected",
+		5: "Linux unavailable", 6: "profile incomplete", 7: "safety violation blocked"}[c]
+}
+
+func fv(f *probe.Fact) string {
+	if f == nil || f.Value == nil {
+		if f != nil && f.Note == "conflict" {
+			return L("КОНФЛИКТ", "CONFLICT")
+		}
+		return L("неизвестно", "unknown")
+	}
+	switch v := f.Value.(type) {
+	case uint64:
+		return fmt.Sprintf("0x%x [%s]", v, f.Confidence)
+	}
+	return fmt.Sprintf("%v [%s]", f.Value, f.Confidence)
+}
+
+func printProbeSummary(p *probe.Profile) {
+	if p == nil {
+		return
+	}
+	fmt.Println("\n=== ursus-profile-v1 ===")
+	fmt.Println("SoC:         ", fv(&p.SoC.Fact))
+	fmt.Println(L("Модель:      ", "Model:       "), fv(p.Device["model"]))
+	fmt.Println("Compatible:  ", fv(p.Device["compatible"]))
+	ram := L("неизвестно", "unknown")
+	if f := p.Device["ram_mib"]; f != nil && f.Value != nil {
+		ram = fmt.Sprintf("%v MiB [%s]", f.Value, f.Confidence)
+	} else if f != nil && f.Note == "conflict" {
+		ram = L("КОНФЛИКТ", "CONFLICT")
+	}
+	fmt.Println("RAM:         ", ram)
+	fmt.Println("Flash:       ", fv(p.Flash.Type), "/", fv(p.Flash.Manufacturer), L("/ размер", "/ size"), fv(p.Flash.TotalSize), L("/ блок", "/ erase"), fv(p.Flash.EraseSize), L("/ страница", "/ page"), fv(p.Flash.PageSize))
+	fmt.Println("U-Boot:      ", p.UBoot["detected"], p.UBoot["version"], p.UBoot["source"])
+	fmt.Println("Linux:       ", p.Linux["detected"], p.Linux["os"])
+	fmt.Println("BootROM:     ", p.BootROM["detected"], "xmodem:", p.BootROM["xmodem"])
+	if len(p.MTD) > 0 {
+		fmt.Println("MTD:")
+		for _, e := range p.MTD {
+			off, sz := "?", "?"
+			if e.Offset != nil {
+				off = fmt.Sprintf("0x%08x", *e.Offset)
+			}
+			if e.Size != nil {
+				sz = fmt.Sprintf("0x%08x", *e.Size)
+			}
+			flag := ""
+			if e.Conflict {
+				flag = " CONFLICT"
+			}
+			if e.DeviceSpecific {
+				flag += " device-specific"
+			}
+			fmt.Printf("  %-16s off=%s size=%s [%s]%s\n", e.Name, off, sz, e.Confidence, flag)
+		}
+	}
+	for _, c := range p.Conflicts {
+		fmt.Println(L("КОНФЛИКТ:", "CONFLICT:"), c.Field)
+	}
+	if m, ok := p.Completeness["missing"].([]string); ok && len(m) > 0 {
+		fmt.Println(L("Не хватает:", "Missing:"), strings.Join(m, ", "))
+	}
+	for _, w := range p.Warnings {
+		fmt.Println(L("ВНИМАНИЕ:", "WARN:"), w)
+	}
+}
