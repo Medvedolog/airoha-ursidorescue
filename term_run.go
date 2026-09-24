@@ -17,10 +17,17 @@ type uartTerm struct {
 	ed        lineEditor
 	dec       ansiDecoder
 	raw       bool
+	simple    bool
 	prompt    string
 	quit      bool
 	shownW    int  // rune width of the input line currently on screen (line mode)
 	lineShown bool // an input line is drawn and needs erasing before device output
+
+	pagerEnabled   bool
+	pagerWaiting   bool
+	pagerLines     int
+	pagerPending   []byte
+	lastASCIINotice time.Time
 }
 
 // runTerminal opens the port and runs the interactive terminal.
@@ -42,17 +49,29 @@ func (a *App) runTerminal() error {
 }
 
 func (a *App) runTerminalOn(s Serial) error {
+	return a.runTerminalOnMode(s, false)
+}
+
+func (a *App) runTerminalOnMode(s Serial, simple bool) error {
 	// Raw passthrough is the default: device output is printed verbatim, so it
 	// is clean and copyable, and the device's own line editing/history works.
-	t := &uartTerm{a: a, s: s, prompt: "] ", raw: true}
+	t := &uartTerm{a: a, s: s, prompt: "] ", raw: true, simple: simple}
 	t.ed.hidx = 0
-	fmt.Println(L("\nUART-терминал 115200 8N1 — прозрачный режим (вывод как есть, копируется).",
-		"\nUART terminal 115200 8N1 — raw passthrough (verbatim output, copyable)."))
-	fmt.Println(L("Ctrl+] — меню: l — построчный ввод с историей ↑/↓, s/r — XMODEM отправка/приём, g — лог, q — выход.",
-		"Ctrl+] — menu: l line-input with ↑/↓ history, s/r XMODEM send/receive, g log, q quit."))
-	fmt.Println(L("Ctrl+Q — быстрый выход. В Windows QuickEdit/clipboard остаётся включён.",
-		"Ctrl+Q — quick exit. On Windows QuickEdit/clipboard stays enabled."))
-	fmt.Println(L("Всё пишется в лог.", "Everything is logged."))
+	if simple {
+		fmt.Printf(L("\nUART Shell %s — 115200 8N1, no flow\n", "\nUART Shell %s — 115200 8N1, no flow\n"), s.Name())
+		fmt.Println(L("Ctrl+] / Ctrl+Q — выход, Ctrl+P — постраничный вывод. Команды только ASCII/латиница.",
+			"Ctrl+] / Ctrl+Q — exit, Ctrl+P — local pager. Command input is ASCII/Latin only."))
+		fmt.Println(L("Никаких автоматических x/Enter/Ctrl-C не отправляется.", "No automatic x/Enter/Ctrl-C is sent."))
+	} else {
+		fmt.Println(L("\nUART-терминал 115200 8N1 — прозрачный режим (вывод как есть, копируется).",
+			"\nUART terminal 115200 8N1 — raw passthrough (verbatim output, copyable)."))
+		fmt.Println(L("Ctrl+] — меню: l — построчный ввод с историей ↑/↓, s/r — XMODEM отправка/приём, g — лог, q — выход.",
+			"Ctrl+] — menu: l line-input with ↑/↓ history, s/r XMODEM send/receive, g log, q quit."))
+		fmt.Println(L("Ctrl+Q — быстрый выход, Ctrl+P — постраничный вывод по высоте окна. Команды только ASCII/латиница.",
+			"Ctrl+Q — quick exit, Ctrl+P — local pager sized to the console window. Command input is ASCII/Latin only."))
+	}
+	fmt.Println(L("В Windows QuickEdit/clipboard остаётся включён. Всё пишется в лог.",
+		"On Windows QuickEdit/clipboard stays enabled. Everything is logged."))
 	state, e := consoleRaw()
 	if e != nil {
 		return fmt.Errorf(L("raw-консоль: %w", "raw console: %w"), e)
@@ -86,10 +105,22 @@ func (a *App) runTerminalOn(s Serial) error {
 			continue
 		}
 		for _, b := range ib[:n] {
+			if b >= 0x80 {
+				t.warnNonASCII()
+				continue
+			}
 			if b == 0x11 { // Ctrl+Q is always local; never send it to the router.
 				t.quit = true
 				fmt.Print(L("\r\n[выход из UART-терминала: Ctrl+Q]\r\n", "\r\n[UART terminal exit: Ctrl+Q]\r\n"))
 				return nil
+			}
+			if b == 0x10 {
+				t.togglePager()
+				continue
+			}
+			if t.pagerIsWaiting() && (b == '\r' || b == '\n') {
+				t.pagerContinue()
+				continue
 			}
 			for _, ev := range t.dec.push(b) {
 				t.onKey(ev)
@@ -105,11 +136,68 @@ func (a *App) runTerminalOn(s Serial) error {
 // writeRawInput forwards normal console input in the same chunks in which it
 // arrived. Ctrl+] opens the local menu and Ctrl+Q leaves the terminal; neither
 // control byte is sent to the router.
+func filterASCIICommandInput(p []byte) (out []byte, blocked bool) {
+	out = make([]byte, 0, len(p))
+	for _, b := range p {
+		if b >= 0x80 {
+			blocked = true
+			continue
+		}
+		out = append(out, b)
+	}
+	return out, blocked
+}
+
+func splitOutputPage(data []byte, maxLines int) (head, tail []byte, lines int, full bool) {
+	if maxLines < 1 {
+		maxLines = 1
+	}
+	for i, b := range data {
+		if b == '\n' {
+			lines++
+			if lines >= maxLines {
+				return data[:i+1], data[i+1:], lines, true
+			}
+		}
+	}
+	return data, nil, lines, false
+}
+
 func (t *uartTerm) writeRawInput(p []byte) error {
+	var blocked bool
+	p, blocked = filterASCIICommandInput(p)
+	if blocked {
+		t.warnNonASCII()
+	}
 	for len(p) > 0 {
+		if t.pagerIsWaiting() {
+			i := -1
+			for n, b := range p {
+				if b == '\r' || b == '\n' || b == 0x11 || b == 0x10 {
+					i = n
+					break
+				}
+			}
+			if i < 0 {
+				return nil
+			}
+			ctrl := p[i]
+			p = p[i+1:]
+			switch ctrl {
+			case '\r', '\n':
+				t.pagerContinue()
+			case 0x10:
+				t.togglePager()
+			case 0x11:
+				t.quit = true
+				fmt.Print(L("\r\n[выход из UART-терминала: Ctrl+Q]\r\n", "\r\n[UART terminal exit: Ctrl+Q]\r\n"))
+				return nil
+			}
+			continue
+		}
 		i := -1
 		for n, b := range p {
-			if b == 0x1d || b == 0x11 {
+			if b == 0x1d || b == 0x11 || b == 0x10 {
 				i = n
 				break
 			}
@@ -127,6 +215,15 @@ func (t *uartTerm) writeRawInput(p []byte) error {
 		if ctrl == 0x11 {
 			t.quit = true
 			fmt.Print(L("\r\n[выход из UART-терминала: Ctrl+Q]\r\n", "\r\n[UART terminal exit: Ctrl+Q]\r\n"))
+			return nil
+		}
+		if ctrl == 0x10 {
+			t.togglePager()
+			continue
+		}
+		if t.simple {
+			t.quit = true
+			fmt.Print(L("\r\n[выход из UART Shell]\r\n", "\r\n[UART Shell exit]\r\n"))
 			return nil
 		}
 		var choice byte
@@ -149,7 +246,7 @@ func (t *uartTerm) writeRawInput(p []byte) error {
 func (t *uartTerm) readLoop(done chan<- error) {
 	buf := make([]byte, 4096)
 	for {
-		n, err := t.s.Read(buf, 200*time.Millisecond)
+		n, err := t.s.Read(buf, 20*time.Millisecond)
 		if err != nil {
 			done <- err
 			return
@@ -158,17 +255,107 @@ func (t *uartTerm) readLoop(done chan<- error) {
 			continue
 		}
 		d := append([]byte(nil), buf[:n]...)
-		t.mu.Lock()
+		t.a.logBytes(d, false)
+		t.deviceOutput(d)
+	}
+}
+
+
+func (t *uartTerm) warnNonASCII() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if time.Since(t.lastASCIINotice) < time.Second {
+		return
+	}
+	t.lastASCIINotice = time.Now()
+	fmt.Print(L("\r\n[ввод отклонён: UART-команды только ASCII/латиница — переключите раскладку]\r\n",
+		"\r\n[input blocked: UART commands are ASCII/Latin only — switch keyboard layout]\r\n"))
+}
+
+func (t *uartTerm) pagerIsWaiting() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.pagerWaiting
+}
+
+func (t *uartTerm) pageSizeLocked() int {
+	r := consoleRows()
+	if r < 8 {
+		return 20
+	}
+	return r - 3
+}
+
+func (t *uartTerm) togglePager() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.pagerEnabled = !t.pagerEnabled
+	t.pagerWaiting = false
+	t.pagerLines = 0
+	if !t.pagerEnabled {
+		if len(t.pagerPending) > 0 {
+			os.Stdout.Write(t.pagerPending)
+			t.pagerPending = nil
+		}
+		fmt.Print(L("\r\n[pager: выкл]\r\n", "\r\n[pager: off]\r\n"))
+		return
+	}
+	fmt.Printf(L("\r\n[pager: вкл, %d строк на страницу]\r\n", "\r\n[pager: on, %d lines per page]\r\n"), t.pageSizeLocked())
+}
+
+func (t *uartTerm) pagerContinue() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.pagerEnabled {
+		return
+	}
+	t.pagerWaiting = false
+	t.pagerLines = 0
+	fmt.Print("\r\n")
+	t.flushPagerLocked()
+}
+
+func (t *uartTerm) flushPagerLocked() {
+	if !t.pagerEnabled || t.pagerWaiting || len(t.pagerPending) == 0 {
+		return
+	}
+	remaining := t.pageSizeLocked() - t.pagerLines
+	head, tail, lines, full := splitOutputPage(t.pagerPending, remaining)
+	if len(head) > 0 {
+		os.Stdout.Write(head)
+	}
+	t.pagerPending = append(t.pagerPending[:0], tail...)
+	t.pagerLines += lines
+	if full {
+		t.pagerWaiting = true
+		fmt.Print(L("\r\n-- ещё -- Enter: продолжить, Ctrl+P: без пауз, Ctrl+Q: выход --",
+			"\r\n-- More -- Enter: continue, Ctrl+P: disable pager, Ctrl+Q: exit --"))
+	}
+}
+
+func (t *uartTerm) deviceOutput(d []byte) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.pagerEnabled {
 		if !t.raw && t.lineShown {
 			t.eraseLineLocked()
 		}
 		os.Stdout.Write(d)
-		t.a.logBytes(d, false)
 		if !t.raw {
 			t.drawLineLocked(0)
 		}
-		t.mu.Unlock()
+		return
 	}
+	t.pagerPending = append(t.pagerPending, d...)
+	if len(t.pagerPending) > 4<<20 {
+		fmt.Print(L("\r\n[pager: буфер >4 MiB, пауза отключена]\r\n", "\r\n[pager: buffer >4 MiB, disabling pause]\r\n"))
+		t.pagerEnabled = false
+		t.pagerWaiting = false
+		os.Stdout.Write(t.pagerPending)
+		t.pagerPending = nil
+		return
+	}
+	t.flushPagerLocked()
 }
 
 // eraseLineLocked clears the current input line using only CR and spaces.

@@ -1,3 +1,22 @@
+# UrsidoRescue 0.2.0-test7-dev
+
+Status: **HW terminal debugging / unreleased.** Real OpenWrt testing of v0.2.0-test6 showed that
+the legacy Expert-mode UART Shell still used one-byte console reads and a 250 ms serial read loop,
+so arrow escape sequences were split and interactive input could lag close to a second.
+
+## 0.2.0-test7-dev
+
+- Expert item 6 now uses the same low-latency raw backend as item 1; no separate one-byte UART
+  shell implementation remains.
+- Interactive serial read polling reduced from 200/250 ms to 20 ms so synchronous Windows COM
+  reads do not stall operator writes for a visible fraction of a second.
+- Raw keyboard/paste data is written in chunks; ANSI arrow sequences remain contiguous.
+- Ctrl+Q and Ctrl+] both exit the simple UART Shell locally.
+- Interactive command input is ASCII-only: bytes >=0x80 are blocked locally with a layout warning.
+  XMODEM/binary transfers are unaffected.
+- Ctrl+P toggles a local pager sized to the console window. While paused, UART keeps draining and
+  logging; Enter shows the next page. Pending display data is capped at 4 MiB.
+
 # UrsidoRescue 0.2.0-test6
 
 Status: **simulation PASS / HW PARTIAL.** The interactive UART terminal has now run on real

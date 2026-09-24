@@ -135,6 +135,25 @@ func TestRenderPortableAndCursor(t *testing.T) {
 	}
 }
 
+
+func TestFilterASCIICommandInput(t *testing.T) {
+	in := append([]byte("ip addr "), []byte{0xd0, 0xb9, '\r'}...)
+	got, blocked := filterASCIICommandInput(in)
+	if !blocked {
+		t.Fatal("non-ASCII input was not reported")
+	}
+	if string(got) != "ip addr \r" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestSplitOutputPage(t *testing.T) {
+	head, tail, lines, full := splitOutputPage([]byte("1\n2\n3\n4\n"), 3)
+	if !full || lines != 3 || string(head) != "1\n2\n3\n" || string(tail) != "4\n" {
+		t.Fatalf("head=%q tail=%q lines=%d full=%v", head, tail, lines, full)
+	}
+}
+
 type captureSerial struct {
 	writes [][]byte
 }

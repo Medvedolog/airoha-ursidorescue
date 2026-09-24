@@ -28,7 +28,7 @@ import (
 
 const (
 	appName               = "UrsidoRescue"
-	appVersion            = "0.2.0-test6"
+	appVersion            = "0.2.0-test7-dev"
 	defaultRouterIP       = "192.168.1.1"
 	defaultLocalIP        = "192.168.1.254"
 	defaultTFTPPort       = 1069
@@ -1855,7 +1855,7 @@ func (a *App) physicalRestoreWizard() error {
 		return e
 	}
 	if len(blbad) > 0 || len(bad) > 0 {
-		return fmt.Errorf(L("восстановление physical image в 0.2.0-test6 требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test6 requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
+		return fmt.Errorf(L("восстановление physical image в 0.2.0-test7-dev требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test7-dev requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
 	}
 	local, e := a.networkIP()
 	if e != nil {
@@ -2089,49 +2089,10 @@ func (a *App) uartShell() error {
 	return a.uartShellOn(s)
 }
 func (a *App) uartShellOn(s Serial) error {
-	fmt.Printf(L("\nUART Shell %s — 115200 8N1, no flow\nCtrl+] = exit. Никаких автоматических x/Enter/Ctrl-C не отправляется.\n", "\nUART Shell %s — 115200 8N1, no flow\nCtrl+] = exit. No automatic x/Enter/Ctrl-C is sent.\n"), s.Name())
-	state, e := consoleRaw()
-	if e != nil {
-		return fmt.Errorf(L("raw-консоль: %w", "raw console: %w"), e)
-	}
-	defer consoleRestore(state)
-	done := make(chan error, 1)
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, e := s.Read(buf, 250*time.Millisecond)
-			if e != nil {
-				done <- e
-				return
-			}
-			if n > 0 {
-				a.logBytes(buf[:n], true)
-			}
-		}
-	}()
-	ib := make([]byte, 1)
-	for {
-		select {
-		case e := <-done:
-			return e
-		default:
-		}
-		n, e := os.Stdin.Read(ib)
-		if e != nil {
-			return e
-		}
-		if n == 1 {
-			if ib[0] == 0x1d {
-				fmt.Print(L("\r\n[выход из UART Shell]\r\n", "\r\n[UART Shell exit]\r\n"))
-				return nil
-			}
-			if e = s.Write(ib); e != nil {
-				return e
-			}
-		}
-	}
+	// The simple shell now shares the same low-latency raw backend as the full
+	// terminal. It still sends nothing automatically.
+	return a.runTerminalOnMode(s, true)
 }
-
 func (a *App) expertUBIVolume() error {
 	pref, e := chooseProfileInteractive(a)
 	if e != nil {
@@ -2163,7 +2124,7 @@ func (a *App) expertUBIVolume() error {
 	}
 	st, _ := os.Stat(path)
 	if st.Size() > maxGenericRAMFile {
-		return errors.New(L("файл volume >64 MiB за один раз не поддерживается в 0.2.0-test6", "expert one-shot volume file >64 MiB is not supported in 0.2.0-test6"))
+		return errors.New(L("файл volume >64 MiB за один раз не поддерживается в 0.2.0-test7-dev", "expert one-shot volume file >64 MiB is not supported in 0.2.0-test7-dev"))
 	}
 	sha, _ := shaFile(path)
 	fmt.Printf("WRITE EXISTING UBI VOLUME %s size=%d SHA256=%s\n", name, st.Size(), sha)
@@ -2315,7 +2276,7 @@ func (a *App) makeSupportBundle() (string, error) {
 }
 
 func (a *App) selftest() error {
-	if appVersion != "0.2.0-test6" {
+	if appVersion != "0.2.0-test7-dev" {
 		return errors.New("version")
 	}
 	if _, e := probe.CheckUBoot("saveenv"); e == nil {

@@ -12,6 +12,7 @@ type consoleState struct{ mode uint32 }
 
 var pGetConsoleMode = k32.NewProc("GetConsoleMode")
 var pSetConsoleMode = k32.NewProc("SetConsoleMode")
+var pGetConsoleScreenBufferInfo = k32.NewProc("GetConsoleScreenBufferInfo")
 
 func consoleRaw() (*consoleState, error) {
 	h := syscall.Handle(os.Stdin.Fd())
@@ -55,4 +56,26 @@ func enableVTOutput() {
 		return
 	}
 	pSetConsoleMode.Call(uintptr(h), uintptr(mode|0x0004))
+}
+
+type winCoord struct{ X, Y int16 }
+type winSmallRect struct{ Left, Top, Right, Bottom int16 }
+type winConsoleScreenBufferInfo struct {
+	Size              winCoord
+	CursorPosition    winCoord
+	Attributes        uint16
+	Window            winSmallRect
+	MaximumWindowSize winCoord
+}
+
+func consoleRows() int {
+	h := syscall.Handle(os.Stdout.Fd())
+	var info winConsoleScreenBufferInfo
+	if r, _, _ := pGetConsoleScreenBufferInfo.Call(uintptr(h), uintptr(unsafe.Pointer(&info))); r != 0 {
+		n := int(info.Window.Bottom-info.Window.Top) + 1
+		if n > 0 {
+			return n
+		}
+	}
+	return 24
 }

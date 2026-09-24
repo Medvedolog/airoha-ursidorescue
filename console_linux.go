@@ -40,3 +40,17 @@ func consoleRestore(s *consoleState) {
 
 // enableVTOutput is a no-op on Linux; ANSI is always understood.
 func enableVTOutput() {}
+
+type consoleWinSize struct {
+	Row, Col, Xpixel, Ypixel uint16
+}
+
+func consoleRows() int {
+	var ws consoleWinSize
+	fd := int(os.Stdout.Fd())
+	_, _, e := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
+	if e == 0 && ws.Row > 0 {
+		return int(ws.Row)
+	}
+	return 24
+}
