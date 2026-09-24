@@ -18,8 +18,8 @@ func feed(dec *ansiDecoder, s string) []keyEvent {
 
 func TestAnsiDecoder(t *testing.T) {
 	var d ansiDecoder
-	got := feed(&d, "ab\x1b[A\x1b[D\x7f\r\x03\x1d\x1b[3~\x1b[H\x1b[F")
-	want := []keyKind{kRune, kRune, kUp, kLeft, kBackspace, kEnter, kCtrlC, kMenu, kDelete, kHome, kEnd}
+	got := feed(&d, "ab\x1b[A\x1b[D\x7f\r\x03\x1a\x1d\x1b[3~\x1b[H\x1b[F")
+	want := []keyKind{kRune, kRune, kUp, kLeft, kBackspace, kEnter, kCtrlC, kCtrlZ, kMenu, kDelete, kHome, kEnd}
 	if len(got) != len(want) {
 		t.Fatalf("got %d events %+v", len(got), got)
 	}
@@ -149,6 +149,8 @@ func TestTranslateWindowsConsoleKey(t *testing.T) {
 		{"down", winVKDown, 0, 0, 1, "\x1b[B"},
 		{"up-repeat", winVKUp, 0, 0, 2, "\x1b[A\x1b[A"},
 		{"ctrl-q", winVKQ, 0, winLeftCtrlPressed, 1, "\x11"},
+		{"ctrl-c", winVKC, 0, winLeftCtrlPressed, 1, "\x03"},
+		{"ctrl-z", winVKZ, 0, winLeftCtrlPressed, 1, "\x1a"},
 		{"ctrl-menu", winVKOEM6, 0, winRightCtrlPressed, 1, "\x1d"},
 		{"cyrillic", 0, 'й', 0, 1, "й"},
 	}

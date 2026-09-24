@@ -13,7 +13,10 @@ screen-oriented programs such as BusyBox top were being split by the local line 
 - Color-only SGR output and simple erase-line sequences do not trigger TUI bypass.
 - top/vi/less-style applications therefore retain their own terminal screen model; Ctrl+P can
   re-enable paging later for ps, dmesg, logs and other static output.
-- Regression tests cover fullscreen ANSI detection, normal colored output and split CSI sequences.
+- Ctrl+C and Ctrl+Z are explicitly forwarded to the remote console as 0x03 and 0x1A in both raw
+  and line-input modes; Windows KEY_EVENT_RECORD translation covers both shortcuts.
+- Regression tests cover fullscreen ANSI detection, normal colored output, split CSI sequences and
+  Ctrl+C/Ctrl+Z translation.
 
 # UrsidoRescue 0.2.0-test8
 

@@ -26,6 +26,7 @@ const (
 	kUp
 	kDown
 	kCtrlC     // 0x03 — forwarded to the device
+	kCtrlZ     // 0x1a — forwarded to the device
 	kMenu      // 0x1d (Ctrl+]) — opens the terminal menu
 	kInterrupt // 0x04 (Ctrl+D) — reserved, ignored in line mode
 )
@@ -57,6 +58,8 @@ func (d *ansiDecoder) push(b byte) []keyEvent {
 		return []keyEvent{{kind: kBackspace}}
 	case 0x03:
 		return []keyEvent{{kind: kCtrlC}}
+	case 0x1a:
+		return []keyEvent{{kind: kCtrlZ}}
 	case 0x1d:
 		return []keyEvent{{kind: kMenu}}
 	case 0x01:
@@ -124,6 +127,7 @@ const (
 	winVKP      = 0x50
 	winVKC      = 0x43
 	winVKD      = 0x44
+	winVKZ      = 0x5a
 	winVKOEM6   = 0xdd
 
 	winRightCtrlPressed = 0x0004
@@ -151,6 +155,8 @@ func translateWindowsConsoleKey(vk uint16, ch rune, controlState uint32, repeat 
 			one = []byte{0x03}
 		case winVKD:
 			one = []byte{0x04}
+		case winVKZ:
+			one = []byte{0x1a}
 		case winVKOEM6:
 			one = []byte{0x1d}
 		}

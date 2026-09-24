@@ -30,6 +30,7 @@ type uartTerm struct {
 	pagerANSIProbe  []byte
 	lastASCIINotice time.Time
 }
+
 // runTerminal opens the port and runs the interactive terminal.
 func (a *App) runTerminal() error {
 	port, e := a.choosePort()
@@ -453,6 +454,10 @@ func (t *uartTerm) onKey(ev keyEvent) {
 	case kCtrlC:
 		t.logSent("<Ctrl-C>")
 		_ = t.s.Write([]byte{0x03})
+		return
+	case kCtrlZ:
+		t.logSent("<Ctrl-Z>")
+		_ = t.s.Write([]byte{0x1a})
 		return
 	case kInterrupt:
 		return
