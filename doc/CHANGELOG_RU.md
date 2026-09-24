@@ -58,7 +58,17 @@
   перенесена в ARCHITECTURE.
 - `PROBE.md`: номер пункта главного меню Porting Collector исправлен на 7. Номер 8 устарел с test5.
 - Утверждено ТЗ v3 на единый интерфейс Web-GUI / TUI / CLI (`doc/UI_SPEC_RU.md`) и добавлен
-  HTML-макет Web-GUI (`doc/ui-mockup/`). Кода интерфейса пока нет.
+  HTML-макет Web-GUI (`doc/ui-mockup/`).
+- **Этап 1 ТЗ — application layer** (консоль ведёт себя как раньше):
+  - пакет `app`: контракт Event / Progress / Ask / Confirm / Output / Artifact, классы риска,
+    подтверждение по классу (фраза обязательна для WRITE / ERASE / UBI_METADATA);
+  - ядро сообщает и спрашивает только через UI; консоль — одна из реализаций; тест-страж на `go/ast`;
+  - каталог операций и `RunOperation`: каждая операция в своей сессии
+    `work/sessions/<дата>-<время>-<вид>-<hex>/` (`session.json`, `session.log`, `uart.log`,
+    `operations.jsonl` с каждой командой U-Boot, `errors.log`), operation ID на всех событиях;
+  - порт принадлежит `PortOwner` и сдаётся операции в аренду, одна операция одновременно;
+  - UART-логи и нарезка образов переехали в каталог сессии; пакет логов и `export` находят и
+    старые файлы в `work/`.
 - Документация и `PROBE.md` обновлены до test17: сеть и пререквизиты LAN, цветной вывод, EOT,
   stock LAN assist, `--stock-lan-assist`, Telnet-only passive plan и повторное чтение поздних паролей.
 

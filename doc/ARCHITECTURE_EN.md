@@ -35,7 +35,9 @@ everything else is shared.
 | `lang.go` | 83 | UI language: `L(ru, en)`, `--lang`, `URSIDO_LANG`, locale, selection dialogue |
 | `term.go` | ~400 | Terminal logic without I/O: ANSI key decoder, Windows `KEY_EVENT_RECORD` translation, line editor with history, XMODEM receive (CRC, 128/1K) |
 | `term_run.go` | ~640 | The running terminal: UART read loop, raw/line mode, ASCII gate, pager with fullscreen-TUI bypass, Ctrl+] menu, XMODEM send/receive |
-| `serial.go` | 11 | The `Serial` interface: `Name`, `Read(buf, timeout)`, `Write`, `ResetInput`, `Close` |
+| `serial.go` | 8 | `Serial` = `app.Port`: `Name`, `Read(buf, timeout)`, `Write`, `ResetInput`, `Close` |
+| `operations.go` | ~210 | Operation catalogue (spec §10 scenarios with risk classes), `RunOperation`, operation sessions and the probe session, `openPort` — a lease from `PortOwner` |
+| `console_frontend.go` | ~130 | Console implementation of `app.UI`: renders events, progress, questions and confirmations exactly as the console did before the application layer |
 | `serial_linux.go` | ~110 | termios via `ioctl(TCGETS/TCSETS)`: raw 115200 8N1, `CLOCAL`, no flow control; lists `/dev/ttyUSB*`, `ttyACM*`, `ttyAMA*`, `ttyS*` |
 | `serial_windows.go` | ~170 | `kernel32.dll` via `syscall`: `CreateFileW`, `SetCommState`, `SetCommTimeouts`, `PurgeComm`, `ReadFile`/`WriteFile`; lists existing `COMn` via `QueryDosDeviceW` |
 | `udp_windows.go`, `udp_other.go` | 18 / 5 | `isExpectedUDPNoise`: on Windows, UDP `WSAECONNRESET` (10054) / `WSAECONNABORTED` (10053) errors from a stale peer are noise for the TFTP server; always `false` elsewhere |
@@ -47,6 +49,27 @@ everything else is shared.
 | `payloads/` | | BootROM binaries: preloader and RAM FIP for MD and MF |
 | `build.sh` | | Release build |
 | `.github/workflows/build.yml` | | CI |
+
+## The `app/` package (application layer)
+
+The layer between the core and the front ends (spec `doc/UI_SPEC_RU.md` §6, §8, §9, §13, §14). It knows
+nothing about the console, HTML or ANSI.
+
+| file | purpose |
+|---|---|
+| `ui.go` | The `UI` contract: `Event` (level, label, sections), `Progress` (unknown total — no fake percentages), `Ask` (text, path, choice), `Confirm`, `Output` (raw UART bytes), `Artifact`; `ErrCancelled` |
+| `risk.go` | Risk classes `READ_ONLY … MANUAL`, confirmation form per class (`FormFor`), `Validate` refuses a write or erase without a phrase |
+| `session.go` | Session `work/sessions/<date>-<time>-<kind>-<hex>/`: `session.json`, `session.log`, `operations.jsonl`, `errors.log`, `artifacts/`; operation IDs; `SessionUI` wraps a UI and writes events, questions (not answers) and confirmations into the session |
+| `port.go` | `PortOwner`: owns the port and leases it to one operation; a lease's `Close` only returns it; disconnecting or switching ports under a lease is refused |
+| `recorder.go` | Scripted UI for tests and headless runs; `CheckAnswer` is the shared rule for confirmation answers |
+
+Call flow: front end → `a.RunOperation(kind)` → a new session and operation ID → `a.ui` = `SessionUI` over
+the front end → core wizard → `a.openPort()` (lease) → transport. The core reports only through `a.ui`
+(`a.event`, `a.note`, `a.status`, `a.confirm(risk, phrase)`), and every U-Boot command goes into
+`operations.jsonl` with its return code and duration.
+
+Two `go/ast` guard tests: core functions do not call `fmt.Print*`, `os.Stdout`/`os.Stdin` or console
+drawing helpers; only `PortOwner` may open a port (`openSerial`).
 
 ## The `probe/` package (Porting Collector)
 

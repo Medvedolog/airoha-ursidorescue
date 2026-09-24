@@ -69,7 +69,7 @@ Enter picks it. Settings are always 115200 8N1, no flow control.
 The common procedure for main menu items 1–5, expert items 2–5 and the Porting Collector RAM U-Boot
 mode. **Nothing is written to flash.**
 
-1. The port is opened and the log `work/recovery-<date-time>.uart.log` is created.
+1. The port is opened; the UART goes to the operation session's `uart.log` (`work/sessions/<id>/`).
 2. Hint: if `Press x to load BL31 + U-Boot FIP` and `CCC` are already on screen, reboot nothing.
    Otherwise power the router off, **hold Reset and power it on** (BootROM mode).
 3. The program waits up to 180 s for the BootROM. On `Press x` it sends `x` (at most once every
@@ -199,7 +199,7 @@ the whole stock area), UART, an Ethernet cable.
    alphabetically) and prints how many of `mtd0…mtd16` are present. If `SHA256SUMS`/`SHA256SUMS.txt`
    has an entry for the chosen file, the hash is checked; mismatch → stop.
 2. **Split, no writes.** The file (gzip is detected automatically) is read completely and split in
-   `work/stock-<time>/`: `stock-bl2.bin` (first `0x20000`) and `stock-ibu-NN.bin` (8 MiB each).
+   `stock-<time>/` inside the session: `stock-bl2.bin` (first `0x20000`) and `stock-ibu-NN.bin` (8 MiB each).
    Checks:
    - the uncompressed size must be **exactly** `0x0EBA0000` bytes (more/less → stop);
    - **BL2 provenance:** if the backup BL2 is a known AN7581/AN7583 OpenWrt preloader (including one
@@ -258,7 +258,7 @@ entering the BootROM again and repeating. A broken BL2 on top of a half-written 
 3. `mtd bad bl2` and `mtd bad ubi`: in 0.2.0-test17 **any** bad block → stop. A raw image carries
    another chip's bad-block layout; writing it over a NAND with bad blocks without understanding
    the format is unsafe.
-4. Network; the image is split in `work/physical-<time>/` into `bl2.bin` and 8 MiB `ubi-NN.bin`.
+4. Network; the image is split in `physical-<time>/` inside the session into `bl2.bin` and 8 MiB `ubi-NN.bin`.
    The first chunk is transferred as a TFTP test.
 5. Confirmation `RESTORE PHYSICAL NAND`.
 6. `mtd erase ubi`, then per chunk: TFTP → `mtd write ubi` → readback.
@@ -331,7 +331,7 @@ data are in [../PROBE.md](../PROBE.md). In short:
   0. Back
 ```
 
-All collectors write into the **current probe session**, the directory `work/probe-<date-time>/`.
+All collectors write into the **current probe session**, the directory `work/sessions/<date>-<time>-probe-<hex>/`.
 Several items in a row extend one session; `N` starts a new one.
 
 Items 1 and 3–7 first ask: *"Is the device already on and sitting at a U-Boot/Linux prompt (allow
@@ -364,7 +364,7 @@ and password by hand.
 | **8. Export** | Analyses the current (or latest) session and packs `ursus-probe-<vendor>-<model>-<soc>-<time>.zip` next to the program. Asks whether to mask MACs/serials in text files (`--redact`: binary files such as DTB and flash samples are then left out and listed in `REDACTED.txt`). |
 | **9. View profile** | An `ursus-profile-v1` summary: SoC, model, compatible, RAM, NAND, etc., with confidence; paths to `profile.json` and `ursusboot-porting-report.md`. |
 | **A. UBI attach** | ADVANCED, **NOT read-only**. Warns that attaching UBI may change the volume table, write a fastmap or move blocks, and that booting Linux (`ubinfo -a`) is better for a write-free volume list. Requires `UBI ATTACH`, then collects U-Boot + flash with `ubi part`/`ubi read`. The profile will say `strict_read_only: false`. |
-| **N. New session** | Creates a new `work/probe-…` directory and makes it current. |
+| **N. New session** | Closes the current probe session and starts a new `work/sessions/…-probe-…`. |
 
 **Submenu "2. BootROM profile":**
 
@@ -406,7 +406,7 @@ An error in any expert item returns to the **main** menu.
 
 #### Expert 1. UART terminal
 
-Port choice → log `work/term-<time>.uart.log` → the full terminal (see
+Port choice → the session's `uart.log` → the full terminal (see
 [below](#uart-terminal-keys-and-menu)). It sends nothing by itself and holds no passwords.
 
 #### Expert 2. Start RAM U-Boot and leave the prompt
@@ -445,7 +445,7 @@ Same as [main menu item 5](#5-nand--ubi--u-boot-diagnostics).
 
 #### Expert 6. UART Shell
 
-Port choice → log `work/shell-<time>.uart.log` → a simplified terminal: the same low-latency raw
+Port choice → the session's `uart.log` → a simplified terminal: the same low-latency raw
 mode but without the Ctrl+] menu (Ctrl+] and Ctrl+Q exit). No automatic `x`/Enter/Ctrl-C is sent,
 handy for simply "watching what the router says".
 

@@ -217,14 +217,14 @@ output and the UART logs are never coloured.
 | `--version` | prints the version |
 | `--selftest` | self-check: pinned payload SHA256, FIP headers, probe allowlist, XMODEM CRC, parsers. `SELFTEST PASS` / `SELFTEST FAIL: …` |
 | `probe [flags]` | Porting Collector without the menu |
-| `export [--input DIR] [--output DIR] [--redact]` | repack a bundle from an existing probe directory (default: the latest `work/probe-*`) |
+| `export [--input DIR] [--output DIR] [--redact]` | repack a bundle from an existing probe directory (default: the latest probe session under `work/sessions/`; old `work/probe-*` are found too) |
 
 `probe` flags:
 
 | flag | meaning |
 |---|---|
 | `--uart PORT` | port (`COM6`, `/dev/ttyUSB0`). Optional: `probe` finds ports the same way as the menu (`QueryDosDeviceW` on Windows). No port → an error with exit code 2; exactly one → selected automatically; several → a numbered list is printed, exit code 2, re-run with `--uart PORT` |
-| `--output DIR` | session directory (default `work/probe-<time>`) |
+| `--output DIR` | probe data directory (default: a new session `work/sessions/<date>-<time>-probe-<hex>/`) |
 | `--uboot-only` / `--linux-only` / `--no-linux` | limit environments (the first two exclude each other) |
 | `--bootrom` | answer `Press x` and check the XMODEM `C` |
 | `--ram-uboot md\|mf` | bricked Nokia: load UrsidoRescue's RAM U-Boot and probe through it |
@@ -255,17 +255,20 @@ UrsidoRescue.exe probe --uart COM6
 
 | path | contents |
 |---|---|
-| `work/recovery-<time>.uart.log` | full UART log of RAM U-Boot operations (items 1–5, expert 2–5) |
-| `work/term-<time>.uart.log` | UART terminal log (expert 1) |
-| `work/shell-<time>.uart.log` | UART Shell log (expert 6) |
-| `work/stock-<time>/` | `mtd16` split into BL2 + 8 MiB chunks (item 1) |
-| `work/physical-<time>/` | NAND image split into chunks (item 3) |
-| `work/probe-<time>/` | a Porting Collector session |
+| `work/sessions/<date>-<time>-<operation>-<hex>/` | a **session**: every menu operation runs in its own (probe items share one until "N") |
+| `…/uart.log` | full raw UART log of the operation (formerly `work/recovery-*`, `term-*`, `shell-*.uart.log`) |
+| `…/session.log` | timestamped program events and questions (answers are not written: they can be passwords) |
+| `…/operations.jsonl` | structured log: operation start and result, every U-Boot command with return code and duration, confirmations, produced files |
+| `…/errors.log` | failures |
+| `…/session.json` | operation kind, version, front end, times, result (`success` / `cancelled` / `failed`), operation IDs |
+| `…/stock-<time>/`, `…/physical-<time>/` | temporary image chunks (items 1 and 3) |
+| probe session | plus the Porting Collector data: `transcript.jsonl`, `uboot/`, `linux/`, `flash/`, `dt/`… |
 | `UrsidoRescue-support-<time>.zip` | report log bundle (item 6) |
 | `ursus-probe-<vendor>-<model>-<soc>-<time>.zip` | porting bundle |
 
-The `stock-*` and `physical-*` directories take as much space as the source image (up to 256 MiB);
-after a successful restore they can be deleted.
+The `stock-*` and `physical-*` directories inside a session take as much space as the source image (up
+to 256 MiB); after a successful restore they can be deleted. Files from older versions in `work/`
+(`*.uart.log`, `probe-*`) still go into the log bundle and are found by `export`.
 
 ## 8. When something goes wrong
 

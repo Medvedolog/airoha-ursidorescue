@@ -221,14 +221,14 @@ Linux:    ./UrsidoRescue-linux-amd64
 | `--version` | печатает версию |
 | `--selftest` | самопроверка: закреплённые SHA256 payloads, заголовки FIP, allowlist probe, CRC XMODEM, парсеры. `SELFTEST PASS` / `SELFTEST FAIL: …` |
 | `probe [флаги]` | Porting Collector без меню |
-| `export [--input DIR] [--output DIR] [--redact]` | переупаковать bundle из уже собранного каталога probe (по умолчанию — последний `work/probe-*`) |
+| `export [--input DIR] [--output DIR] [--redact]` | переупаковать bundle из уже собранного каталога probe (по умолчанию — последняя probe-сессия в `work/sessions/`, старые `work/probe-*` тоже находятся) |
 
 Флаги `probe`:
 
 | флаг | смысл |
 |---|---|
 | `--uart PORT` | порт (`COM6`, `/dev/ttyUSB0`). Можно опустить: `probe` ищет порты так же, как меню (на Windows — `QueryDosDeviceW`). Ни одного порта — ошибка с кодом 2; ровно один — выбирается автоматически; несколько — печатается нумерованный список, код выхода 2, нужно повторить команду с `--uart PORT` |
-| `--output DIR` | каталог сессии (по умолчанию `work/probe-<время>`) |
+| `--output DIR` | каталог данных probe (по умолчанию новая сессия `work/sessions/<дата>-<время>-probe-<hex>/`) |
 | `--uboot-only` / `--linux-only` / `--no-linux` | ограничить среды (первые два взаимоисключающие) |
 | `--bootrom` | ответить на `Press x` и проверить `C` от XMODEM |
 | `--ram-uboot md\|mf` | «кирпич» Nokia: загрузить RAM U-Boot UrsidoRescue и исследовать через него |
@@ -259,17 +259,20 @@ UrsidoRescue.exe probe --uart COM6
 
 | путь | что там |
 |---|---|
-| `work/recovery-<время>.uart.log` | полный UART-лог операций с RAM U-Boot (пункты 1–5, эксперт 2–5) |
-| `work/term-<время>.uart.log` | лог UART-терминала (эксперт 1) |
-| `work/shell-<время>.uart.log` | лог UART Shell (эксперт 6) |
-| `work/stock-<время>/` | `mtd16`, разрезанный на BL2 + части по 8 МиБ (пункт 1) |
-| `work/physical-<время>/` | образ NAND, разрезанный на части (пункт 3) |
-| `work/probe-<время>/` | сессия Porting Collector |
+| `work/sessions/<дата>-<время>-<операция>-<hex>/` | **сессия**: каждая операция меню работает в своей (probe-пункты — в общей, пока не выбран «N») |
+| `…/uart.log` | полный сырой UART-лог операции (раньше `work/recovery-*`, `term-*`, `shell-*.uart.log`) |
+| `…/session.log` | события и вопросы программы с временем (ответы не пишутся — там могут быть пароли) |
+| `…/operations.jsonl` | структурированный журнал: начало и итог операции, каждая команда U-Boot с кодом возврата и временем, подтверждения, созданные файлы |
+| `…/errors.log` | ошибки |
+| `…/session.json` | вид операции, версия, интерфейс, время, итог (`success` / `cancelled` / `failed`), operation ID |
+| `…/stock-<время>/`, `…/physical-<время>/` | временная нарезка образа на части (пункты 1 и 3) |
+| probe-сессия | дополнительно данные Porting Collector: `transcript.jsonl`, `uboot/`, `linux/`, `flash/`, `dt/`… |
 | `UrsidoRescue-support-<время>.zip` | пакет логов для отчёта (пункт 6) |
 | `ursus-probe-<vendor>-<model>-<soc>-<время>.zip` | porting bundle |
 
-Каталоги `stock-*` и `physical-*` занимают столько же, сколько исходный образ (до 256 МиБ);
-после успешного восстановления их можно удалить.
+Каталоги `stock-*` и `physical-*` внутри сессии занимают столько же, сколько исходный образ (до 256 МиБ);
+после успешного восстановления их можно удалить. Файлы старых версий в `work/` (`*.uart.log`, `probe-*`)
+по-прежнему попадают в пакет логов и находятся командой `export`.
 
 ## 8. Если что-то пошло не так
 

@@ -35,7 +35,9 @@
 | `lang.go` | 83 | Язык интерфейса: `L(ru, en)`, `--lang`, `URSIDO_LANG`, локаль, диалог выбора |
 | `term.go` | ~400 | Чистая логика терминала без ввода-вывода: ANSI-декодер клавиш, перевод Windows `KEY_EVENT_RECORD` в байты, построчный редактор с историей, XMODEM-приём (CRC, 128/1K) |
 | `term_run.go` | ~640 | Работающий терминал: цикл чтения UART, прозрачный/построчный режим, ASCII-фильтр, пейджер с обходом полноэкранных TUI, меню Ctrl+], XMODEM-отправка/приём |
-| `serial.go` | 11 | Интерфейс `Serial`: `Name`, `Read(buf, timeout)`, `Write`, `ResetInput`, `Close` |
+| `serial.go` | 8 | `Serial` = `app.Port`: `Name`, `Read(buf, timeout)`, `Write`, `ResetInput`, `Close` |
+| `operations.go` | ~210 | Каталог операций (сценарии ТЗ §10 с классами риска), `RunOperation`, сессии операций и probe-сессия, `openPort` — аренда порта у `PortOwner` |
+| `console_frontend.go` | ~130 | Консольная реализация `app.UI`: рисует события, прогресс, вопросы и подтверждения так же, как консоль до application layer |
 | `serial_linux.go` | ~110 | termios через `ioctl(TCGETS/TCSETS)`: raw 115200 8N1, `CLOCAL`, без управления потоком; поиск `/dev/ttyUSB*`, `ttyACM*`, `ttyAMA*`, `ttyS*` |
 | `serial_windows.go` | ~170 | `kernel32.dll` через `syscall`: `CreateFileW`, `SetCommState`, `SetCommTimeouts`, `PurgeComm`, `ReadFile`/`WriteFile`; поиск существующих `COMn` через `QueryDosDeviceW` |
 | `udp_windows.go`, `udp_other.go` | 18 / 5 | `isExpectedUDPNoise`: на Windows ошибки UDP `WSAECONNRESET` (10054) / `WSAECONNABORTED` (10053) от устаревшего пира — шум для TFTP-сервера; на других ОС всегда `false` |
@@ -47,6 +49,27 @@
 | `payloads/` | | Бинарники для BootROM: preloader и RAM FIP для MD и MF |
 | `build.sh` | | Сборка релиза |
 | `.github/workflows/build.yml` | | CI |
+
+## Пакет `app/` (application layer)
+
+Прослойка между ядром и интерфейсами (ТЗ `doc/UI_SPEC_RU.md` §6, §8, §9, §13, §14). Не знает о консоли,
+HTML и ANSI.
+
+| файл | назначение |
+|---|---|
+| `ui.go` | Контракт `UI`: `Event` (уровень, метка, секции), `Progress` (с неизвестным total — без фиктивных процентов), `Ask` (текст, путь, выбор), `Confirm`, `Output` (сырые байты UART), `Artifact`; `ErrCancelled` |
+| `risk.go` | Классы риска `READ_ONLY … MANUAL`, форма подтверждения по классу (`FormFor`), `Validate` не пропускает запись или стирание без фразы |
+| `session.go` | Сессия `work/sessions/<дата>-<время>-<вид>-<hex>/`: `session.json`, `session.log`, `operations.jsonl`, `errors.log`, `artifacts/`; operation ID; `SessionUI` — обёртка UI, пишущая события, вопросы (без ответов) и подтверждения в сессию |
+| `port.go` | `PortOwner`: владеет портом, выдаёт аренду одной операции; `Close` аренды только возвращает её; отключение и смена порта под арендой запрещены |
+| `recorder.go` | Сценарный UI для тестов и headless-запуска; `CheckAnswer` — общее правило проверки ответа на подтверждение |
+
+Поток вызова: интерфейс → `a.RunOperation(вид)` → новая сессия и operation ID → `a.ui` = `SessionUI`
+поверх интерфейса → мастер ядра → `a.openPort()` (аренда) → транспорт. Ядро сообщает только через
+`a.ui` (`a.event`, `a.note`, `a.status`, `a.confirm(риск, фраза)`), каждая команда U-Boot пишется в
+`operations.jsonl` с кодом возврата и временем.
+
+Два теста-стража на `go/ast`: функции ядра не вызывают `fmt.Print*`, `os.Stdout`/`os.Stdin` и
+консольные функции рисования; открывать порт (`openSerial`) может только `PortOwner`.
 
 ## Пакет `probe/` (Porting Collector)
 

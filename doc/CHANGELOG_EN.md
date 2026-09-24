@@ -58,7 +58,18 @@ Releases by CI.
   table moved to ARCHITECTURE.
 - `PROBE.md`: the Porting Collector main-menu number is now 7. Number 8 has been stale since test5.
 - Approved the unified UI specification v3 for Web-GUI / TUI / CLI (`doc/UI_SPEC_RU.md`, Russian)
-  and added an HTML mockup of the Web-GUI (`doc/ui-mockup/`). No UI code yet.
+  and added an HTML mockup of the Web-GUI (`doc/ui-mockup/`).
+- **Spec stage 1: application layer** (the console behaves as before):
+  - package `app`: the Event / Progress / Ask / Confirm / Output / Artifact contract, risk classes,
+    confirmation by class (a phrase is mandatory for WRITE / ERASE / UBI_METADATA);
+  - the core reports and asks only through the UI; the console is one implementation; a `go/ast`
+    guard test;
+  - operation catalogue and `RunOperation`: every operation runs in its own session
+    `work/sessions/<date>-<time>-<kind>-<hex>/` (`session.json`, `session.log`, `uart.log`,
+    `operations.jsonl` with every U-Boot command, `errors.log`), operation IDs on every event;
+  - the port belongs to `PortOwner` and is leased to one operation at a time;
+  - UART logs and image chunks moved into the session directory; the log bundle and `export` still
+    find older files in `work/`.
 - Documentation and `PROBE.md` updated to test17: network and LAN prerequisites, coloured output,
   EOT, stock LAN assist, `--stock-lan-assist`, the Telnet-only passive plan and late credential refresh.
 
