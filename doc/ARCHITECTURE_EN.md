@@ -1,6 +1,6 @@
 # UrsidoRescue architecture
 
-[Русская версия](ARCHITECTURE_RU.md) · [Contents](README.md) · version 0.2.0-test14
+[Русская версия](ARCHITECTURE_RU.md) · [Contents](README.md) · version 0.2.0-test16
 
 ## Overview
 
@@ -28,8 +28,10 @@ everything else is shared.
 
 | file | lines | purpose |
 |---|---|---|
-| `main.go` | ~2600 | NAND layout constants, MD/MF profiles with pinned SHA256, `realMain` (argument parsing, release-root lookup), main and expert menus, profile and port choice, BootROM wait and XMODEM send, U-Boot prompt wait, U-Boot commands with return codes, TFTP server, RAM checks and readback, all wizards (stock, FIP, physical, ITB, diagnostics, expert 3/4), log bundle, `--selftest` |
-| `main_probe.go` | ~570 | Glue to the `probe` package: the Porting menu, BootROM submenu, `probe`/`export` CLI, exit codes, profile summary |
+| `main.go` | ~2640 | NAND layout constants, MD/MF profiles with pinned SHA256, `realMain` (argument parsing, release-root lookup), main and expert menus, profile and port choice, BootROM wait and XMODEM send, U-Boot prompt wait, U-Boot commands with return codes, TFTP server, RAM checks and readback, all wizards (stock, FIP, physical, ITB, diagnostics, expert 3/4), log bundle, `--selftest` |
+| `main_probe.go` | ~590 | Glue to the `probe` package: the Porting menu, BootROM submenu, `probe`/`export` CLI (including `--stock-lan-assist`), exit codes, profile summary |
+| `stock_access.go` | ~540 | Stock LAN assist for the Nokia XG-040G-MD/MF: stock Web HTTP client (RSA + AES login-form encryption, as in UrsusFlasher), model check, Telnet/FTP credentials (`storage.cgi?ftp_config`), enabling FTP via `storage.cgi` (only on confirmation), `stockLANLoginAssist` with a 90 s wait for the Web UI. The Web administrator password can be overridden with `URSIDO_STOCK_WEB_PASSWORD` |
+| `console_ui.go` | ~130 | Coloured operator output (UrsusBoot/UrsusFlasher palette): `paint`, `uiStatus`, `uiEvent` with a content-based tone, the "Network prerequisites" block and the active IPv4 interface list. Colour is off with `NO_COLOR`, `TERM=dumb` and non-terminal output |
 | `lang.go` | 83 | UI language: `L(ru, en)`, `--lang`, `URSIDO_LANG`, locale, selection dialogue |
 | `term.go` | ~400 | Terminal logic without I/O: ANSI key decoder, Windows `KEY_EVENT_RECORD` translation, line editor with history, XMODEM receive (CRC, 128/1K) |
 | `term_run.go` | ~640 | The running terminal: UART read loop, raw/line mode, ASCII gate, pager with fullscreen-TUI bypass, Ctrl+] menu, XMODEM send/receive |
@@ -57,7 +59,7 @@ through two entry points, and a test proves there are no others.
 | `internal.go` | The three fixed internal line templates (hush test, return-code marker, Linux wrapper `echo URSIDO_B_n; cmd 2>&1; echo URSIDO_E_n_$?`) |
 | `session.go` | Session: port, `uart.log`, `transcript.jsonl`, timeouts (`Timing`, so tests run fast) |
 | `console.go` | Classifies the last line: U-Boot prompt, Linux shell, login, unknown |
-| `collect.go` | Collection by layer (`BootROM`, `UBoot`, `Linux`, `Flash`, `DT`, `Network`, `GPIO`), autoboot stop, waiting for Linux, login |
+| `collect.go` | Collection by layer (`BootROM`, `UBoot`, `Linux`, `Flash`, `DT`, `Network`, `GPIO`), autoboot stop, waiting for Linux, login: stock LAN assist via `LinuxLoginAssist` (credentials in `LinuxLoginPlan`, memory only), UART login, `su`, UID-0 proof via `id -u`, the FTP question |
 | `parse.go` | Parsers: `md.b`/`mtd dump` hex dumps, `mtd list`, `/proc/mtd`, sysfs, `ubinfo`, `printenv`, `bdinfo`, `help`, `mii`, boot log and SoC |
 | `fdt.go` | Own FDT/DTB parser and `.dts` decompiler (no `dtc`) |
 | `dtmeta.go` | Device-tree digest: flash partitions, Ethernet/PHY, GPIO buttons and LEDs |
@@ -105,6 +107,21 @@ a profile update means the program refuses to work. File provenance: [../README.
 
 ## Key mechanisms
 
+- **Stock LAN assist (`stockLANLoginAssist` → `collector.automaticStockLogin`).** On a stock
+  `Login:` the probe runs the assist in a goroutine and keeps reading the UART meanwhile
+  (`runLinuxAssist`). For up to 90 s the assist tries to log in to the Web UI at `192.168.1.1`,
+  checks the XG-040G-MD/MF model and returns a `LinuxLoginPlan`: the Telnet account (`LoginUser`),
+  the UID-0 FTP service account (`RootUser`), `FTPEnabled`. Then `tryStockUARTPlan`:
+  - a direct login as `RootUser`;
+  - otherwise a login as `LoginUser` and `tryUARTSU`;
+  - after each, `currentUID` (`id -u`); only `0` means UID 0.
+  With no UID 0, FTP off and an `Ask` available, a `y/N` question follows; `runLinuxAssist(true)`
+  enables FTP and re-reads the credentials. Passwords reach the port through `sendKeys`, which
+  writes only a label to `uart.log`, and only after `Password:` was recognised. In the CLI the
+  assist is enabled with `--stock-lan-assist` and no `Ask` is set, so FTP is never enabled.
+- **Colour.** All operator messages go through `console_ui.go`. Raw UART bytes (`logBytes`, the
+  terminal) are never coloured.
+
 - **U-Boot return code.** After every command, `echo __URSIDO_<nanoseconds>__RC_$?`; the answer is
   parsed with a regular expression. No marker or `rc≠0` stops the operation.
 - **Slow line sending.** 16-byte pieces 3 ms apart: U-Boot's UART buffer is small.
@@ -113,7 +130,8 @@ a profile update means the program refuses to work. File provenance: [../README.
     once (`scanXmodemReply`: ACK beats noise in the same read);
   - a receiver abort is only `CAN CAN` in a row; a single `CAN` is ignored;
   - `CAN CAN CAN` from the PC is sent in a `defer`, only while `dataComplete == false`;
-  - EOT at most 3 times with 1.5 s waits. `scanXmodemEOTReply`: ACK is success; NAK retries; any
+  - EOT with a 0.9 s wait; silence hands off at once without EOT retries. `scanXmodemEOTReply`: ACK
+    is success; NAK retries EOT (at most 3 times); any
     other non-whitespace byte is a handoff, i.e. next-stage output;
   - on handoff or with no EOT ACK it returns `nil` and keeps the bytes received after EOT in
     `Trailing`.
@@ -127,11 +145,14 @@ a profile update means the program refuses to work. File provenance: [../README.
 - **LAN/TFTP (`tftpLoadKnownLocal`).**
   - `detectLocalIP`: the address of the interface routed to `192.168.1.1` (a UDP "dial" that sends
     no packets); fallback: scan active `192.168.1.x` interfaces.
-  - Up to **3 attempts**. Each: `configureUBootNet` (temporary MACs, IP, `serverip`, `tftpdstp`,
-    `autoload`) → a fresh `runTFTPServer` with a cancel channel → `tftpboot` → byte count →
-    `verifyRAM` (`hash sha256` or `crc32`).
-  - On failure: `close(cancel)` releases UDP/1069, `resyncUBootAfterNetError` (Ctrl-C until the
-    prompt, 4 × 1.5 s), a backoff of `attempt` seconds.
+  - `configureUBootNet` (temporary MACs, IP, `serverip`, `tftpdstp`, `autoload`) runs **once per
+    session**: in `tftpLoad` and at the start of the stock/physical wizards.
+  - Up to **3 attempts** per transfer. Each: a fresh `runTFTPServer` with a cancel channel →
+    `tftpboot` → byte count → `verifyRAM` (`hash sha256` or `crc32`).
+  - `tftpboot` failure: `close(cancel)` releases UDP/1069, `resyncUBootAfterNetError` (Ctrl-C until
+    the prompt, 4 × 1.5 s), `configureUBootNet` again, a backoff of `attempt` seconds.
+  - Verification failure (bytes, RAM): only a backoff and a repeated transfer; the network is left
+    alone.
   - `ping` is not used.
 - **TFTP server (`runTFTPServer`).** A goroutine on UDP:
   - answers only an RRQ for the expected name from `192.168.1.1`;
@@ -189,8 +210,10 @@ messages (physical restore, expert 3/4).
 - **Main package:** XMODEM CRC16, prompt detection, bad blocks and good spans, language choice, ANSI
   decoder, line editor and history, Windows key translation, ASCII gate (including Cyrillic from
   Windows), fullscreen-ANSI detection (including across reads), pager, batched escape sequences,
-  local Ctrl+Q, XMODEM receive and bad-CRC rejection, the one-transfer limit being exactly 128 MiB, XMODEM reply parsing (noise, single `CAN`,
-  `CAN CAN`), the EOT handoff classifier, the prompt after the AN7583 ANSI bootmenu.
+  local Ctrl+Q, XMODEM receive and bad-CRC rejection, the one-transfer limit being exactly 128 MiB,
+  XMODEM reply parsing (noise, single `CAN`, `CAN CAN`), the EOT handoff classifier, the prompt after
+  the AN7583 ANSI bootmenu, coloured-message tone (`TestEventTone`), stock Web encoding and parsing
+  (`TestStockEncodeURL`, `TestStockJSField`, `TestStockPKCS7`).
 - **probe:** allowlist (destructive commands blocked, read-only allowed, UBI attach not read-only),
   internal templates and "nothing else writes lines", no destructive literals in probe code, all
   parsers, FDT, FIP, conflict resolution, full probe on a simulated board (with and without UBI

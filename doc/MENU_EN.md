@@ -1,6 +1,6 @@
 # UrsidoRescue menus: every item in detail
 
-[Русская версия](MENU_RU.md) · [Contents](README.md) · version 0.2.0-test14
+[Русская версия](MENU_RU.md) · [Contents](README.md) · version 0.2.0-test16
 
 This page explains what every menu item does, in which order, which commands reach the router and
 where the program stops by itself. Wiring and network setup are in [GUIDE_EN.md](GUIDE_EN.md).
@@ -86,7 +86,8 @@ mode. **Nothing is written to flash.**
    - 128-byte blocks, ACK wait up to 2 s, **at most 8 attempts** per block; NAK or `C` retries only
      that block at once;
    - a single `CAN` is line noise; a receiver abort needs **`CAN CAN`**;
-   - after the last block is ACKed: EOT, at most 3 times with 1.5 s waits. **A missing EOT ACK after
+   - after the last block is ACKed: EOT with a 0.9 s wait; retried only on an explicit NAK (up to
+     3 times), never on silence. **A missing EOT ACK after
      fully ACKed data is not fatal**: the next stage proves success, either the second `CCC`
      receiver after the preloader (step 6) or a stable U-Boot prompt after the FIP (step 8);
    - `CAN CAN CAN` is sent only when the data phase fails, never after the last block was ACKed.
@@ -116,20 +117,27 @@ stops it.
 Used by items 1–4 and expert 3–4. The router's Ethernet (LAN) port is cabled to the PC. Resilience
 details: [GUIDE_EN.md](GUIDE_EN.md#lan-tftp).
 
+0. At the very start of the wizard (before the profile choice and the RAM U-Boot) a **"Network
+   prerequisites"** block is printed: a direct cable into LAN2/LAN3, Nokia and PC IPs, UDP/1069, a
+   request to disable extra adapters, and the PC's active IPv4 interfaces (a warning if there are
+   several, but nothing is blocked).
 1. **Route-aware PC IP.** The program takes the address of the interface the OS uses to reach
    `192.168.1.1`; fallback: any active interface with `192.168.1.x`. If none, it asks you to set
    Ethernet statically (`192.168.1.254/24` recommended) and type the address, and checks that it can
    bind to it.
-2. For every attempt (at most **3**):
-   1. U-Boot gets `ethaddr=02:00:00:04:0d:10`, `eth1addr=02:00:00:04:0d:11` (temporary locally
-      administered MACs, in-memory environment only), `ipaddr 192.168.1.1`, `serverip <PC IP>`,
-      `netmask 255.255.255.0`, `tftpdstp 1069`, `autoload no` again;
-   2. **the built-in TFTP server** starts on `<PC IP>:1069/UDP`: it serves exactly one file under
+2. **U-Boot network is configured once per session:** `ethaddr=02:00:00:04:0d:10`,
+   `eth1addr=02:00:00:04:0d:11` (temporary locally administered MACs, in-memory environment only),
+   `ipaddr 192.168.1.1`, `serverip <PC IP>`, `netmask 255.255.255.0`, `tftpdstp 1069`,
+   `autoload no`. All chunks of a large image reuse these settings.
+3. Each transfer gets at most **3** attempts:
+   1. **the built-in TFTP server** starts on `<PC IP>:1069/UDP`: it serves exactly one file under
       one expected name, only to `192.168.1.1`, and every wait it makes is bounded;
-   3. `tftpboot 0x90000000 <name>`; the byte count must equal the file size;
-   4. **RAM check:** `hash sha256` if U-Boot has it, otherwise `crc32`.
-3. On failure the server stops and releases the port, U-Boot is **resynchronised** (Ctrl-C until a
-   stable prompt), there is a 1–2 s backoff, and **only this transfer** is repeated. After 3
+   2. `tftpboot 0x90000000 <name>`; the byte count must equal the file size;
+   3. **RAM check:** `hash sha256` if U-Boot has it, otherwise `crc32`.
+4. If the `tftpboot` command itself fails, the server stops and releases the port, U-Boot is
+   **resynchronised** (Ctrl-C until a stable prompt), the U-Boot network is re-applied, there is a
+   1–2 s backoff, and **only this transfer** is repeated. If the byte count or the RAM check does
+   not match, only the transfer is repeated, with no resync and no network reconfiguration. After 3
    failures: stop, "TFTP failed after 3 attempts".
 
 `ping` is no longer run: the transfer plus the RAM check is the proof that the network works. One
@@ -247,7 +255,7 @@ entering the BootROM again and repeating. A broken BL2 on top of a half-written 
 
 1. Path to the image; the size must be **exactly** `0x10000000` (256 MiB). The SHA256 is printed.
 2. Profile → RAM U-Boot.
-3. `mtd bad bl2` and `mtd bad ubi`: in 0.2.0-test14 **any** bad block → stop. A raw image carries
+3. `mtd bad bl2` and `mtd bad ubi`: in 0.2.0-test16 **any** bad block → stop. A raw image carries
    another chip's bad-block layout; writing it over a NAND with bad blocks without understanding
    the format is unsafe.
 4. Network; the image is split in `work/physical-<time>/` into `bl2.bin` and 8 MiB `ubi-NN.bin`.
@@ -328,14 +336,26 @@ Several items in a row extend one session; `N` starts a new one.
 
 Items 1 and 3–7 first ask: *"Is the device already on and sitting at a U-Boot/Linux prompt (allow
 one Ctrl-C)? [y/N]"*. `y` is the `--wake` mode: one Ctrl-C to wake a device that is already running.
-Then: "The probe only reads… After starting, power the device on." Timeout: 5 minutes.
+The program then reminds you that the probe's flash commands stay read-only and that the stock LAN
+assist first only reads Web credentials; if FTP must be enabled, there will be a separate `y/N`.
+Timeout: 5 minutes.
+
+**Logging in to stock Linux.** If a Nokia XG-040G-MD/MF stock `Login:` shows up on the UART, the
+probe first tries the **stock LAN assist**:
+1. it takes the current credentials through the Web UI at `192.168.1.1` (waiting up to 90 s);
+2. it logs in over UART as the UID-0 service account, or through the Telnet account and `su`;
+3. it checks `id -u` = 0;
+4. if needed, it asks `y/N` about enabling FTP.
+For this the PC must be on `192.168.1.x` and cabled to a router LAN port. Passwords stay in memory
+only. Details: [GUIDE_EN.md](GUIDE_EN.md#stock-login). If the assist fails, you are asked for a user
+and password by hand.
 
 | item | collects |
 |---|---|
 | **1. Full probe** | All layers: BootROM markers, U-Boot, flash/MTD/UBI, DTB, network, GPIO, Linux. Flow: power on → the probe interrupts U-Boot autoboot and collects → asks you to power-cycle the device (do **not** hold Reset) → waits for Linux without interrupting it and collects the Linux part. The bundle is exported automatically at the end. |
 | **2. BootROM profile** | Submenu, see below. |
 | **3. U-Boot profile** | U-Boot only: `version`, `help`, `bdinfo`, `printenv`, `mtd list`, `mtd bad`, `nand/mmc info`, `dm tree`, `mii`/`mdio`, `gpio status`, control DTB. |
-| **4. Linux profile** | Linux only: `uname`, `cpuinfo`, `cmdline`, `meminfo`, `/proc/mtd`, `/sys/class/mtd`, `ubinfo`, `dmesg`, `fw_printenv`, `board.json`, `/sys/firmware/fdt`, `ip link/addr`, `ethtool`, debug gpio. If Linux asks for a login, the probe asks you for user and password (empty user = skip the Linux part). |
+| **4. Linux profile** | Linux only: `uname`, `cpuinfo`, `cmdline`, `meminfo`, `/proc/mtd`, `/sys/class/mtd`, `ubinfo`, `dmesg`, `fw_printenv`, `board.json`, `/sys/firmware/fdt`, `ip link/addr`, `ethtool`, debug gpio. On a stock `Login:` the stock LAN assist runs first (see above); if it fails, the probe asks you for user and password (empty user = skip the Linux part). |
 | **5. Flash / MTD / UBI** | Partition map and samples: the first 4 KiB of every partition and the last 4 KiB of partitions up to 8 MiB (`mtd dump`), UBI geometry from the EC/VID headers, FIP ToC parsing, SHA256 of boot partitions. Runs in the first reachable environment (U-Boot or Linux). |
 | **6. DTB** | Control DTB from U-Boot (`md.b`) or `/sys/firmware/fdt` from Linux; the built-in parser decompiles it to `dt/fdt.dts` (no dtc needed). |
 | **7. Network / PHY / switch** | `mii`/`mdio` in U-Boot, `ip`, `ethtool` in Linux. |

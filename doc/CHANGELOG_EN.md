@@ -42,6 +42,8 @@ Releases by CI.
 | 0.2.0-test12 | `0b07944` | 11:03 | XMODEM and LAN/TFTP hardening |
 | 0.2.0-test13 | `03336da`, `d799a8f` | no (no tag) | AN7583 EOT handoff |
 | 0.2.0-test14 | `28f14c4` | yes | read-only diagnostics, 128 MiB limit, COM in the CLI |
+| 0.2.0-test15 | `115c87c` | yes | network once per session, LAN prerequisites, colour, EOT |
+| 0.2.0-test16 | `8f72817` | yes | stock LAN assist: UART login and UID 0 |
 
 ---
 
@@ -51,8 +53,87 @@ Releases by CI.
   operator guide, every menu in detail, architecture, and this complete changelog.
 - Added `README.ru.md`, the Russian version of the main README, linked from the English `README.md`.
 - `PROBE.md`: the Porting Collector main-menu number is now 7. Number 8 has been stale since test5.
+- Documentation and `PROBE.md` updated to test16: network and LAN prerequisites, coloured output,
+  EOT, stock LAN assist and `--stock-lan-assist`.
 
 ---
+
+## 0.2.0-test16 (2026-09-24 12:07–12:10)
+
+Commits:
+- `4caad37`: release;
+- `f9b953f`: CI gofmt diff output;
+- `3311d81`: finalisation;
+- `8f72817`: probe build fix.
+
+Tag `v0.2.0-test16` → `8f72817`, pre-release. CI run #38 on this commit fully PASSed: format, vet
+and tests, Windows/Linux builds, selftest, packaging, publishing.
+
+Status: **simulation candidate / HW PARTIAL**.
+
+**Why:** a real MF stock boot under test15 reached the serial `Login:` prompt, but the probe could
+only ask for `--linux-user`/`--linux-password`, and an empty answer skipped the Linux part. The same
+log shows:
+- `user_ftp` on MF is UID 0, while `user-telnet` is an ordinary user (UID 1002);
+- stock init changes the `user_ftp`, `user-telnet` and `root` passwords late in boot.
+
+**Stock LAN assist for the UART login (Nokia XG-040G-MD/MF):**
+- At a stock `Login:` the interactive probe does not ask for a login right away. For up to 90 s it
+  waits for the stock Web UI on `192.168.1.1`, reading the UART all the time.
+- The mechanism comes from the UrsusFlasher family:
+  - encrypted stock Web login;
+  - model check, XG-040G-MD/MF only;
+  - reading the current `TelnetUserName/TelnetPassword` and `FtpUserName/FtpPassword`
+    (`storage.cgi?ftp_config`).
+- **Credentials live in memory only.** They are never printed or written to the bundle,
+  transcript, UART log or command-line arguments.
+- **UART login order:**
+  1. directly as the UID-0 service account (FTP, `user_ftp` on MF);
+  2. if the serial getty refuses it: log in as the Telnet account and `su` to the UID-0 account.
+- **UID 0 is proven only by `id -u`** returning `0`. The probe's Linux allowlist permits exactly
+  `id -u`.
+- **If UID 0 is not obtained and stock FTP is off**, one separate `y/N` question offers to enable
+  FTP through the stock Web UI.
+  - It is labelled plainly as a stock-settings change, not "read-only".
+  - No raw MTD or firmware is written.
+  - Credentials are re-read, then the login and `su` are retried.
+  - FTP stays enabled after the probe.
+- If a login succeeds without UID 0, the read-only Linux diagnostics continue with the current
+  privileges.
+- **CLI:** the new `--stock-lan-assist` flag only fetches credentials passively. The command line
+  never enables FTP, since it has no interactive confirmation.
+- The probe result gained `linux_uid0`, `stock_lan_assist` and `stock_service_provisioned`.
+- `--selftest` checks that the guard admits `id -u`.
+- **Tests:** `TestStockEncodeURL`, `TestStockJSField`, `TestStockPKCS7`.
+
+## 0.2.0-test15 (2026-09-24 11:43)
+
+Commit `115c87c`, tag `v0.2.0-test15`, pre-release.
+
+Status: **simulation candidate / HW PARTIAL**.
+
+**Why:** test14 on a real MF reached a stable RAM U-Boot, passed the geometry and bad-block checks,
+and transferred and verified several 8 MiB stock chunks. The log also showed that the U-Boot network
+variables were redundantly re-applied before every chunk.
+
+- **U-Boot network is configured once per session**, as in UrsusFlasher/MedveFlasher. Later chunks
+  reuse the same `ethaddr/ipaddr/serverip/netmask/tftpdstp`.
+  - The network is re-applied only after a real TFTP/network failure and prompt resync.
+  - A RAM-verification retry does not touch the network.
+- **A "Network prerequisites" block** before every LAN/TFTP wizard (items 1–4, expert 3–4):
+  - a direct cable; LAN2 or LAN3 (LAN1 not recommended, avoid LAN4);
+  - Nokia and PC IPs, DHCP off on the recovery adapter;
+  - the built-in server on UDP/1069;
+  - a request to disable Wi-Fi, VPN, other Ethernet, virtual adapters and tunnels;
+  - the PC's active IPv4 interfaces, listed for information only, non-blocking.
+- **Coloured console output** in the UrsusBoot/UrsusFlasher palette (brown, amber, sand, green,
+  red), only on an interactive terminal. `NO_COLOR`, `TERM=dumb` and redirected output stay plain.
+  UART bytes and UART logs are never coloured.
+- **XMODEM EOT no longer retries on silence** after fully ACKed data:
+  - the EOT reply wait is 0.9 s;
+  - EOT is retried only on an explicit NAK, at most 3 times;
+  - otherwise control passes straight to the next-stage proof.
+- **Tests:** `TestEventTone`.
 
 ## 0.2.0-test14 (2026-09-24 11:31)
 

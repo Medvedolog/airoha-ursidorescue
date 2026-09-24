@@ -1,6 +1,6 @@
 # Архитектура UrsidoRescue
 
-[English version](ARCHITECTURE_EN.md) · [Оглавление](README.md) · версия 0.2.0-test14
+[English version](ARCHITECTURE_EN.md) · [Оглавление](README.md) · версия 0.2.0-test16
 
 ## Общая схема
 
@@ -28,8 +28,10 @@
 
 | файл | строк | назначение |
 |---|---|---|
-| `main.go` | ~2600 | Константы раскладки NAND, профили MD/MF с закреплёнными SHA256, `realMain` (разбор аргументов, поиск корня релиза), главное и экспертное меню, выбор профиля и порта, ожидание BootROM и XMODEM-отправка, ожидание приглашения U-Boot, выполнение команд U-Boot с получением кода возврата, TFTP-сервер, проверки RAM и проверка после записи, все мастера (stock, FIP, physical, ITB, диагностика, эксперт 3/4), пакет логов, `--selftest` |
-| `main_probe.go` | ~570 | Связка с пакетом `probe`: меню «Портирование», подменю BootROM, CLI `probe`/`export`, коды выхода, печать сводки профиля |
+| `main.go` | ~2640 | Константы раскладки NAND, профили MD/MF с закреплёнными SHA256, `realMain` (разбор аргументов, поиск корня релиза), главное и экспертное меню, выбор профиля и порта, ожидание BootROM и XMODEM-отправка, ожидание приглашения U-Boot, выполнение команд U-Boot с получением кода возврата, TFTP-сервер, проверки RAM и проверка после записи, все мастера (stock, FIP, physical, ITB, диагностика, эксперт 3/4), пакет логов, `--selftest` |
+| `main_probe.go` | ~590 | Связка с пакетом `probe`: меню «Портирование», подменю BootROM, CLI `probe`/`export` (включая `--stock-lan-assist`), коды выхода, печать сводки профиля |
+| `stock_access.go` | ~540 | Stock LAN assist для Nokia XG-040G-MD/MF: HTTP-клиент stock Web (RSA + AES-шифрование формы входа, как в UrsusFlasher), проверка модели, чтение Telnet/FTP-реквизитов (`storage.cgi?ftp_config`), включение FTP через `storage.cgi` (только по подтверждению), `stockLANLoginAssist` — ожидание Web до 90 с. Пароль Web-администратора переопределяется `URSIDO_STOCK_WEB_PASSWORD` |
+| `console_ui.go` | ~130 | Цветной вывод оператору (палитра UrsusBoot/UrsusFlasher): `paint`, `uiStatus`, `uiEvent` с тоном по содержимому, блок «Сетевые пререквизиты» и список активных IPv4-интерфейсов. Цвет выключается при `NO_COLOR`, `TERM=dumb` и выводе не в терминал |
 | `lang.go` | 83 | Язык интерфейса: `L(ru, en)`, `--lang`, `URSIDO_LANG`, локаль, диалог выбора |
 | `term.go` | ~400 | Чистая логика терминала без ввода-вывода: ANSI-декодер клавиш, перевод Windows `KEY_EVENT_RECORD` в байты, построчный редактор с историей, XMODEM-приём (CRC, 128/1K) |
 | `term_run.go` | ~640 | Работающий терминал: цикл чтения UART, прозрачный/построчный режим, ASCII-фильтр, пейджер с обходом полноэкранных TUI, меню Ctrl+], XMODEM-отправка/приём |
@@ -57,7 +59,7 @@
 | `internal.go` | Три фиксированных внутренних шаблона строк (hush-тест, маркер кода возврата, Linux-обёртка `echo URSIDO_B_n; cmd 2>&1; echo URSIDO_E_n_$?`) |
 | `session.go` | Сессия: порт, лог `uart.log`, `transcript.jsonl`, таймауты (`Timing` — чтобы тесты шли быстро) |
 | `console.go` | Классификация последней строки: приглашение U-Boot, shell Linux, логин, неизвестное |
-| `collect.go` | Сценарий сбора по слоям (`BootROM`, `UBoot`, `Linux`, `Flash`, `DT`, `Network`, `GPIO`), остановка автозагрузки, ожидание Linux, логин |
+| `collect.go` | Сценарий сбора по слоям (`BootROM`, `UBoot`, `Linux`, `Flash`, `DT`, `Network`, `GPIO`), остановка автозагрузки, ожидание Linux, логин: stock LAN assist через `LinuxLoginAssist` (реквизиты в `LinuxLoginPlan` — только в памяти), вход по UART, `su`, доказательство UID 0 через `id -u`, вопрос о включении FTP |
 | `parse.go` | Парсеры: hex-дампы `md.b`/`mtd dump`, `mtd list`, `/proc/mtd`, sysfs, `ubinfo`, `printenv`, `bdinfo`, `help`, `mii`, журнал загрузки и SoC |
 | `fdt.go` | Собственный парсер FDT/DTB и декомпиляция в `.dts` (без `dtc`) |
 | `dtmeta.go` | Выжимка из дерева устройств: разделы flash, Ethernet/PHY, GPIO-кнопки и светодиоды |
@@ -105,6 +107,21 @@ SPI-NAND 256 МиБ (0x10000000), eraseblock 0x20000, страница (min I/O)
 
 ## Ключевые механизмы
 
+- **Stock LAN assist (`stockLANLoginAssist` → `collector.automaticStockLogin`).** На stock
+  `Login:` probe запускает assist в горутине и всё это время вычитывает UART (`runLinuxAssist`).
+  Assist до 90 с пытается войти в Web `192.168.1.1`, проверяет модель XG-040G-MD/MF и возвращает
+  `LinuxLoginPlan`: Telnet-учётку (`LoginUser`), UID0-сервисную FTP-учётку (`RootUser`),
+  `FTPEnabled`. Дальше `tryStockUARTPlan`:
+  - прямой вход под `RootUser`;
+  - иначе вход под `LoginUser` и `tryUARTSU`;
+  - после каждого варианта `currentUID` (`id -u`); только `0` = UID0.
+  Если UID 0 нет, FTP выключен и есть `Ask`, задаётся вопрос `y/N`; `runLinuxAssist(true)` включает
+  FTP и перечитывает реквизиты. Пароль уходит в порт через `sendKeys`, который пишет в `uart.log`
+  только метку, и только после распознанного `Password:`. В CLI assist подключается флагом
+  `--stock-lan-assist`, а `Ask` не задан, поэтому FTP не включается.
+- **Цвет.** Все операторские сообщения идут через `console_ui.go`. Сырые байты UART
+  (`logBytes`, терминал) не раскрашиваются никогда.
+
 - **Код возврата U-Boot.** После каждой команды — `echo __URSIDO_<наносекунды>__RC_$?`; ответ
   разбирается регулярным выражением. Без маркера или с `rc≠0` операция останавливается.
 - **Медленная отправка строки.** Кусками по 16 байт с паузой 3 мс: UART-буфер U-Boot маленький.
@@ -113,8 +130,9 @@ SPI-NAND 256 МиБ (0x10000000), eraseblock 0x20000, страница (min I/O)
     немедленный повтор блока (`scanXmodemReply`: ACK важнее шума в том же чтении);
   - отмена приёмником — только `CAN CAN` подряд; одиночный `CAN` игнорируется;
   - `CAN CAN CAN` от ПК — в `defer`, только пока `dataComplete == false`;
-  - EOT — не более 3 раз по 1,5 с. `scanXmodemEOTReply`: ACK — успех; NAK — повтор; любой другой
-    непробельный байт — handoff, то есть вывод следующего этапа;
+  - EOT с ожиданием 0,9 с. `scanXmodemEOTReply`: ACK — успех; NAK — повтор EOT (не более 3 раз);
+    любой другой непробельный байт — handoff, то есть вывод следующего этапа; тишина — сразу
+    handoff без повторов EOT;
   - при handoff или без EOT ACK функция возвращает `nil`, а байты после EOT кладёт в `Trailing`.
   Вызывающий обязан доказать переход: в `acquireRAMUBoot` поле `Trailing` передаётся в
   `waitReceiver` (второй приёмник после preloader) или в `waitUBootPrompt` (приглашение после
@@ -126,11 +144,13 @@ SPI-NAND 256 МиБ (0x10000000), eraseblock 0x20000, страница (min I/O)
 - **LAN/TFTP (`tftpLoadKnownLocal`).**
   - `detectLocalIP`: адрес интерфейса по маршруту к `192.168.1.1` (UDP-«dial» без отправки
     пакетов); запасной вариант — перебор активных интерфейсов `192.168.1.x`.
-  - До **3 попыток**. Каждая: `configureUBootNet` (временные MAC, IP, `serverip`, `tftpdstp`,
-    `autoload`) → новый `runTFTPServer` с каналом отмены → `tftpboot` → сверка байтов → `verifyRAM`
-    (`hash sha256` или `crc32`).
-  - Сбой: `close(cancel)` освобождает UDP/1069, `resyncUBootAfterNetError` (Ctrl-C до приглашения,
-    4 × 1,5 с), пауза `attempt` секунд.
+  - `configureUBootNet` (временные MAC, IP, `serverip`, `tftpdstp`, `autoload`) вызывается **один
+    раз за сессию**: в `tftpLoad` и в начале stock/physical-мастеров.
+  - До **3 попыток** на передачу. Каждая: новый `runTFTPServer` с каналом отмены → `tftpboot` →
+    сверка байтов → `verifyRAM` (`hash sha256` или `crc32`).
+  - Сбой `tftpboot`: `close(cancel)` освобождает UDP/1069, `resyncUBootAfterNetError` (Ctrl-C до
+    приглашения, 4 × 1,5 с), повторный `configureUBootNet`, пауза `attempt` секунд.
+  - Сбой проверки (байты, RAM): только пауза и повтор передачи, сеть не трогается.
   - `ping` не используется.
 - **TFTP-сервер (`runTFTPServer`).** Горутина на UDP:
   - отвечает только на RRQ с ожидаемым именем от `192.168.1.1`;
@@ -189,8 +209,10 @@ SPI-NAND 256 МиБ (0x10000000), eraseblock 0x20000, страница (min I/O)
   выбор языка, ANSI-декодер, построчный редактор и история, перевод клавиш Windows, ASCII-фильтр
   (в т. ч. кириллица из Windows), обнаружение полноэкранного ANSI (включая разрыв между чтениями),
   пейджер, пакетная отправка escape-последовательностей, локальный Ctrl+Q, XMODEM-приём и отказ
-  при неверной CRC, предел одной передачи ровно 128 МиБ, разбор ответов XMODEM (шум, одиночный `CAN`, `CAN CAN`), классификатор EOT
-  handoff, приглашение после ANSI-bootmenu AN7583.
+  при неверной CRC, предел одной передачи ровно 128 МиБ, разбор ответов XMODEM (шум, одиночный
+  `CAN`, `CAN CAN`), классификатор EOT handoff, приглашение после ANSI-bootmenu AN7583, тон цветных
+  сообщений (`TestEventTone`), кодирование и разбор stock Web (`TestStockEncodeURL`,
+  `TestStockJSField`, `TestStockPKCS7`).
 - **probe:** allowlist (разрушительные команды блокируются, read-only разрешены, UBI attach не
   считается read-only), внутренние шаблоны и «никто, кроме них, не пишет строки», отсутствие
   разрушительных литералов в коде probe, все парсеры, FDT, FIP, разрешение конфликтов, полный
