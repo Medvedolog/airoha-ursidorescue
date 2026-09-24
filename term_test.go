@@ -180,7 +180,6 @@ func TestFilterASCIICommandInput(t *testing.T) {
 	}
 }
 
-
 func TestHasFullscreenANSI(t *testing.T) {
 	full := []string{
 		"\x1b[H",

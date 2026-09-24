@@ -23,14 +23,13 @@ type uartTerm struct {
 	shownW    int  // rune width of the input line currently on screen (line mode)
 	lineShown bool // an input line is drawn and needs erasing before device output
 
-	pagerEnabled     bool
-	pagerWaiting     bool
-	pagerLines       int
-	pagerPending     []byte
-	pagerANSIProbe   []byte
-	lastASCIINotice  time.Time
+	pagerEnabled    bool
+	pagerWaiting    bool
+	pagerLines      int
+	pagerPending    []byte
+	pagerANSIProbe  []byte
+	lastASCIINotice time.Time
 }
-
 // runTerminal opens the port and runs the interactive terminal.
 func (a *App) runTerminal() error {
 	port, e := a.choosePort()
