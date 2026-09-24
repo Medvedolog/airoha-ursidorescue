@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UrsidoRescue — результат операции</title>
+<link rel="stylesheet" href="style.css">
+<script src="mock.js"></script>
+</head>
+<body data-active="stock" data-port="COM6" data-stop-mode="now">
+<div class="app">
+<header class="top" id="top"></header>
+<div class="body">
+<nav class="side" id="side" aria-label="Действия"></nav>
+<div class="work">
+
+<main class="wiz">
+<div class="wizhead"><div style="flex:1">
+<div class="eyebrow">СПАСЕНИЕ · РЕЗУЛЬТАТ</div>
+<h1>Сток записан и сверен</h1>
+<div class="sub">Вернуть сток Nokia · 24 минуты · 30 частей + BL2</div>
+<div class="ids">сессия <button type="button" data-full="20260924-115752-stock-restore-7f3c" title="Скопировать полный ID">…7f3c</button> · op <button type="button" data-full="op-20260924-115801-stock-restore-a121" title="Скопировать полный ID">…a121</button></div>
+</div></div>
+
+<div class="results">
+<div class="res ok"><span>Запись</span><b>OK · 31 шаг</b></div>
+<div class="res ok"><span>Чтение обратно</span><b>OK · crc32 совпал</b></div>
+<div class="res ok"><span>SHA256 источника</span><b class="mono">9f3c…a41e</b></div>
+<div class="res nv"><span>Загрузка</span><b>НЕ ПРОВЕРЕНА</b></div>
+</div>
+
+<div class="banner chg">ЗАГРУЗКА ЕЩЁ НЕ ПРОВЕРЕНА<small>Данные во flash совпадают с источником, но старт стоковой прошивки подтвердит только перезагрузка.</small></div>
+
+<section class="card" aria-label="Файлы">
+<div class="cardhead"><b>Файлы сессии</b><span class="spacer"></span><span class="mono sub">work/sessions/20260924-115752-stock-restore-7f3c/</span></div>
+<div class="facts">
+<div><span>UART</span><em class="mono" style="font-style:normal">uart.log · 2,1 МиБ</em></div>
+<div><span>Операции</span><em class="mono" style="font-style:normal">operations.jsonl · 142 записи</em></div>
+<div><span>Ошибки</span>нет</div>
+<div><span>Артефакты</span><em class="mono" style="font-style:normal">artifacts/ · 0</em></div>
+</div>
+</section>
+
+<div style="display:flex;gap:12px;flex-wrap:wrap">
+<button type="button" class="btn pri">Перезагрузить и проверить старт</button>
+<button type="button" class="btn sec">Открыть папку сессии</button>
+<button type="button" class="btn sec">Собрать пакет логов</button>
+<button type="button" class="btn sec">Готово</button>
+</div>
+</main>
+
+<section class="log" id="log" aria-label="Лог UART">
+<div class="logbar">
+<span class="title">UART</span><span class="path mono">COM6 · work/sessions/…-stock-restore-7f3c/uart.log</span>
+<div class="seg filter" role="group" aria-label="Фильтр">
+<button type="button" data-v="all" aria-pressed="true">Всё</button>
+<button type="button" data-v="uart" aria-pressed="false">UART</button>
+<button type="button" data-v="ev" aria-pressed="false">События</button>
+</div>
+<span class="spacer"></span>
+<button type="button" class="tool pause" aria-pressed="false">Пауза</button>
+<button type="button" class="tool">Копировать</button>
+<button type="button" class="tool maxi" aria-label="Развернуть лог">⤢</button>
+</div>
+<div class="lines">
+<div class="ln uart"><span class="ts"></span><span class="tx">AN7583&gt; mtd write bl2 0x90000000 0x0 0x20000</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">AN7583&gt; mtd read bl2 0x91000000 0x0 0x20000</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">AN7583&gt; crc32 0x91000000 0x20000</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">crc32 for 91000000 ... 9101ffff ==&gt; 0d3e77a1</span></div>
+<div class="ln ev"><span class="ts">12:21:54</span><span class="tx ok">BL2 сверен: crc32 0d3e77a1</span></div>
+<div class="ln ev"><span class="ts">12:21:55</span><span class="tx ok">Сток записан: 30/30 частей + BL2</span></div>
+<button type="button" class="jump" hidden>↓ К новым строкам</button>
+</div>
+</section>
+</div>
+</div>
+</div>
+</body>
+</html>

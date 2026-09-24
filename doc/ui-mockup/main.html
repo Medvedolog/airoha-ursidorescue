@@ -4,12 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>UrsidoRescue — вернуть сток</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <script src="mock.js"></script>
 </head>
-<body data-active="stock">
+<body data-active="stock" data-port="COM6" data-lease="stock-restore …a121" data-stop-mode="checkpoint" data-stop-note="после части 10 из 30">
 <div class="app">
 <header class="top" id="top"></header>
 <div class="body">
@@ -22,8 +20,12 @@
 <div class="eyebrow">СПАСЕНИЕ · ЗАПИСЬ ВО FLASH</div>
 <h1>Вернуть сток Nokia</h1>
 <div class="sub">Источник: <span class="mono">D:\backup\XG040G-MF\mtd16.bin.gz</span> · SHA256 <span class="mono">9f3c…a41e</span></div>
+<div class="ids">сессия <button type="button" data-full="20260924-115752-stock-restore-7f3c" title="Скопировать полный ID">…7f3c</button> · op <button type="button" data-full="op-20260924-115801-stock-restore-a121" title="Скопировать полный ID">…a121</button></div>
 </div>
-<button type="button" class="ghost" style="height:44px">Остановиться после текущей части</button>
+<div class="seg" data-demo role="group" aria-label="Демо: фаза">
+<button type="button" data-v="ibu" data-stop="checkpoint" data-note="после части 10 из 30" aria-pressed="true">Фаза: IBU</button>
+<button type="button" data-v="bl2" data-stop="unavailable" data-note="проверяется BL2" aria-pressed="false">Фаза: BL2</button>
+</div>
 </div>
 
 <ol class="stages" aria-label="Этапы">
@@ -32,11 +34,13 @@
 <li class="stage done"><div class="st"><span class="mk">✓</span>ГОТОВО</div><b>RAM FIP</b><small>BL31 + U-Boot</small></li>
 <li class="stage done"><div class="st"><span class="mk">✓</span>ГОТОВО</div><b>Проверки</b><small>геометрия, bad</small></li>
 <li class="stage done"><div class="st"><span class="mk">✓</span>ГОТОВО</div><b>Стирание</b><small>mtd erase ubi</small></li>
-<li class="stage now" aria-current="step"><div class="st"><span class="mk">•</span>ИДЁТ</div><b>Запись IBU</b><small>9 из 30 частей</small></li>
-<li class="stage"><div class="st"><span class="mk"></span>ЖДЁТ</div><b>BL2</b><small>последним</small></li>
+<li class="stage now" aria-current="step" data-phase="ibu"><div class="st"><span class="mk">•</span>ИДЁТ</div><b>Запись IBU</b><small>9 из 30 частей</small></li>
+<li class="stage" data-phase="ibu"><div class="st"><span class="mk"></span>ЖДЁТ</div><b>BL2</b><small>последним</small></li>
+<li class="stage done" data-phase="bl2"><div class="st"><span class="mk">✓</span>ГОТОВО</div><b>Запись IBU</b><small>30 из 30 частей</small></li>
+<li class="stage locked" aria-current="step" data-phase="bl2"><div class="st"><span class="mk">■</span>НЕ ПРЕРЫВАТЬ</div><b>BL2</b><small>запись и сверка</small></li>
 </ol>
 
-<section class="card" aria-label="Текущий шаг">
+<section class="card" aria-label="Текущий шаг" data-phase="ibu">
 <div class="cardhead"><b>Запись заводской области (IBU)</b><span class="part">часть 10 из 30</span><span class="spacer"></span><span class="mono sub">прошло 06:41 · осталось ≈ 15 мин</span></div>
 <div class="bar" role="progressbar" aria-label="Прогресс записи IBU" aria-valuemin="0" aria-valuemax="30" aria-valuenow="9"><i></i></div>
 <div class="facts">
@@ -45,12 +49,25 @@
 <div><span>Bad-блоки ubi</span>2, в безопасном окне</div>
 <div><span>BL2</span><em style="font-style:normal;color:var(--ok)">не тронут, будет последним</em></div>
 </div>
+<div class="note"><b>СТОП сейчас:</b> текущая часть будет дописана и сверена, затем мастер остановится. Устройство останется в U-Boot из RAM; повторный запуск продолжит с первой несверенной части.</div>
+</section>
+
+<section class="card" aria-label="Текущий шаг" data-phase="bl2" hidden>
+<div class="cardhead"><b>Запись BL2</b><span class="part">последний шаг</span><span class="spacer"></span><span class="mono sub">≈ 10 с</span></div>
+<div class="bar ind" role="progressbar" aria-label="Запись BL2"><i></i></div>
+<div class="facts">
+<div><span>Сейчас</span>mtd write bl2 → read back → crc32</div>
+<div><span>IBU</span><em style="font-style:normal;color:var(--ok)">30/30 частей сверены</em></div>
+<div><span>Нельзя</span>выключать питание и отключать UART</div>
+<div><span>После</span>СТОП снова станет доступен</div>
+</div>
+<div class="note"><b>Остановка недоступна:</b> прерванная запись BL2 оставит устройство без загрузчика. Шаг будет доведён до сверки.</div>
 </section>
 </main>
 
 <section class="log" id="log" aria-label="Лог UART">
 <div class="logbar">
-<span class="title">UART</span><span class="path mono">COM6 · пишется в work/recovery-…uart.log</span>
+<span class="title">UART</span><span class="path mono">COM6 · work/sessions/…-stock-restore-7f3c/uart.log</span>
 <div class="seg filter" role="group" aria-label="Фильтр">
 <button type="button" data-v="all" aria-pressed="true">Всё</button>
 <button type="button" data-v="uart" aria-pressed="false">UART</button>

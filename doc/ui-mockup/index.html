@@ -7,12 +7,17 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body style="display:grid;place-items:center;min-height:100vh">
-<main style="width:min(640px,90vw);display:flex;flex-direction:column;gap:16px;padding:32px;border:1px solid var(--edge);border-radius:16px;background:var(--surface)">
+<main style="width:min(680px,90vw);display:flex;flex-direction:column;gap:12px;padding:32px;border:1px solid var(--edge);border-radius:16px;background:var(--surface)">
 <h1 style="margin:0">UrsidoRescue GUI — макет</h1>
-<p class="sub" style="margin:0">Статический кликабельный прототип. Данные выдуманы, порт и сеть не используются.</p>
-<a class="ghost" style="display:flex;align-items:center;height:44px;text-decoration:none" href="main.html">1. Мастер «Вернуть сток» — лог UART снизу</a>
-<a class="ghost" style="display:flex;align-items:center;height:44px;text-decoration:none" href="terminal.html">2. UART-терминал — лог развёрнут, ввод активен</a>
-<a class="ghost" style="display:flex;align-items:center;height:44px;text-decoration:none" href="confirm.html">3. Подтверждение записи — лог виден под диалогом</a>
+<p class="sub" style="margin:0">Статический кликабельный прототип к doc/UI_SPEC_RU.md v3.1. Данные выдуманы, порт и сеть не используются, внешних запросов нет.</p>
+<a class="ghost" style="display:flex;align-items:center;min-height:44px;text-decoration:none" href="connect.html">1. Первое подключение — пустое состояние, выбор порта</a>
+<a class="ghost" style="display:flex;align-items:center;min-height:44px;text-decoration:none" href="bootrom.html">2. Ожидание BootROM — три шага и признаки в UART</a>
+<a class="ghost" style="display:flex;align-items:center;min-height:44px;text-decoration:none" href="confirm.html">3. Подтверждение — класс риска, действия, граница остановки</a>
+<a class="ghost" style="display:flex;align-items:center;min-height:44px;text-decoration:none" href="main.html">4. Мастер «Вернуть сток» — СТОП «после части 10»</a>
+<a class="ghost" style="display:flex;align-items:center;min-height:44px;text-decoration:none" href="main.html?phase=bl2">5. Мастер, фаза BL2 — ОСТАНОВКА НЕДОСТУПНА</a>
+<a class="ghost" style="display:flex;align-items:center;min-height:44px;text-decoration:none" href="result.html">6. Результат операции — загрузка не проверена</a>
+<a class="ghost" style="display:flex;align-items:center;min-height:44px;text-decoration:none" href="probe.html">7. Porting Collector — баннеры режима</a>
+<a class="ghost" style="display:flex;align-items:center;min-height:44px;text-decoration:none" href="terminal.html">8. UART-терминал — лог развёрнут, ввод активен</a>
 </main>
 </body>
 </html>

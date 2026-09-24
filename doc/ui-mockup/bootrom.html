@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UrsidoRescue — ожидание BootROM</title>
+<link rel="stylesheet" href="style.css">
+<script src="mock.js"></script>
+</head>
+<body data-session="revive-9b20" data-active="revive" data-port="COM6" data-lease="revive …c41d" data-stop-mode="now">
+<div class="app">
+<header class="top" id="top"></header>
+<div class="body">
+<nav class="side" id="side" aria-label="Действия"></nav>
+<div class="work">
+
+<main class="wiz">
+<div class="wizhead"><div style="flex:1">
+<div class="eyebrow">СПАСЕНИЕ · БЕЗ ЗАПИСИ</div>
+<h1>Жду BootROM</h1>
+<div class="sub">Ничего не пишется во flash. Когда появится <span class="mono">Press x</span>, программа сама ответит.</div>
+<div class="ids">сессия <button type="button" data-full="20260924-115752-revive-9b20" title="Скопировать полный ID">…9b20</button> · op <button type="button" data-full="op-20260924-115753-revive-c41d" title="Скопировать полный ID">…c41d</button></div>
+</div><span class="mono big" aria-label="Прошло времени">00:37</span></div>
+
+<div class="steps3">
+<div class="step3"><span class="n">1</span><b>Выключите роутер</b><span>Кнопкой или из розетки. UART оставьте подключённым.</span></div>
+<div class="step3"><span class="n">2</span><b>Замкните кнопку/перемычку</b><span>Если BootROM не видно с первого раза — держите WPS/Reset или замкните TP по схеме из инструкции.</span></div>
+<div class="step3"><span class="n">3</span><b>Включите питание</b><span>Лог ниже сразу покажет, что говорит устройство.</span></div>
+</div>
+
+<section class="card" aria-label="Признаки">
+<div class="cardhead"><b>Что видно в UART</b><span class="spacer"></span><span class="sub">обновляется по мере прихода строк</span></div>
+<div class="signs">
+<div class="sign"><span>Поток байт</span><b class="y">есть · 115200</b></div>
+<div class="sign"><span>BootROM «Press x»</span><b class="n">ещё нет</b></div>
+<div class="sign"><span>XMODEM «C»</span><b class="n">ещё нет</b></div>
+<div class="sign"><span>Грузится прошивка</span><b class="y">да — U-Boot с flash</b></div>
+</div>
+<div class="note"><b>Подсказка:</b> строки U-Boot означают, что роутер загружается с flash мимо BootROM. Выключите питание и повторите шаг 2.</div>
+</section>
+</main>
+
+<section class="log" id="log" aria-label="Лог UART">
+<div class="logbar">
+<span class="title">UART</span><span class="path mono">COM6 · work/sessions/…-revive-9b20/uart.log</span>
+<div class="seg filter" role="group" aria-label="Фильтр">
+<button type="button" data-v="all" aria-pressed="true">Всё</button>
+<button type="button" data-v="uart" aria-pressed="false">UART</button>
+<button type="button" data-v="ev" aria-pressed="false">События</button>
+</div>
+<span class="spacer"></span>
+<button type="button" class="tool pause" aria-pressed="false">Пауза</button>
+<button type="button" class="tool">Копировать</button>
+<button type="button" class="tool maxi" aria-label="Развернуть лог">⤢</button>
+</div>
+<div class="lines">
+<div class="ln ev"><span class="ts">12:31:02</span><span class="tx amb">Ожидание BootROM Press x / CCC</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">U-Boot 2026.07-OpenWrt</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">CPU:   Airoha AN7583</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx dim">Hit any key to stop autoboot:  3</span></div>
+<div class="ln ev"><span class="ts">12:31:09</span><span class="tx amb">Похоже на загрузку с flash, а не BootROM: выключите питание и повторите</span></div>
+<button type="button" class="jump" hidden>↓ К новым строкам</button>
+</div>
+</section>
+</div>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UrsidoRescue — подключение</title>
+<link rel="stylesheet" href="style.css">
+<script src="mock.js"></script>
+</head>
+<body data-session="" data-active="" data-stop-mode="now">
+<div class="app">
+<header class="top" id="top"></header>
+<div class="body">
+<nav class="side" id="side" aria-label="Действия"></nav>
+<div class="work">
+
+<div class="empty"><div class="box">
+<h2>Подключите USB-UART</h2>
+<p>Нажмите на чип порта вверху слева, чтобы выбрать COM-порт. Нужен адаптер 3,3 В: TX↔RX, RX↔TX, GND↔GND. Питание (VCC) не подключайте.</p>
+<p>Если порта нет в списке — проверьте драйвер (CH340, CP210x, FTDI) и нажмите «Обновить».</p>
+<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+<button type="button" class="btn pri" onclick="document.getElementById('portchip').click();event.stopPropagation()">Выбрать порт</button>
+<button type="button" class="btn sec">Как подключить UART</button>
+</div>
+</div></div>
+
+</div>
+</div>
+</div>
+</body>
+</html>

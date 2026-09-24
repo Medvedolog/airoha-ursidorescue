@@ -4,12 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>UrsidoRescue — подтверждение записи</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <script src="mock.js"></script>
 </head>
-<body data-active="stock">
+<body data-active="stock" data-port="COM6" data-lease="stock-restore …a121" data-stop-mode="now">
 <div class="app">
 <header class="top" id="top"></header>
 <div class="body">
@@ -22,13 +20,16 @@
 <svg width="28" height="28" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1z" fill="none" stroke="#e8837a" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6v4M8 11.8v.4" stroke="#e8837a" stroke-width="1.4" stroke-linecap="round"/></svg>
 <h2 id="cf-title">Сейчас начнётся запись во flash</h2>
 </div>
-<div style="font-size:15px;line-height:22px;color:var(--uart)">Все проверки только на чтение пройдены. Дальше будет:</div>
+<div class="risk">Класс риска <b>ERASE</b><span>высший из действий ниже</span></div>
+<div style="font-size:15px;line-height:22px;color:var(--uart)">Все проверки только на чтение пройдены. Действия по порядку:</div>
 <ol>
-<li>полностью стёрта область OpenWrt UBI (<span class="mono">mtd erase ubi</span>);</li>
-<li>записаны 30 частей заводского <span class="mono">mtd16</span> с проверкой каждой;</li>
-<li>BL2 записан <strong>последним</strong>, только если всё остальное сошлось.</li>
+<li>стереть область OpenWrt UBI целиком (<span class="mono">mtd erase ubi</span>);</li>
+<li>записать 30 частей заводского <span class="mono">mtd16</span>, сверяя каждую;</li>
+<li>записать BL2 <strong>последним</strong>, только если всё остальное сошлось.</li>
 </ol>
+<div class="boundary"><b>Остановка:</b> во время стирания и записи частей — после текущей части; во время записи BL2 — недоступна до сверки.</div>
 <div class="facts2">Источник SHA256 <span class="mono" style="color:var(--ink)">9f3c…a41e</span> · bad-блоков в ubi: 2, в безопасном окне · тест TFTP до записи: PASS</div>
+<div class="ids">сессия <button type="button" data-full="20260924-115752-stock-restore-7f3c" title="Скопировать полный ID">…7f3c</button> · op <button type="button" data-full="op-20260924-115801-stock-restore-a121" title="Скопировать полный ID">…a121</button></div>
 <label>
 <span>Введите точно <strong class="mono" style="color:var(--sand)">RESTORE STOCK BACKUP</strong></span>
 <input id="phrase" class="phrase" type="text" data-want="RESTORE STOCK BACKUP" autocomplete="off" spellcheck="false" autofocus>

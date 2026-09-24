@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UrsidoRescue — Porting Collector</title>
+<link rel="stylesheet" href="style.css">
+<script src="mock.js"></script>
+</head>
+<body data-session="probe-4a7e" data-active="probe" data-mode="probe" data-port="COM6" data-lease="probe …e913" data-stop-mode="unavailable" data-stop-note="сбор пока не поддерживает остановку">
+<div class="app">
+<header class="top" id="top"></header>
+<div class="body">
+<nav class="side" id="side" aria-label="Действия"></nav>
+<div class="work">
+
+<main class="wiz">
+<div class="wizhead"><div style="flex:1">
+<div class="eyebrow">РАЗВЕДКА · PORTING COLLECTOR</div>
+<h1>Сбор данных о новом железе</h1>
+<div class="sub">Отчёт для портирования: SoC, NAND, разметка, окружение U-Boot, логи загрузки.</div>
+<div class="ids">сессия <button type="button" data-full="20260924-124010-probe-4a7e" title="Скопировать полный ID">…4a7e</button> · op <button type="button" data-full="op-20260924-124011-probe-e913" title="Скопировать полный ID">…e913</button></div>
+</div>
+<div class="seg" data-demo role="group" aria-label="Демо: состояние">
+<button type="button" data-v="ro" data-stop="unavailable" data-note="сбор пока не поддерживает остановку" aria-pressed="true">Только чтение</button>
+<button type="button" data-v="chg" data-stop="unavailable" data-note="сбор пока не поддерживает остановку" aria-pressed="false">+ FTP</button>
+<button type="button" data-v="not" data-stop="unavailable" data-note="сбор пока не поддерживает остановку" aria-pressed="false">UBI attach</button>
+</div></div>
+
+<div class="banner ro" data-phase="ro">ТОЛЬКО ЧТЕНИЕ<small>Ни flash, ни настройки устройства не меняются.</small></div>
+<div class="banner chg" data-phase="chg" hidden>ТОЛЬКО ЧТЕНИЕ FLASH · ИЗМЕНЕНА НАСТРОЙКА: FTP<small>Во flash ничего не пишется; на время сбора включён FTP, после — будет выключен.</small></div>
+<div class="banner not" data-phase="not" hidden>НЕ ТОЛЬКО ЧТЕНИЕ · UBI ATTACH<small><span class="mono">ubi part</span> может обновить метаданные UBI (счётчики стирания). Данные томов не меняются.</small></div>
+
+<section class="card" aria-label="Шаги сбора">
+<div class="cardhead"><b>Сбор</b><span class="part">шаг 4 из 9</span><span class="spacer"></span><span class="mono sub">прошло 01:52</span></div>
+<div class="bar" role="progressbar" aria-label="Прогресс сбора" aria-valuemin="0" aria-valuemax="9" aria-valuenow="4"><i></i></div>
+<div class="facts">
+<div><span>SoC</span>AN7583 (chip id 0x7583)</div>
+<div><span>NAND</span>Fudan FM25G02B · 256 МиБ</div>
+<div><span>Сейчас</span><em class="mono" style="font-style:normal">printenv → env.txt</em></div>
+<div><span>Далее</span>mtd list, bad-блоки, dmesg</div>
+</div>
+</section>
+</main>
+
+<section class="log" id="log" aria-label="Лог UART">
+<div class="logbar">
+<span class="title">UART</span><span class="path mono">COM6 · work/sessions/…-probe-4a7e/uart.log</span>
+<div class="seg filter" role="group" aria-label="Фильтр">
+<button type="button" data-v="all" aria-pressed="true">Всё</button>
+<button type="button" data-v="uart" aria-pressed="false">UART</button>
+<button type="button" data-v="ev" aria-pressed="false">События</button>
+</div>
+<span class="spacer"></span>
+<button type="button" class="tool pause" aria-pressed="false">Пауза</button>
+<button type="button" class="tool">Копировать</button>
+<button type="button" class="tool maxi" aria-label="Развернуть лог">⤢</button>
+</div>
+<div class="lines">
+<div class="ln ev"><span class="ts">12:40:12</span><span class="tx amb">Porting Collector: только чтение</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">AN7583&gt; mtd list</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">  - 0x000000000000-0x000000020000 : "bl2"</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">AN7583&gt; printenv</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">bootcmd=run boot_flash</span></div>
+<button type="button" class="jump" hidden>↓ К новым строкам</button>
+</div>
+</section>
+</div>
+</div>
+</div>
+</body>
+</html>
