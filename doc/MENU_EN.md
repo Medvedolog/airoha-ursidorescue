@@ -1,6 +1,6 @@
 # UrsidoRescue menus: every item in detail
 
-[Русская версия](MENU_RU.md) · [Contents](README.md) · version 0.2.0-test16
+[Русская версия](MENU_RU.md) · [Contents](README.md) · version 0.2.0-test17
 
 This page explains what every menu item does, in which order, which commands reach the router and
 where the program stops by itself. Wiring and network setup are in [GUIDE_EN.md](GUIDE_EN.md).
@@ -255,7 +255,7 @@ entering the BootROM again and repeating. A broken BL2 on top of a half-written 
 
 1. Path to the image; the size must be **exactly** `0x10000000` (256 MiB). The SHA256 is printed.
 2. Profile → RAM U-Boot.
-3. `mtd bad bl2` and `mtd bad ubi`: in 0.2.0-test16 **any** bad block → stop. A raw image carries
+3. `mtd bad bl2` and `mtd bad ubi`: in 0.2.0-test17 **any** bad block → stop. A raw image carries
    another chip's bad-block layout; writing it over a NAND with bad blocks without understanding
    the format is unsafe.
 4. Network; the image is split in `work/physical-<time>/` into `bl2.bin` and 8 MiB `ubi-NN.bin`.
@@ -316,8 +316,8 @@ data are in [../PROBE.md](../PROBE.md). In short:
 - MAC/serial/GPON never enter `profile.json`, the report or the draft: only *where* they live.
 
 ```
- PORTING / HARDWARE DISCOVERY (read-only)
-  1. Probe new Airoha device (full automatic read-only probe)
+ PORTING / HARDWARE DISCOVERY
+  1. Probe new Airoha device (full automatic probe)
   2. Collect BootROM profile
   3. Collect U-Boot profile
   4. Collect Linux profile
@@ -345,7 +345,9 @@ probe first tries the **stock LAN assist**:
 1. it takes the current credentials through the Web UI at `192.168.1.1` (waiting up to 90 s);
 2. it logs in over UART as the UID-0 service account, or through the Telnet account and `su`;
 3. it checks `id -u` = 0;
-4. if needed, it asks `y/N` about enabling FTP.
+4. if UID 0 is not proved, it keeps draining UART for 12 seconds, re-reads Web credentials once,
+   and retries the login/`su`;
+5. only then, if FTP is off, it asks `y/N` about enabling it.
 For this the PC must be on `192.168.1.x` and cabled to a router LAN port. Passwords stay in memory
 only. Details: [GUIDE_EN.md](GUIDE_EN.md#stock-login). If the assist fails, you are asked for a user
 and password by hand.
@@ -355,7 +357,7 @@ and password by hand.
 | **1. Full probe** | All layers: BootROM markers, U-Boot, flash/MTD/UBI, DTB, network, GPIO, Linux. Flow: power on → the probe interrupts U-Boot autoboot and collects → asks you to power-cycle the device (do **not** hold Reset) → waits for Linux without interrupting it and collects the Linux part. The bundle is exported automatically at the end. |
 | **2. BootROM profile** | Submenu, see below. |
 | **3. U-Boot profile** | U-Boot only: `version`, `help`, `bdinfo`, `printenv`, `mtd list`, `mtd bad`, `nand/mmc info`, `dm tree`, `mii`/`mdio`, `gpio status`, control DTB. |
-| **4. Linux profile** | Linux only: `uname`, `cpuinfo`, `cmdline`, `meminfo`, `/proc/mtd`, `/sys/class/mtd`, `ubinfo`, `dmesg`, `fw_printenv`, `board.json`, `/sys/firmware/fdt`, `ip link/addr`, `ethtool`, debug gpio. On a stock `Login:` the stock LAN assist runs first (see above); if it fails, the probe asks you for user and password (empty user = skip the Linux part). |
+| **4. Linux profile** | Linux only: `uname`, `cpuinfo`, `cmdline`, `meminfo`, `/proc/mtd`, `/sys/class/mtd`, `ubinfo`, `dmesg`, `fw_printenv`, `board.json`, `/sys/firmware/fdt`, `ip link/addr`, `ethtool`, debug gpio. On a stock `Login:` the stock LAN assist runs first (see above); if it fails, the manual fallback asks for user and password; only there does an empty user mean skip the Linux part. |
 | **5. Flash / MTD / UBI** | Partition map and samples: the first 4 KiB of every partition and the last 4 KiB of partitions up to 8 MiB (`mtd dump`), UBI geometry from the EC/VID headers, FIP ToC parsing, SHA256 of boot partitions. Runs in the first reachable environment (U-Boot or Linux). |
 | **6. DTB** | Control DTB from U-Boot (`md.b`) or `/sys/firmware/fdt` from Linux; the built-in parser decompiles it to `dt/fdt.dts` (no dtc needed). |
 | **7. Network / PHY / switch** | `mii`/`mdio` in U-Boot, `ip`, `ethtool` in Linux. |

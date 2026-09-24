@@ -113,7 +113,7 @@ https://github.com/Medvedolog/nokia-router-medveflasher · текущая вер
 
 ### UrsidoRescue — `airoha-ursidorescue`
 
-https://github.com/Medvedolog/airoha-ursidorescue · этот репозиторий · версия `0.2.0-test16`
+https://github.com/Medvedolog/airoha-ursidorescue · этот репозиторий · версия `0.2.0-test17`
 
 Нативный UART-спасатель и сборщик данных для портирования. Место в семействе — «последний рубеж»:
 когда в роутере не осталось ничего работающего, кроме BootROM.
