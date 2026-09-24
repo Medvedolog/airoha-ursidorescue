@@ -28,7 +28,12 @@ const (
 	exitSafetyBlocked   = 7
 )
 
+// newProbeDir starts a new Porting session (work/sessions/<id>/) and returns
+// its directory; the probe writes its data there.
 func (a *App) newProbeDir() string {
+	if d, err := a.newProbeSession(); err == nil {
+		return d
+	}
 	d := filepath.Join(a.work, "probe-"+time.Now().Format("20060102-150405"))
 	a.probeDir = d
 	return d
@@ -39,6 +44,17 @@ func (a *App) currentProbeDir() string {
 		return a.newProbeDir()
 	}
 	return a.probeDir
+}
+
+// runProbeIn runs one probe inside the current Porting session.
+func (a *App) runProbeIn(kind string, risk app.Risk, r probeRequest) (probeResult, error) {
+	var res probeResult
+	err := a.runProbeOperation(kind, risk, func() error {
+		var e error
+		res, e = a.runProbe(r)
+		return e
+	})
+	return res, err
 }
 
 func (a *App) analyzeProbe(dir string) (*probe.Profile, error) {
@@ -247,8 +263,10 @@ func (a *App) cliProbe(args []string) int {
 		}
 	}
 	dir := *out
+	var sess *app.Session
 	if dir == "" {
 		dir = a.newProbeDir()
+		sess = a.probeSess
 	}
 	if *unsafe {
 		fmt.Println(L("[SAFETY] --unsafe игнорируется: probe mode остаётся read-only.", "[SAFETY] --unsafe is ignored: probe mode stays read-only."))
@@ -265,7 +283,25 @@ func (a *App) cliProbe(args []string) int {
 	if *ubiAttach {
 		fmt.Println(L("[ADVANCED] --ubi-attach: U-Boot выполнит ubi part. Это НЕ read-only: UBI может изменить volume table (auto-resize), записать fastmap или перенести блоки.", "[ADVANCED] --ubi-attach: U-Boot will run ubi part. This is NOT read-only: UBI may change the volume table (auto-resize), write a fastmap or move blocks."))
 	}
-	res, err := a.runProbe(req)
+	risk := app.ReadOnly
+	if *ubiAttach {
+		risk = app.UBIMetadata
+	} else if req.ramUBoot != "" {
+		risk = app.NonPersistent
+	}
+	var res probeResult
+	run := func() error {
+		var e error
+		res, e = a.runProbe(req)
+		return e
+	}
+	var err error
+	if sess != nil {
+		err = a.inSession(sess, "probe", risk, run, true)
+		a.probeSess = nil
+	} else {
+		err = run()
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[PROBE]", err)
 		if res.code == 0 {
@@ -319,19 +355,45 @@ func (a *App) cliExport(args []string) int {
 	return exitProbeOK
 }
 
+// latestProbeDir finds the newest Porting data: sessions
+// (work/sessions/<date>-<time>-probe-*, ordered by their exact start time)
+// and legacy work/probe-<date>-<time>.
 func latestProbeDir(work string) string {
-	m, _ := filepath.Glob(filepath.Join(work, "probe-*"))
-	var dirs []string
-	for _, d := range m {
-		if dirExists(d) {
-			dirs = append(dirs, d)
-		}
+	type cand struct {
+		at  time.Time
+		dir string
 	}
-	sort.Strings(dirs)
-	if len(dirs) == 0 {
+	var cs []cand
+	legacy, _ := filepath.Glob(filepath.Join(work, "probe-*"))
+	for _, d := range legacy {
+		if !dirExists(d) {
+			continue
+		}
+		at, err := time.ParseInLocation("20060102-150405", strings.TrimPrefix(filepath.Base(d), "probe-"), time.Local)
+		if err != nil {
+			continue
+		}
+		cs = append(cs, cand{at, d})
+	}
+	sessions, _ := filepath.Glob(filepath.Join(app.SessionsDir(work), "*-probe-*"))
+	for _, d := range sessions {
+		if !dirExists(d) {
+			continue
+		}
+		var meta struct {
+			Started time.Time `json:"started"`
+		}
+		b, err := os.ReadFile(filepath.Join(d, "session.json"))
+		if err != nil || json.Unmarshal(b, &meta) != nil || meta.Started.IsZero() {
+			continue
+		}
+		cs = append(cs, cand{meta.Started, d})
+	}
+	if len(cs) == 0 {
 		return ""
 	}
-	return dirs[len(dirs)-1]
+	sort.SliceStable(cs, func(i, j int) bool { return cs[i].at.Before(cs[j].at) })
+	return cs[len(cs)-1].dir
 }
 
 // existingPorts uses the same platform enumerator as the interactive menu.
@@ -420,7 +482,11 @@ func (a *App) menuProbe(o probe.Options, export bool) error {
 	fmt.Println(L("\nProbe flash-команды остаются read-only. Stock LAN assist сначала только читает Web-реквизиты; если понадобится включить FTP, будет отдельное y/N с предупреждением об изменении stock-настройки.", "\nProbe flash commands remain read-only. Stock LAN assist first only reads Web credentials; if FTP must be enabled, a separate y/N warns that a stock setting will change."))
 	fmt.Println(L("Подключите UART (GND/TX/RX, 3.3V; VCC не подключать).", "Connect the UART (GND/TX/RX, 3.3V; never connect VCC)."))
 	fmt.Println(L("После запуска включите устройство. Если нужна Linux-часть, probe попросит перезагрузить его после U-Boot.", "After starting, power the device on. For the Linux part the probe will ask you to power-cycle it after U-Boot."))
-	res, err := a.runProbe(probeRequest{dir: a.currentProbeDir(), opts: o, export: export, interactive: true})
+	risk := app.ReadOnly
+	if o.UBIAttach {
+		risk = app.UBIMetadata
+	}
+	res, err := a.runProbeIn("probe", risk, probeRequest{dir: a.currentProbeDir(), opts: o, export: export, interactive: true})
 	if err != nil {
 		return err
 	}
@@ -452,7 +518,7 @@ func (a *App) menuBootROM() error {
 			return errors.New(L("для RAM U-Boot выберите MD или MF явно", "for the RAM U-Boot choose MD or MF explicitly"))
 		}
 		o := probe.Options{Layers: probe.AllLayers(), Ask: a.probeAsk, Timeout: 5 * time.Minute}
-		res, err := a.runProbe(probeRequest{dir: a.currentProbeDir(), opts: o, ramUBoot: pref.ID, interactive: true})
+		res, err := a.runProbeIn("probe-ram-uboot", app.NonPersistent, probeRequest{dir: a.currentProbeDir(), opts: o, ramUBoot: pref.ID, interactive: true})
 		if err != nil {
 			return err
 		}

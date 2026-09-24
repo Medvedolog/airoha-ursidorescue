@@ -98,9 +98,15 @@ type App struct {
 	probeDir     string // current porting-probe session
 	portOverride string // UART chosen on the command line
 
-	// ui is the front end the core reports to and asks through
-	// (application layer, doc/UI_SPEC_RU.md §6).
-	ui app.UI
+	// ui is what the core reports to and asks through (application layer,
+	// doc/UI_SPEC_RU.md §6): the front end, wrapped by the current session.
+	ui       app.UI
+	front    app.UI
+	frontEnd string
+
+	sess      *app.Session // session of the running operation
+	op        string       // its operation ID
+	probeSess *app.Session // current Porting session (spans probe items)
 }
 
 func main() { os.Exit(realMain()) }
@@ -118,7 +124,10 @@ func realMain() int {
 	}
 	enableVTOutput()
 	a := &App{root: root, work: filepath.Join(root, "work"), reader: bufio.NewReader(os.Stdin), lang: uiLang}
-	a.ui = newConsoleUI(a.reader)
+	a.front = newConsoleUI(a.reader)
+	a.ui = a.front
+	a.frontEnd = "console"
+	defer a.closeSessions()
 	_ = os.MkdirAll(a.work, 0755)
 	if !interactive {
 		switch args[0] {
@@ -190,31 +199,28 @@ func (a *App) run() error {
 		v := a.ask(L("Выбор: ", "Choice: "))
 		switch v {
 		case "1":
-			if err := a.stockRestoreWizard(); err != nil {
+			if err := a.RunOperation("stock-restore"); err != nil {
 				a.showErr(err)
 			}
 		case "2":
-			if err := a.fipRepairWizard(); err != nil {
+			if err := a.RunOperation("fip-repair"); err != nil {
 				a.showErr(err)
 			}
 		case "3":
-			if err := a.physicalRestoreWizard(); err != nil {
+			if err := a.RunOperation("physical-restore"); err != nil {
 				a.showErr(err)
 			}
 		case "4":
-			if err := a.bootRecoveryWizard(); err != nil {
+			if err := a.RunOperation("itb-boot"); err != nil {
 				a.showErr(err)
 			}
 		case "5":
-			if err := a.diagnosticsWizard(); err != nil {
+			if err := a.RunOperation("diagnostics"); err != nil {
 				a.showErr(err)
 			}
 		case "6":
-			p, err := a.makeSupportBundle()
-			if err != nil {
+			if err := a.RunOperation("support-bundle"); err != nil {
 				a.showErr(err)
-			} else {
-				fmt.Println(L("Пакет для отчёта:", "Report bundle:"), p)
 			}
 		case "7":
 			if err := a.portingMenu(); err != nil {
@@ -268,7 +274,7 @@ func (a *App) askPath(prompt string) (string, error) {
 func (a *App) confirm(risk app.Risk, phrase string) error {
 	err := a.ui.Confirm(app.ConfirmRequest{Risk: risk, Phrase: phrase})
 	if errors.Is(err, app.ErrCancelled) {
-		return errors.New(L("операция отменена пользователем", "operation cancelled by the user"))
+		return cancelledError{L("операция отменена пользователем", "operation cancelled by the user")}
 	}
 	return err
 }
@@ -370,9 +376,14 @@ func validateFIT(path string) error {
 }
 
 func (a *App) startLog(prefix string) (*os.File, error) {
-	stamp := time.Now().Format("20060102-150405")
-	p := filepath.Join(a.work, fmt.Sprintf("%s-%s.uart.log", prefix, stamp))
-	f, e := os.Create(p)
+	var p string
+	if a.sess != nil {
+		p = a.sess.UARTPath()
+	} else {
+		stamp := time.Now().Format("20060102-150405")
+		p = filepath.Join(a.work, fmt.Sprintf("%s-%s.uart.log", prefix, stamp))
+	}
+	f, e := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if e != nil {
 		return nil, e
 	}
@@ -967,7 +978,27 @@ func (a *App) readUntilPrompt(s Serial, timeout time.Duration, command string) (
 	}
 	return out, fmt.Errorf(L("тайм-аут команды U-Boot: %s", "U-Boot command timeout: %s"), command)
 }
-func (a *App) ubootCommandRaw(s Serial, command string, timeout time.Duration) ([]byte, int, error) {
+func (a *App) ubootCommandRaw(s Serial, command string, timeout time.Duration) (out []byte, rc int, err error) {
+	start := time.Now()
+	defer func() { a.recordCommand(command, start, rc, err) }()
+	return a.ubootCommandExec(s, command, timeout)
+}
+
+// recordCommand writes one U-Boot command into the session's
+// operations.jsonl (the source for a Command Inspector, UI_SPEC §32).
+func (a *App) recordCommand(command string, start time.Time, rc int, err error) {
+	if a.sess == nil {
+		return
+	}
+	rec := map[string]any{"op": a.op, "event": "command", "transport": "uart", "stage": "uboot",
+		"command": command, "rc": rc, "duration_ms": time.Since(start).Milliseconds()}
+	if err != nil {
+		rec["error"] = err.Error()
+	}
+	a.sess.Record(rec)
+}
+
+func (a *App) ubootCommandExec(s Serial, command string, timeout time.Duration) ([]byte, int, error) {
 	marker := fmt.Sprintf("__URSIDO_%x__", time.Now().UnixNano())
 	a.event("U-Boot: " + command)
 	a.waitQuiet(s, 180*time.Millisecond, time.Second)
@@ -1810,7 +1841,7 @@ func (a *App) prepareStock(path string) (stockPrepared, error) {
 		return stockPrepared{}, e
 	}
 	defer r.Close()
-	dir := filepath.Join(a.work, "stock-"+time.Now().Format("20060102-150405"))
+	dir := a.sessionScratch("stock-" + time.Now().Format("20060102-150405"))
 	if e = os.MkdirAll(dir, 0755); e != nil {
 		return stockPrepared{}, e
 	}
@@ -2204,7 +2235,7 @@ func (a *App) physicalRestoreWizard() error {
 	if e = a.configureUBootNet(s, local); e != nil {
 		return e
 	}
-	dir := filepath.Join(a.work, "physical-"+time.Now().Format("20060102-150405"))
+	dir := a.sessionScratch("physical-" + time.Now().Format("20060102-150405"))
 	if e = os.MkdirAll(dir, 0755); e != nil {
 		return e
 	}
@@ -2365,41 +2396,10 @@ func (a *App) expertMenu() error {
 		fmt.Println(L("  6. UART Shell (прозрачный терминал, ничего не отправляет сам)", "  6. UART Shell (transparent passthrough, sends nothing by itself)"))
 		fmt.Println(L("  0. Назад", "  0. Back"))
 		v := a.ask(L("Выбор: ", "Choice: "))
+		ops := map[string]string{"1": "terminal", "2": "ram-uboot", "3": "ubi-volume", "4": "raw-mtd", "5": "diagnostics", "6": "shell"}
 		switch v {
-		case "1":
-			if e := a.runTerminal(); e != nil {
-				return e
-			}
-		case "6":
-			if e := a.uartShell(); e != nil {
-				return e
-			}
-		case "2":
-			pref, e := chooseProfileInteractive(a)
-			if e != nil {
-				return e
-			}
-			s, _, _, e := a.acquireRAMUBoot(pref)
-			if e != nil {
-				return e
-			}
-			fmt.Println(L("RAM U-Boot готов. Открываю UART Shell; Ctrl+] вернёт в меню.", "RAM U-Boot is ready. Opening the UART Shell; Ctrl+] returns to the menu."))
-			e = a.uartShellOn(s)
-			s.Close()
-			a.closeLog()
-			if e != nil {
-				return e
-			}
-		case "3":
-			if e := a.expertUBIVolume(); e != nil {
-				return e
-			}
-		case "4":
-			if e := a.expertRawMTD(); e != nil {
-				return e
-			}
-		case "5":
-			if e := a.diagnosticsWizard(); e != nil {
+		case "1", "2", "3", "4", "5", "6":
+			if e := a.RunOperation(ops[v]); e != nil {
 				return e
 			}
 		case "0":
@@ -2592,6 +2592,26 @@ func (a *App) makeSupportBundle() (string, error) {
 		low := strings.ToLower(name)
 		if strings.HasSuffix(low, ".log") || strings.HasSuffix(low, ".txt") {
 			if e := add(filepath.Join(a.work, name), filepath.ToSlash(filepath.Join("work", name))); e != nil {
+				_ = zw.Close()
+				_ = f.Close()
+				return "", e
+			}
+		}
+	}
+	// Sessions (work/sessions/<id>/): logs and metadata only. Probe binaries
+	// (flash samples, DTB) and scratch chunks stay out: they can hold device
+	// identity and are large; a porting bundle is exported separately.
+	sessions, _ := os.ReadDir(app.SessionsDir(a.work))
+	for _, sd := range sessions {
+		if !sd.IsDir() {
+			continue
+		}
+		for _, name := range []string{"session.json", "session.log", "uart.log", "operations.jsonl", "errors.log", "transcript.jsonl"} {
+			p := filepath.Join(app.SessionsDir(a.work), sd.Name(), name)
+			if !fileExists(p) {
+				continue
+			}
+			if e := add(p, filepath.ToSlash(filepath.Join("work", "sessions", sd.Name(), name))); e != nil {
 				_ = zw.Close()
 				_ = f.Close()
 				return "", e
