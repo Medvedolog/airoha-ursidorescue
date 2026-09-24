@@ -256,11 +256,24 @@ func (u *SessionUI) Confirm(c ConfirmRequest) error {
 	if err != nil {
 		res = "not confirmed: " + err.Error()
 	}
-	u.Session.Record(map[string]any{"op": c.Op, "event": "confirm", "risk": string(c.Risk), "phrase": c.Phrase, "result": res})
+	u.Session.Record(map[string]any{"op": c.Op, "event": "confirm", "risk": string(c.Risk), "actions": c.Actions,
+		"cancel_note": c.CancelNote, "phrase": c.Phrase, "result": res})
 	return err
 }
 
 func (u *SessionUI) Output(b []byte) { u.Inner.Output(b) }
+
+// Cancel forwards the STOP state and records each change, so a log shows
+// exactly when stopping was possible.
+func (u *SessionUI) Cancel(c CancelState) {
+	if c.Op == "" {
+		c.Op = u.Op
+	}
+	modes := map[CancelMode]string{CancelNow: "now", CancelAtCheckpoint: "checkpoint", CancelUnavailable: "unavailable"}
+	u.Session.Record(map[string]any{"op": c.Op, "event": "cancel_state", "mode": modes[c.Mode],
+		"checkpoint": c.Checkpoint, "reason": c.Reason, "requested": c.Requested})
+	u.Inner.Cancel(c)
+}
 
 func (u *SessionUI) Artifact(a Artifact) {
 	if a.Op == "" {

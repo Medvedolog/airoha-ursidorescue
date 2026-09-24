@@ -95,7 +95,39 @@ type ConfirmRequest struct {
 	Risk    Risk
 	Title   string
 	Summary []string
-	Phrase  string
+	// Actions lists what the operation will do, in order (erase, write,
+	// BL2 last...). The risk class is the highest of them.
+	Actions []string
+	// CancelNote says when STOP will take effect once the operation runs
+	// (doc/UI_SPEC_RU.md §17), from the same policy that drives CancelState.
+	CancelNote string
+	Phrase     string
+}
+
+// CancelMode is what STOP does at this moment (doc/UI_SPEC_RU.md §17).
+type CancelMode int
+
+const (
+	// CancelNow stops at once.
+	CancelNow CancelMode = iota
+	// CancelAtCheckpoint stops at the next safe checkpoint.
+	CancelAtCheckpoint
+	// CancelUnavailable cannot stop until the current step finishes.
+	CancelUnavailable
+)
+
+// CancelState tells the front end how to label STOP. The core sends it on
+// every change; front ends never guess it.
+type CancelState struct {
+	Op   string
+	Mode CancelMode
+	// Checkpoint names the next safe point ("after chunk 10/30").
+	Checkpoint string
+	// Reason says why stopping is unavailable ("BL2 is being verified").
+	Reason string
+	// Requested is true once STOP was pressed and the core is heading for
+	// the checkpoint.
+	Requested bool
 }
 
 // Artifact is a file the operation produced.
@@ -118,6 +150,8 @@ type UI interface {
 	// Output passes raw device bytes (UART) through for display.
 	Output([]byte)
 	Artifact(Artifact)
+	// Cancel reports what STOP would do now.
+	Cancel(CancelState)
 }
 
 // ErrCancelled is returned by Confirm when the operator did not confirm.

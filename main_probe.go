@@ -106,6 +106,7 @@ func (a *App) runProbe(r probeRequest) (probeResult, error) {
 			return res, fmt.Errorf("RAM U-Boot: %w", err)
 		}
 		s = ser
+		a.cancelBlocked(noStopReason()) // the probe itself does not poll STOP yet
 		r.opts.AtUBootPrompt = got.SoC + ">"
 		r.opts.UBootSource = "ursido-ram-uboot"
 		r.opts.RAMHint = loadAddr

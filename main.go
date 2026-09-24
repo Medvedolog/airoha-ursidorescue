@@ -106,8 +106,11 @@ type App struct {
 
 	ports     *app.PortOwner // owns the serial port; operations lease it
 	sess      *app.Session   // session of the running operation
-	op        string         // its operation ID
-	probeSess *app.Session   // current Porting session (spans probe items)
+	opKind    string         // catalogue kind of the running operation
+	stop      app.StopFlag   // STOP from the front end, polled at checkpoints
+	cancel    app.CancelState
+	op        string       // its operation ID
+	probeSess *app.Session // current Porting session (spans probe items)
 }
 
 func main() { os.Exit(realMain()) }
@@ -273,11 +276,7 @@ func (a *App) askPath(prompt string) (string, error) {
 // confirm is the single confirmation of an operation with risk; its form
 // follows the risk class (doc/UI_SPEC_RU.md §13).
 func (a *App) confirm(risk app.Risk, phrase string) error {
-	err := a.ui.Confirm(app.ConfirmRequest{Risk: risk, Phrase: phrase})
-	if errors.Is(err, app.ErrCancelled) {
-		return cancelledError{L("операция отменена пользователем", "operation cancelled by the user")}
-	}
-	return err
+	return a.confirmOp(risk, phrase, nil)
 }
 
 // note is plain operator guidance; status is a labelled line; event is a
@@ -552,6 +551,9 @@ func (a *App) waitReceiver(s Serial, timeout time.Duration, keepExisting bool, i
 		return ph, p, tail, nil
 	}
 	for time.Now().Before(deadline) {
+		if a.stop.Requested() && a.cancel.Mode != app.CancelUnavailable {
+			return phaseUnknown, Profile{}, tail, stopError(L("ожидание BootROM", "waiting for the BootROM"))
+		}
 		n, e := s.Read(buf, 500*time.Millisecond)
 		if e != nil {
 			return phaseUnknown, Profile{}, tail, e
@@ -684,6 +686,11 @@ func (a *App) xmodemSend(s Serial, path, label string) (xmodemResult, error) {
 	}()
 
 	for idx := int64(0); idx < blocks; idx++ {
+		// STOP during the data phase aborts the transfer; the deferred
+		// CAN CAN CAN tells the receiver. Nothing is written to flash here.
+		if a.stop.Requested() {
+			return result, stopError(fmt.Sprintf(L("XMODEM %s, блок %d/%d", "XMODEM %s, block %d/%d"), label, idx+1, blocks))
+		}
 		for i := range payload {
 			payload[i] = 0x1a
 		}
@@ -746,6 +753,9 @@ func (a *App) xmodemSend(s Serial, path, label string) (xmodemResult, error) {
 		}
 	}
 	dataComplete = true
+	// After the last ACK the peer may already run the image: no CAN, no stop
+	// until the next stage is proven (UI_SPEC §17).
+	a.cancelBlocked(L("передача управления следующему этапу загрузки", "handing over to the next boot stage"))
 
 	// EOT is a transport close, not stronger evidence than the next-stage
 	// receiver/prompt. Retry EOT only when the receiver explicitly NAKs it.
@@ -980,6 +990,9 @@ func (a *App) readUntilPrompt(s Serial, timeout time.Duration, command string) (
 	return out, fmt.Errorf(L("тайм-аут команды U-Boot: %s", "U-Boot command timeout: %s"), command)
 }
 func (a *App) ubootCommandRaw(s Serial, command string, timeout time.Duration) (out []byte, rc int, err error) {
+	if err = a.stopBeforeCommand(command); err != nil {
+		return nil, -1, err
+	}
 	start := time.Now()
 	defer func() { a.recordCommand(command, start, rc, err) }()
 	return a.ubootCommandExec(s, command, timeout)
@@ -1181,6 +1194,7 @@ func (a *App) acquireRAMUBoot(preferred Profile) (Serial, Profile, []byte, error
 			a.closeLog()
 			return nil, Profile{}, trans, e2
 		}
+		a.cancelNow() // the second receiver proved the preloader handoff
 		if ph2 != phaseFIP {
 			a.event(L("Второй receiver не дал явного FIP marker; продолжаю только потому, что preloader stage только что завершён", "The second receiver gave no explicit FIP marker; continuing only because the preloader stage just completed"))
 		}
@@ -1200,6 +1214,9 @@ func (a *App) acquireRAMUBoot(preferred Profile) (Serial, Profile, []byte, error
 		return nil, Profile{}, trans, xe
 	}
 	boot, e := a.waitUBootPrompt(s, 180*time.Second, fipResult.Trailing)
+	if e == nil {
+		a.cancelNow() // a stable prompt proved the FIP handoff
+	}
 	trans = append(trans, boot...)
 	if e != nil {
 		s.Close()
@@ -1727,9 +1744,13 @@ func (a *App) fipRepairWizard() error {
 		return e
 	}
 	a.noteln(L("\nВсе read-only gates пройдены. Будет перезаписан ТОЛЬКО существующий UBI volume fip.", "\nAll read-only gates passed. ONLY the existing UBI volume fip will be overwritten."))
-	if e = a.confirm(app.Write, "WRITE FIP"); e != nil {
+	if e = a.confirmOp(app.Write, "WRITE FIP", []string{
+		L("перезаписать существующий UBI-том fip", "overwrite the existing UBI volume fip"),
+		L("прочитать том обратно и сверить CRC32", "read the volume back and compare CRC32"),
+	}); e != nil {
 		return e
 	}
+	a.cancelBlocked(L("запись тома fip и её проверка", "writing the fip volume and its readback"))
 	if _, e = a.ubootCommand(s, fmt.Sprintf("ubi write 0x%x fip 0x%x", loadAddr, st.Size()), 5*time.Minute); e != nil {
 		return e
 	}
@@ -1744,6 +1765,7 @@ func (a *App) fipRepairWizard() error {
 	if !regexp.MustCompile(fmt.Sprintf(`(?i)(?:0x)?%08x`, crc)).Match(out) {
 		return errors.New(L("CRC32 FIP после записи не совпал", "FIP readback CRC32 mismatch"))
 	}
+	a.cancelNow()
 	a.event(L("Запись FIP + проверка PASS; SHA256 источника=", "FIP write + readback PASS; source SHA256=") + sha)
 	a.noteln(L("Можно выполнить reset. Нажмите Enter для reset или введите N чтобы оставить RAM U-Boot.", "Ready to reset. Press Enter to reset or type N to stay in RAM U-Boot."))
 	if strings.ToLower(a.ask("> ")) != "n" {
@@ -2100,10 +2122,18 @@ func (a *App) stockRestoreWizard() error {
 		return fmt.Errorf(L("тест TFTP перед записью не прошёл: %w", "pre-write TFTP test failed: %w"), e)
 	}
 	a.noteln(L("\nВНИМАНИЕ: будет полностью очищен OpenWrt UBI region, затем восстановлен stock mtd16; BL2 пишется ПОСЛЕДНИМ.", "\nWARNING: the OpenWrt UBI region will be erased completely, then stock mtd16 restored; BL2 is written LAST."))
-	if e = a.confirm(app.Erase, "RESTORE STOCK BACKUP"); e != nil {
+	if e = a.confirmOp(app.Erase, "RESTORE STOCK BACKUP", []string{
+		L("стереть область ubi (mtd erase ubi)", "erase the ubi region (mtd erase ubi)"),
+		fmt.Sprintf(L("записать %d частей заводской области с проверкой каждой", "write %d stock chunks, each read back"), len(prep.chunks)),
+		L("записать BL2 последним и проверить", "write BL2 last and read it back"),
+	}); e != nil {
 		return e
 	}
+	a.cancelAt(L("после стирания ubi", "after erasing ubi"))
 	if _, e = a.ubootCommand(s, "mtd erase ubi", 20*time.Minute); e != nil {
+		return e
+	}
+	if e = a.checkpoint(L("после стирания ubi; BL2 не тронут", "after erasing ubi; BL2 untouched")); e != nil {
 		return e
 	}
 	bad2, e := a.mtdBad(s, "ubi", ubiSize)
@@ -2126,6 +2156,7 @@ func (a *App) stockRestoreWizard() error {
 		}
 	}
 	for i, ch := range prep.chunks {
+		a.cancelAt(fmt.Sprintf(L("после части %d/%d", "after chunk %d/%d"), i+1, len(prep.chunks)))
 		if i > 0 {
 			if e = a.loadChunkWithKnownLocal(s, ch, fmt.Sprintf("stock-%02d.bin", i), local); e != nil {
 				return e
@@ -2158,6 +2189,9 @@ func (a *App) stockRestoreWizard() error {
 			}
 		}
 		a.event(fmt.Sprintf(L("IBU-часть %d/%d проверка PASS", "IBU chunk %d/%d readback PASS"), i+1, len(prep.chunks)))
+		if e = a.checkpoint(fmt.Sprintf(L("после части %d/%d; BL2 не тронут", "after chunk %d/%d; BL2 untouched"), i+1, len(prep.chunks))); e != nil {
+			return e
+		}
 	}
 	bad3, e := a.mtdBad(s, "ubi", ubiSize)
 	if e != nil {
@@ -2166,9 +2200,14 @@ func (a *App) stockRestoreWizard() error {
 	if fmt.Sprint(bad3) != fmt.Sprint(bad2) {
 		return errors.New(L("карта bad-блоков изменилась во время записи IBU; BL2 не тронут", "bad-block map changed during IBU write; BL2 remains untouched"))
 	}
+	a.cancelAt(L("перед записью BL2", "before writing BL2"))
 	if e = a.loadChunkWithKnownLocal(s, prep.bl2, "stock-bl2.bin", local); e != nil {
 		return e
 	}
+	if e = a.checkpoint(L("перед записью BL2; BL2 не тронут", "before writing BL2; BL2 untouched")); e != nil {
+		return e
+	}
+	a.cancelBlocked(L("BL2: стирание, запись и проверка", "BL2: erase, write and readback"))
 	if _, e = a.ubootCommand(s, "mtd erase bl2", 3*time.Minute); e != nil {
 		return e
 	}
@@ -2182,6 +2221,7 @@ func (a *App) stockRestoreWizard() error {
 	if e = a.readbackCRC(s, "bl2", 0, bl2Size, loadAddr, crc); e != nil {
 		return e
 	}
+	a.cancelNow()
 	a.event(L("Восстановление стока PASS: IBU проверен, BL2 проверен последним. SHA256 источника mtd16=", "Stock restore PASS: IBU verified, BL2 verified last. Source mtd16 SHA256=") + prep.allSHA)
 	a.noteln(L("Нажмите Enter для reset или N чтобы оставить U-Boot.", "Press Enter to reset or N to stay in U-Boot."))
 	if strings.ToLower(a.ask("> ")) != "n" {
@@ -2269,13 +2309,22 @@ func (a *App) physicalRestoreWizard() error {
 		return e
 	}
 	a.noteln(L("Будет восстановлен raw physical image; UBI region erase/write/readback, BL2 LAST.", "The raw physical image will be restored; UBI region erase/write/readback, BL2 LAST."))
-	if e = a.confirm(app.Erase, "RESTORE PHYSICAL NAND"); e != nil {
+	if e = a.confirmOp(app.Erase, "RESTORE PHYSICAL NAND", []string{
+		L("стереть область ubi (mtd erase ubi)", "erase the ubi region (mtd erase ubi)"),
+		fmt.Sprintf(L("записать %d частей образа с проверкой каждой", "write %d image chunks, each read back"), len(chunks)),
+		L("записать BL2 последним и проверить", "write BL2 last and read it back"),
+	}); e != nil {
 		return e
 	}
+	a.cancelAt(L("после стирания ubi", "after erasing ubi"))
 	if _, e = a.ubootCommand(s, "mtd erase ubi", 20*time.Minute); e != nil {
 		return e
 	}
+	if e = a.checkpoint(L("после стирания ubi; BL2 не тронут", "after erasing ubi; BL2 untouched")); e != nil {
+		return e
+	}
 	for i, ch := range chunks {
+		a.cancelAt(fmt.Sprintf(L("после части %d/%d", "after chunk %d/%d"), i+1, len(chunks)))
 		if i > 0 {
 			if e = a.loadChunkWithKnownLocal(s, ch, fmt.Sprintf("physical-%02d.bin", i), local); e != nil {
 				return e
@@ -2291,10 +2340,18 @@ func (a *App) physicalRestoreWizard() error {
 			return e
 		}
 		a.event(fmt.Sprintf(L("physical UBI часть %d/%d PASS", "physical UBI chunk %d/%d PASS"), i+1, len(chunks)))
+		if e = a.checkpoint(fmt.Sprintf(L("после части %d/%d; BL2 не тронут", "after chunk %d/%d; BL2 untouched"), i+1, len(chunks))); e != nil {
+			return e
+		}
 	}
+	a.cancelAt(L("перед записью BL2", "before writing BL2"))
 	if e = a.loadChunkWithKnownLocal(s, bl, "physical-bl2.bin", local); e != nil {
 		return e
 	}
+	if e = a.checkpoint(L("перед записью BL2; BL2 не тронут", "before writing BL2; BL2 untouched")); e != nil {
+		return e
+	}
+	a.cancelBlocked(L("BL2: стирание, запись и проверка", "BL2: erase, write and readback"))
 	if _, e = a.ubootCommand(s, "mtd erase bl2", 3*time.Minute); e != nil {
 		return e
 	}
@@ -2305,6 +2362,7 @@ func (a *App) physicalRestoreWizard() error {
 	if e = a.readbackCRC(s, "bl2", 0, bl2Size, loadAddr, crc); e != nil {
 		return e
 	}
+	a.cancelNow()
 	a.event(L("Восстановление physical NAND PASS; SHA256 источника=", "Physical NAND restore PASS; source SHA256=") + sha)
 	return nil
 }
@@ -2465,9 +2523,13 @@ func (a *App) expertUBIVolume() error {
 	if _, e = a.tftpLoad(s, path, "ursido-volume.bin", loadAddr); e != nil {
 		return e
 	}
-	if e = a.confirm(app.Write, "WRITE UBI VOLUME "+name); e != nil {
+	if e = a.confirmOp(app.Write, "WRITE UBI VOLUME "+name, []string{
+		fmt.Sprintf(L("перезаписать существующий UBI-том %s", "overwrite the existing UBI volume %s"), name),
+		L("прочитать том обратно и сверить CRC32", "read the volume back and compare CRC32"),
+	}); e != nil {
 		return e
 	}
+	a.cancelBlocked(L("запись тома и её проверка", "writing the volume and its readback"))
 	if _, e = a.ubootCommand(s, fmt.Sprintf("ubi write 0x%x %s 0x%x", loadAddr, name, st.Size()), 10*time.Minute); e != nil {
 		return e
 	}
@@ -2482,6 +2544,7 @@ func (a *App) expertUBIVolume() error {
 	if !regexp.MustCompile(fmt.Sprintf(`(?i)(?:0x)?%08x`, crc)).Match(out) {
 		return errors.New(L("CRC UBI volume после записи не совпал", "UBI volume readback CRC mismatch"))
 	}
+	a.cancelNow()
 	a.event(L("Запись/проверка UBI volume PASS", "UBI volume write/readback PASS"))
 	return nil
 }
@@ -2531,9 +2594,13 @@ func (a *App) expertRawMTD() error {
 		return e
 	}
 	exact := fmt.Sprintf("WRITE RAW %s 0x%x", strings.ToUpper(target), off)
-	if e = a.confirm(app.Write, exact); e != nil {
+	if e = a.confirmOp(app.Write, exact, []string{
+		fmt.Sprintf(L("записать 0x%x байт в %s со смещения 0x%x (без стирания)", "write 0x%x bytes into %s at offset 0x%x (no erase)"), st.Size(), target, off),
+		L("прочитать обратно и сверить CRC32", "read back and compare CRC32"),
+	}); e != nil {
 		return e
 	}
+	a.cancelBlocked(L("запись и её проверка", "the write and its readback"))
 	if _, e = a.ubootCommand(s, fmt.Sprintf("mtd write %s 0x%x 0x%x 0x%x", target, loadAddr, off, st.Size()), 10*time.Minute); e != nil {
 		return e
 	}
@@ -2541,6 +2608,7 @@ func (a *App) expertRawMTD() error {
 	if e = a.readbackCRC(s, target, off, uint64(st.Size()), verifyAddr, crc); e != nil {
 		return e
 	}
+	a.cancelNow()
 	a.event(L("Запись/проверка RAW MTD PASS", "RAW MTD write/readback PASS"))
 	return nil
 }

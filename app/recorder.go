@@ -14,6 +14,7 @@ type Recorder struct {
 	Asks      []AskRequest
 	Confirms  []ConfirmRequest
 	Artifacts []Artifact
+	Cancels   []CancelState
 	Output    []byte
 
 	// Answers are returned by Ask in order; an empty queue answers "".
@@ -74,6 +75,12 @@ func (r *Recorder) AddArtifact(a Artifact) {
 	r.Artifacts = append(r.Artifacts, a)
 }
 
+func (r *Recorder) CancelUpdate(c CancelState) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.Cancels = append(r.Cancels, c)
+}
+
 // UI adapts the recorder to the UI interface.
 func (r *Recorder) UI() UI { return recorderUI{r} }
 
@@ -85,6 +92,7 @@ func (u recorderUI) Ask(q AskRequest) (string, error) { return u.r.Ask(q) }
 func (u recorderUI) Confirm(c ConfirmRequest) error   { return u.r.Confirm(c) }
 func (u recorderUI) Output(b []byte)                  { u.r.WriteOutput(b) }
 func (u recorderUI) Artifact(a Artifact)              { u.r.AddArtifact(a) }
+func (u recorderUI) Cancel(c CancelState)             { u.r.CancelUpdate(c) }
 
 // CheckAnswer decides whether an operator answer confirms c. Front ends use
 // it so that every one of them applies the same rule.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"ursidorescue/app"
 )
@@ -16,6 +17,10 @@ type operation struct {
 	Risk app.Risk
 	run  func(a *App) error
 }
+
+// unstoppable names operations whose code does not poll STOP yet; they report
+// that honestly instead of promising an immediate stop.
+var unstoppable = map[string]bool{"terminal": true, "shell": true}
 
 var operationCatalog = map[string]operation{
 	"stock-restore":    {app.Erase, (*App).stockRestoreWizard},
@@ -54,10 +59,16 @@ func (a *App) RunOperation(kind string) error {
 // routes the UI through the session and records start, end and failure.
 func (a *App) inSession(sess *app.Session, kind string, risk app.Risk, fn func() error, closeAfter bool) error {
 	opID := sess.NewOperation(kind)
-	prevUI, prevSess, prevOp := a.ui, a.sess, a.op
+	prevUI, prevSess, prevOp, prevKind := a.ui, a.sess, a.op, a.opKind
 	a.ui = &app.SessionUI{Inner: a.front, Session: sess, Op: opID}
-	a.sess, a.op = sess, opID
+	a.sess, a.op, a.opKind = sess, opID, kind
+	a.stop.Reset()
 	sess.Record(map[string]any{"op": opID, "event": "start", "operation": kind, "risk": string(risk)})
+	if unstoppable[kind] || strings.HasPrefix(kind, "probe") {
+		a.cancelBlocked(noStopReason())
+	} else {
+		a.cancelNow()
+	}
 	err := fn()
 	result := "success"
 	switch {
@@ -72,7 +83,8 @@ func (a *App) inSession(sess *app.Session, kind string, risk app.Risk, fn func()
 		rec["error"] = err.Error()
 	}
 	sess.Record(rec)
-	a.ui, a.sess, a.op = prevUI, prevSess, prevOp
+	a.cancelNow()
+	a.ui, a.sess, a.op, a.opKind = prevUI, prevSess, prevOp, prevKind
 	if closeAfter {
 		sess.Close(result)
 	}
@@ -214,4 +226,100 @@ func (p *oneShotPort) Close() error {
 	p.done = true
 	_ = p.Port.Close()
 	return p.owner.Disconnect()
+}
+
+// cancelNotes is the STOP policy per operation (doc/UI_SPEC_RU.md §17), as
+// shown in the confirmation; the wizards emit the matching CancelState at
+// each phase.
+var cancelNotes = map[string]func() string{
+	"stock-restore": func() string {
+		return L("до «mtd erase ubi» — сразу; во время стирания и записи частей — после текущей части и её проверки; от стирания BL2 до его проверки — недоступна",
+			"before \"mtd erase ubi\": at once; while erasing and writing chunks: after the current chunk and its readback; from erasing BL2 until it is verified: unavailable")
+	},
+	"physical-restore": func() string {
+		return L("до «mtd erase ubi» — сразу; во время стирания и записи частей — после текущей части и её проверки; от стирания BL2 до его проверки — недоступна",
+			"before \"mtd erase ubi\": at once; while erasing and writing chunks: after the current chunk and its readback; from erasing BL2 until it is verified: unavailable")
+	},
+	"fip-repair": func() string {
+		return L("до записи — сразу; запись тома fip и её проверка не прерываются",
+			"before writing: at once; writing the fip volume and its readback are not interrupted")
+	},
+	"ubi-volume": func() string {
+		return L("до записи — сразу; запись тома и её проверка не прерываются",
+			"before writing: at once; writing the volume and its readback are not interrupted")
+	},
+	"raw-mtd": func() string {
+		return L("до записи — сразу; запись и её проверка не прерываются",
+			"before writing: at once; the write and its readback are not interrupted")
+	},
+	"itb-boot": func() string {
+		return L("до «bootm» — сразу; после «bootm» управление у ядра Linux, отменять нечего",
+			"before \"bootm\": at once; after \"bootm\" the Linux kernel is in control and there is nothing to undo")
+	},
+}
+
+// noStopReason is shown for operations whose code does not poll STOP yet.
+func noStopReason() string {
+	return L("эта операция пока не поддерживает СТОП: выход из неё — её собственными средствами",
+		"this operation does not support STOP yet: leave it by its own means")
+}
+
+// confirmOp is the single confirmation with the operation's actions and its
+// STOP policy (doc/UI_SPEC_RU.md §13).
+func (a *App) confirmOp(risk app.Risk, phrase string, actions []string) error {
+	note := ""
+	if f, ok := cancelNotes[a.opKind]; ok {
+		note = f()
+	}
+	err := a.ui.Confirm(app.ConfirmRequest{Risk: risk, Phrase: phrase, Actions: actions, CancelNote: note})
+	if errors.Is(err, app.ErrCancelled) {
+		return cancelledError{L("операция отменена пользователем", "operation cancelled by the user")}
+	}
+	return err
+}
+
+// setCancel reports what STOP does now; the front end only displays it.
+func (a *App) setCancel(mode app.CancelMode, checkpoint, reason string) {
+	a.cancel = app.CancelState{Mode: mode, Checkpoint: checkpoint, Reason: reason, Requested: a.stop.Requested()}
+	a.ui.Cancel(a.cancel)
+}
+
+func (a *App) cancelNow() { a.setCancel(app.CancelNow, "", "") }
+func (a *App) cancelAt(checkpoint string) {
+	a.setCancel(app.CancelAtCheckpoint, checkpoint, "")
+}
+func (a *App) cancelBlocked(reason string) { a.setCancel(app.CancelUnavailable, "", reason) }
+
+// RequestStop is what a front end's STOP button calls. The core stops at
+// once only where nothing is being written; otherwise at the next safe
+// checkpoint, never inside an unavailable step.
+func (a *App) RequestStop() {
+	a.stop.Request()
+	c := a.cancel
+	c.Requested = true
+	a.cancel = c
+	a.ui.Cancel(c)
+}
+
+// stopError is the cancellation of an operation at a safe point.
+func stopError(where string) error {
+	return cancelledError{fmt.Sprintf(L("остановлено оператором в безопасной точке: %s", "stopped by the operator at a safe checkpoint: %s"), where)}
+}
+
+// checkpoint ends the operation here when STOP is pending. Call it only
+// where stopping leaves the device recoverable.
+func (a *App) checkpoint(where string) error {
+	if a.stop.Requested() {
+		return stopError(where)
+	}
+	return nil
+}
+
+// stopBeforeCommand lets STOP take effect before the next U-Boot command,
+// but only while the operation is in a phase where stopping at once is safe.
+func (a *App) stopBeforeCommand(command string) error {
+	if a.cancel.Mode == app.CancelNow && a.stop.Requested() {
+		return stopError(L("до команды ", "before the command ") + command)
+	}
+	return nil
 }

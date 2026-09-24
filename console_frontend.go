@@ -102,6 +102,15 @@ func (c *consoleUI) Confirm(r app.ConfirmRequest) error {
 	for _, s := range r.Summary {
 		fmt.Println(s)
 	}
+	if app.FormFor(r.Risk) != app.FormNone || len(r.Actions) > 0 {
+		fmt.Println(paint(L("Риск: ", "Risk: ")+string(r.Risk), uiSand))
+	}
+	for i, act := range r.Actions {
+		fmt.Printf("  %d. %s\n", i+1, act)
+	}
+	if r.CancelNote != "" {
+		fmt.Println(paint(L("Остановка: ", "Stopping: ")+r.CancelNote, uiMuted))
+	}
 	if r.Phrase != "" {
 		fmt.Printf(L("Введите точно %s: ", "Type exactly %s: "), r.Phrase)
 	} else if app.FormFor(r.Risk) == app.FormButton {
@@ -121,6 +130,10 @@ func (c *consoleUI) Artifact(a app.Artifact) {
 	defer c.mu.Unlock()
 	fmt.Println(a.Label, a.Path)
 }
+
+// Cancel is not drawn: the console has no STOP button (Ctrl+C ends the
+// program). The session still records every state.
+func (c *consoleUI) Cancel(app.CancelState) {}
 
 // uiWriter lets code that writes to an io.Writer (the probe session) report
 // through the UI.
