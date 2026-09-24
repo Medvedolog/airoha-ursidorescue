@@ -28,7 +28,7 @@ import (
 
 const (
 	appName               = "UrsidoRescue"
-	appVersion            = "0.2.0-test12"
+	appVersion            = "0.2.0-test13"
 	defaultRouterIP       = "192.168.1.1"
 	defaultLocalIP        = "192.168.1.254"
 	defaultTFTPPort       = 1069
@@ -452,8 +452,8 @@ const (
 	phaseFIP
 )
 
-func (a *App) waitReceiver(s Serial, timeout time.Duration, keepExisting bool) (ReceiverPhase, Profile, []byte, error) {
-	if !keepExisting {
+func (a *App) waitReceiver(s Serial, timeout time.Duration, keepExisting bool, initial []byte) (ReceiverPhase, Profile, []byte, error) {
+	if !keepExisting && len(initial) == 0 {
 		_ = s.ResetInput()
 	}
 	a.event(L("Ожидание BootROM Press x / CCC. Если устройство уже печатает C, НЕ перезагружайте его.", "Waiting for BootROM Press x / CCC. If the device already prints C, do NOT reboot it."))
@@ -463,46 +463,65 @@ func (a *App) waitReceiver(s Serial, timeout time.Duration, keepExisting bool) (
 	lastX := time.Time{}
 	press := false
 	buf := make([]byte, 4096)
+
+	consume := func(d []byte, alreadyLogged bool) (ReceiverPhase, Profile, bool) {
+		if len(d) == 0 {
+			return phaseUnknown, Profile{}, false
+		}
+		if alreadyLogged {
+			_, _ = os.Stdout.Write(d)
+		} else {
+			a.logBytes(d, true)
+		}
+		tail = append(tail, d...)
+		if len(tail) > 65536 {
+			tail = tail[len(tail)-65536:]
+		}
+		low := strings.ToLower(string(tail))
+		if strings.Contains(low, "press x") {
+			press = true
+		}
+		if press && time.Since(lastX) > 2*time.Second && cCount == 0 {
+			a.event(L("Press x обнаружен; отправляю x", "Press x seen; sending x"))
+			_ = s.Write([]byte("x"))
+			lastX = time.Now()
+		}
+		for _, b := range d {
+			if b == 'C' {
+				cCount++
+				if cCount >= 3 {
+					ph := phasePreloader
+					if strings.Contains(low, "press x to load bl31") || strings.Contains(low, "dram flow done") || strings.Contains(low, "load bl31 + u-boot fip") {
+						ph = phaseFIP
+					}
+					p, ok := inferProfile(tail)
+					if !ok {
+						p = Profile{ID: "auto"}
+					}
+					return ph, p, true
+				}
+			} else if b == 9 || b == 10 || b == 13 || b == 32 || b < 0x20 {
+			} else {
+				cCount = 0
+			}
+		}
+		return phaseUnknown, Profile{}, false
+	}
+
+	if ph, p, ok := consume(initial, true); ok {
+		return ph, p, tail, nil
+	}
 	for time.Now().Before(deadline) {
 		n, e := s.Read(buf, 500*time.Millisecond)
 		if e != nil {
 			return phaseUnknown, Profile{}, tail, e
 		}
-		if n > 0 {
-			d := append([]byte(nil), buf[:n]...)
-			a.logBytes(d, true)
-			tail = append(tail, d...)
-			if len(tail) > 65536 {
-				tail = tail[len(tail)-65536:]
-			}
-			low := strings.ToLower(string(tail))
-			if strings.Contains(low, "press x") {
-				press = true
-			}
-			if press && time.Since(lastX) > 2*time.Second && cCount == 0 {
-				a.event(L("Press x обнаружен; отправляю x", "Press x seen; sending x"))
-				_ = s.Write([]byte("x"))
-				lastX = time.Now()
-			}
-			for _, b := range d {
-				if b == 'C' {
-					cCount++
-					if cCount >= 3 {
-						ph := phasePreloader
-						if strings.Contains(low, "press x to load bl31") || strings.Contains(low, "dram flow done") || strings.Contains(low, "load bl31 + u-boot fip") {
-							ph = phaseFIP
-						}
-						p, ok := inferProfile(tail)
-						if !ok {
-							p = Profile{ID: "auto"}
-						}
-						return ph, p, tail, nil
-					}
-				} else if b == 9 || b == 10 || b == 13 || b == 32 || b < 0x20 {
-				} else {
-					cCount = 0
-				}
-			}
+		if n == 0 {
+			continue
+		}
+		d := append([]byte(nil), buf[:n]...)
+		if ph, p, ok := consume(d, false); ok {
+			return ph, p, tail, nil
 		}
 	}
 	return phaseUnknown, Profile{}, tail, errors.New(L("тайм-аут ожидания BootROM XMODEM", "timeout waiting for BootROM XMODEM"))
@@ -532,31 +551,77 @@ const (
 	xmodemReplyCancel
 )
 
+type xmodemResult struct {
+	EOTAck   bool
+	Trailing []byte
+}
+
 func scanXmodemReply(data []byte, consecutiveCAN *int) xmodemReply {
+	retry := false
 	for _, b := range data {
 		switch b {
-		case 0x06: // ACK
+		case 0x06: // ACK wins even if C/NAK noise preceded it in the same UART read.
 			*consecutiveCAN = 0
 			return xmodemReplyACK
-		case 0x18: // CAN: require a real CAN CAN cancellation, not one noisy byte.
+		case 0x18:
 			(*consecutiveCAN)++
 			if *consecutiveCAN >= 2 {
 				return xmodemReplyCancel
 			}
-		case 0x15, 'C': // NAK or CRC request: retry the current block immediately.
+		case 0x15, 'C':
 			*consecutiveCAN = 0
-			return xmodemReplyRetry
+			retry = true
 		default:
 			*consecutiveCAN = 0
 		}
 	}
+	if retry {
+		return xmodemReplyRetry
+	}
 	return xmodemReplyNone
 }
 
-func (a *App) xmodemSend(s Serial, path, label string) error {
+func scanXmodemEOTReply(data []byte, consecutiveCAN *int) (xmodemReply, bool) {
+	retry := false
+	handoff := false
+	for _, b := range data {
+		switch b {
+		case 0x06:
+			*consecutiveCAN = 0
+			return xmodemReplyACK, false
+		case 0x18:
+			(*consecutiveCAN)++
+			if *consecutiveCAN >= 2 {
+				return xmodemReplyCancel, false
+			}
+		case 0x15:
+			*consecutiveCAN = 0
+			retry = true
+		default:
+			*consecutiveCAN = 0
+			// At EOT, ASCII 'C' is not a valid EOT response. It can be the
+			// next XMODEM receiver or ordinary boot text ("NOTICE", etc.).
+			// Any non-whitespace/non-NUL output means stop injecting EOT and
+			// let the caller prove the next stage from UART.
+			if b != 0 && b != '\r' && b != '\n' && b != '\t' && b != ' ' {
+				handoff = true
+			}
+		}
+	}
+	if handoff {
+		return xmodemReplyNone, true
+	}
+	if retry {
+		return xmodemReplyRetry, false
+	}
+	return xmodemReplyNone, false
+}
+
+func (a *App) xmodemSend(s Serial, path, label string) (xmodemResult, error) {
+	var result xmodemResult
 	f, e := os.Open(path)
 	if e != nil {
-		return e
+		return result, e
 	}
 	defer f.Close()
 	st, _ := f.Stat()
@@ -568,10 +633,12 @@ func (a *App) xmodemSend(s Serial, path, label string) error {
 	resp := make([]byte, 256)
 	_ = s.ResetInput()
 
-	completed := false
+	dataComplete := false
 	defer func() {
-		if !completed {
-			// Leave BootROM in a deterministic state after any host-side failure.
+		if !dataComplete {
+			// Only abort while still inside the data phase. Once the final
+			// block was ACKed, the peer may already have jumped to the next
+			// stage and CAN bytes would then be injected into that new stage.
 			_ = s.Write([]byte{0x18, 0x18, 0x18})
 		}
 	}()
@@ -582,7 +649,7 @@ func (a *App) xmodemSend(s Serial, path, label string) error {
 		}
 		n, er := f.Read(payload)
 		if er != nil && er != io.EOF {
-			return er
+			return result, er
 		}
 		c := crc16Xmodem(payload)
 		pkt := make([]byte, 0, 133)
@@ -593,7 +660,7 @@ func (a *App) xmodemSend(s Serial, path, label string) error {
 		accepted := false
 		for attempt := 1; attempt <= 8 && !accepted; attempt++ {
 			if e = s.Write(pkt); e != nil {
-				return e
+				return result, e
 			}
 			deadline := time.Now().Add(2 * time.Second)
 			retryNow := false
@@ -601,7 +668,7 @@ func (a *App) xmodemSend(s Serial, path, label string) error {
 			for time.Now().Before(deadline) {
 				nr, er := s.Read(resp, 150*time.Millisecond)
 				if er != nil {
-					return er
+					return result, er
 				}
 				if nr == 0 {
 					continue
@@ -613,7 +680,7 @@ func (a *App) xmodemSend(s Serial, path, label string) error {
 				case xmodemReplyRetry:
 					retryNow = true
 				case xmodemReplyCancel:
-					return fmt.Errorf(L("BootROM подтвердил отмену XMODEM %s (CAN CAN)", "BootROM confirmed XMODEM cancellation %s (CAN CAN)"), label)
+					return result, fmt.Errorf(L("BootROM подтвердил отмену XMODEM %s (CAN CAN)", "BootROM confirmed XMODEM cancellation %s (CAN CAN)"), label)
 				}
 				if accepted || retryNow {
 					break
@@ -629,7 +696,7 @@ func (a *App) xmodemSend(s Serial, path, label string) error {
 			}
 		}
 		if !accepted {
-			return fmt.Errorf(L("XMODEM блок %d не подтверждён после 8 попыток", "XMODEM block %d not ACKed after 8 attempts"), idx+1)
+			return result, fmt.Errorf(L("XMODEM блок %d не подтверждён после 8 попыток", "XMODEM block %d not ACKed after 8 attempts"), idx+1)
 		}
 		sent += int64(n)
 		seq++
@@ -637,42 +704,64 @@ func (a *App) xmodemSend(s Serial, path, label string) error {
 			fmt.Printf("\r[XMODEM] %s: %d/%d bytes (%d/%d)", label, sent, size, idx+1, blocks)
 		}
 	}
+	dataComplete = true
 
-	for attempt := 1; attempt <= 6; attempt++ {
+	// EOT is a transport close, not stronger evidence than the next-stage
+	// receiver/prompt. AN7583 has now been observed twice ACKing every FIP data
+	// block and then handing off without an EOT ACK. Avoid turning that valid
+	// handoff into a fatal error or sending CAN/EOT bytes into the new stage.
+	for attempt := 1; attempt <= 3; attempt++ {
 		if e = s.Write([]byte{0x04}); e != nil {
-			return e
+			return result, e
 		}
-		deadline := time.Now().Add(2 * time.Second)
+		deadline := time.Now().Add(1500 * time.Millisecond)
 		retryNow := false
 		consecutiveCAN := 0
 		for time.Now().Before(deadline) {
 			n, er := s.Read(resp, 150*time.Millisecond)
 			if er != nil {
-				return er
+				return result, er
 			}
 			if n == 0 {
 				continue
 			}
-			a.logBytes(resp[:n], false)
-			switch scanXmodemReply(resp[:n], &consecutiveCAN) {
+			d := append([]byte(nil), resp[:n]...)
+			a.logBytes(d, false)
+			result.Trailing = append(result.Trailing, d...)
+			if len(result.Trailing) > 65536 {
+				result.Trailing = result.Trailing[len(result.Trailing)-65536:]
+			}
+			reply, handoff := scanXmodemEOTReply(d, &consecutiveCAN)
+			switch reply {
 			case xmodemReplyACK:
 				fmt.Println()
 				a.event(L("XMODEM завершён: ", "XMODEM complete: ") + label)
-				completed = true
-				return nil
+				result.EOTAck = true
+				return result, nil
 			case xmodemReplyRetry:
 				retryNow = true
 			case xmodemReplyCancel:
-				return fmt.Errorf(L("BootROM подтвердил отмену XMODEM %s на EOT (CAN CAN)", "BootROM confirmed XMODEM cancellation %s at EOT (CAN CAN)"), label)
+				return result, fmt.Errorf(L("Receiver подтвердил отмену XMODEM %s на EOT (CAN CAN)", "Receiver confirmed XMODEM cancellation %s at EOT (CAN CAN)"), label)
+			}
+			if handoff {
+				fmt.Println()
+				a.event(L("Все XMODEM-блоки подтверждены; вместо EOT ACK уже виден вывод следующего этапа — проверяю handoff", "All XMODEM blocks were ACKed; next-stage output appeared instead of EOT ACK — verifying handoff"))
+				return result, nil
 			}
 			if retryNow {
 				break
 			}
 		}
-		a.event(fmt.Sprintf(L("XMODEM повтор EOT %s, попытка %d/6", "XMODEM retry EOT %s attempt %d/6"), label, attempt))
+		if retryNow {
+			a.event(fmt.Sprintf(L("XMODEM EOT получил NAK, повтор %d/3", "XMODEM EOT got NAK, retry %d/3"), attempt))
+		} else {
+			a.event(fmt.Sprintf(L("XMODEM EOT без ACK, осторожный повтор %d/3", "XMODEM EOT without ACK, cautious retry %d/3"), attempt))
+		}
 		time.Sleep(80 * time.Millisecond)
 	}
-	return fmt.Errorf(L("XMODEM EOT не подтверждён: %s", "XMODEM EOT not ACKed: %s"), label)
+	fmt.Println()
+	a.event(L("Все XMODEM-блоки подтверждены, но EOT ACK не пришёл — не отменяю сессию, проверяю следующий этап по UART", "All XMODEM blocks were ACKed but EOT ACK was not received — not aborting; verifying the next UART stage"))
+	return result, nil
 }
 
 var ansiCSIForPromptRE = regexp.MustCompile("\x1b\\[[0-?]*[ -/]*[@-~]")
@@ -719,7 +808,7 @@ func (a *App) waitQuiet(s Serial, quiet, timeout time.Duration) []byte {
 	}
 	return out
 }
-func (a *App) waitUBootPrompt(s Serial, timeout time.Duration) ([]byte, error) {
+func (a *App) waitUBootPrompt(s Serial, timeout time.Duration, initial []byte) ([]byte, error) {
 	a.event(L("Ожидание RAM U-Boot; Enter не отправляется, чтобы не выбрать bootmenu", "Waiting for RAM U-Boot; Enter is not sent so no bootmenu entry gets selected"))
 	end := time.Now().Add(timeout)
 	var out, tail []byte
@@ -729,16 +818,16 @@ func (a *App) waitUBootPrompt(s Serial, timeout time.Duration) ([]byte, error) {
 	lastBreak := time.Time{}
 	breaks := 0
 	menuEscapes := 0
-	for time.Now().Before(end) {
-		n, e := s.Read(buf, 120*time.Millisecond)
-		if e != nil {
-			return out, e
+
+	consume := func(d []byte, alreadyLogged bool) (bool, error) {
+		if len(d) == 0 {
+			return false, nil
 		}
-		if n == 0 {
-			continue
+		if alreadyLogged {
+			_, _ = os.Stdout.Write(d)
+		} else {
+			a.logBytes(d, true)
 		}
-		d := append([]byte(nil), buf[:n]...)
-		a.logBytes(d, true)
 		out = append(out, d...)
 		tail = append(tail, d...)
 		if len(tail) > 65536 {
@@ -749,7 +838,7 @@ func (a *App) waitUBootPrompt(s Serial, timeout time.Duration) ([]byte, error) {
 			a.waitQuiet(s, 450*time.Millisecond, 4*time.Second)
 			_ = s.ResetInput()
 			a.event(L("Устойчивый U-Boot prompt получен", "Stable U-Boot prompt reached"))
-			return out, nil
+			return true, nil
 		}
 		if strings.Contains(low, "u-boot 20") || strings.Contains(low, "hit any key to stop autoboot") {
 			seen = true
@@ -760,8 +849,6 @@ func (a *App) waitUBootPrompt(s Serial, timeout time.Duration) ([]byte, error) {
 		}
 		if seen && time.Since(lastBreak) >= 250*time.Millisecond {
 			if menu {
-				// Once bootmenu is visible, ESC is the correct non-selecting exit.
-				// Do not keep mixing Ctrl-C into the menu/prompt stream.
 				if menuEscapes < 6 {
 					_ = s.Write([]byte{0x1b})
 					menuEscapes++
@@ -773,17 +860,36 @@ func (a *App) waitUBootPrompt(s Serial, timeout time.Duration) ([]byte, error) {
 			lastBreak = time.Now()
 		}
 		if strings.Contains(low, "mtd erase ubi") || strings.Contains(low, "erasing 0x") {
-			return out, errors.New(L("до prompt замечена разрушительная автозагрузка", "destructive autoboot observed before prompt"))
+			return false, errors.New(L("до prompt замечена разрушительная автозагрузка", "destructive autoboot observed before prompt"))
 		}
 		if strings.Contains(low, "starting kernel") || strings.Contains(low, "booting linux on physical cpu") {
-			return out, errors.New(L("автозагрузка ушла в Linux до prompt", "autoboot escaped into Linux before prompt"))
+			return false, errors.New(L("автозагрузка ушла в Linux до prompt", "autoboot escaped into Linux before prompt"))
 		}
 		if strings.Contains(low, "press x to load bl31") && !seen {
-			return out, errors.New(L("после FIP устройство вернулось в BootROM", "device returned to BootROM after FIP"))
+			return false, errors.New(L("после FIP устройство вернулось в BootROM", "device returned to BootROM after FIP"))
+		}
+		return false, nil
+	}
+
+	if done, e := consume(initial, true); done || e != nil {
+		return out, e
+	}
+	for time.Now().Before(end) {
+		n, e := s.Read(buf, 120*time.Millisecond)
+		if e != nil {
+			return out, e
+		}
+		if n == 0 {
+			continue
+		}
+		d := append([]byte(nil), buf[:n]...)
+		if done, er := consume(d, false); done || er != nil {
+			return out, er
 		}
 	}
 	return out, errors.New(L("тайм-аут ожидания U-Boot prompt", "U-Boot prompt timeout"))
 }
+
 func sendLine(s Serial, line string) error {
 	if strings.ContainsAny(line, "\r\n") || line == "" {
 		return errors.New("invalid U-Boot command")
@@ -963,7 +1069,7 @@ func (a *App) acquireRAMUBoot(preferred Profile) (Serial, Profile, []byte, error
 	_ = log
 	fmt.Println(L("\nЕсли сейчас уже видите 'Press x to load BL31 + U-Boot FIP' и CCC — ничего не перезагружайте.", "\nIf you already see 'Press x to load BL31 + U-Boot FIP' and CCC, do not reboot anything."))
 	fmt.Println(L("Иначе выключите Nokia, подключите UART, удерживайте Reset и подайте питание для BootROM recovery.", "Otherwise power the Nokia off, connect the UART, hold Reset and power it on for BootROM recovery."))
-	phase, det, trans, e := a.waitReceiver(s, 180*time.Second, true)
+	phase, det, trans, e := a.waitReceiver(s, 180*time.Second, true, nil)
 	if e != nil {
 		s.Close()
 		a.closeLog()
@@ -1004,12 +1110,13 @@ func (a *App) acquireRAMUBoot(preferred Profile) (Serial, Profile, []byte, error
 	fip := filepath.Join(a.root, filepath.FromSlash(p.RAMFIPRel))
 	if phase == phasePreloader {
 		a.event(L("Текущий receiver классифицирован как PRELOADER stage", "Current receiver classified as the PRELOADER stage"))
-		if e = a.xmodemSend(s, pre, p.SoC+" preloader"); e != nil {
+		preResult, xe := a.xmodemSend(s, pre, p.SoC+" preloader")
+		if xe != nil {
 			s.Close()
 			a.closeLog()
-			return nil, Profile{}, trans, e
+			return nil, Profile{}, trans, xe
 		}
-		ph2, det2, t2, e2 := a.waitReceiver(s, 180*time.Second, false)
+		ph2, det2, t2, e2 := a.waitReceiver(s, 180*time.Second, true, preResult.Trailing)
 		trans = append(trans, t2...)
 		if e2 != nil {
 			s.Close()
@@ -1028,17 +1135,21 @@ func (a *App) acquireRAMUBoot(preferred Profile) (Serial, Profile, []byte, error
 	if phase == phaseFIP {
 		a.event(L("Устройство уже находится на BL31+U-Boot FIP XMODEM stage; preloader повторно НЕ отправляется", "The device is already at the BL31+U-Boot FIP XMODEM stage; the preloader is NOT sent again"))
 	}
-	if e = a.xmodemSend(s, fip, p.SoC+" RAM BL31+U-Boot FIP"); e != nil {
+	fipResult, xe := a.xmodemSend(s, fip, p.SoC+" RAM BL31+U-Boot FIP")
+	if xe != nil {
 		s.Close()
 		a.closeLog()
-		return nil, Profile{}, trans, e
+		return nil, Profile{}, trans, xe
 	}
-	boot, e := a.waitUBootPrompt(s, 180*time.Second)
+	boot, e := a.waitUBootPrompt(s, 180*time.Second, fipResult.Trailing)
 	trans = append(trans, boot...)
 	if e != nil {
 		s.Close()
 		a.closeLog()
 		return nil, Profile{}, trans, e
+	}
+	if !fipResult.EOTAck {
+		a.event(L("EOT ACK отсутствовал, но устойчивый RAM U-Boot prompt доказал успешный handoff", "EOT ACK was absent, but a stable RAM U-Boot prompt proved the handoff"))
 	}
 	ver, e := a.ubootCommand(s, "version", 30*time.Second)
 	if e != nil {
@@ -2051,7 +2162,7 @@ func (a *App) physicalRestoreWizard() error {
 		return e
 	}
 	if len(blbad) > 0 || len(bad) > 0 {
-		return fmt.Errorf(L("восстановление physical image в 0.2.0-test12 требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test12 requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
+		return fmt.Errorf(L("восстановление physical image в 0.2.0-test13 требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test13 requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
 	}
 	local, e := a.networkIP()
 	if e != nil {
@@ -2320,7 +2431,7 @@ func (a *App) expertUBIVolume() error {
 	}
 	st, _ := os.Stat(path)
 	if st.Size() > maxGenericRAMFile {
-		return errors.New(L("файл volume >64 MiB за один раз не поддерживается в 0.2.0-test12", "expert one-shot volume file >64 MiB is not supported in 0.2.0-test12"))
+		return errors.New(L("файл volume >64 MiB за один раз не поддерживается в 0.2.0-test13", "expert one-shot volume file >64 MiB is not supported in 0.2.0-test13"))
 	}
 	sha, _ := shaFile(path)
 	fmt.Printf("WRITE EXISTING UBI VOLUME %s size=%d SHA256=%s\n", name, st.Size(), sha)
@@ -2472,7 +2583,7 @@ func (a *App) makeSupportBundle() (string, error) {
 }
 
 func (a *App) selftest() error {
-	if appVersion != "0.2.0-test12" {
+	if appVersion != "0.2.0-test13" {
 		return errors.New("version")
 	}
 	if _, e := probe.CheckUBoot("saveenv"); e == nil {

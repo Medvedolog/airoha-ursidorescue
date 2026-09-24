@@ -1,3 +1,26 @@
+# UrsidoRescue 0.2.0-test13
+
+Status: **simulation candidate / HW PARTIAL.** Two consecutive AN7583/MF hardware runs of test12
+ACKed all 2539 FIP data blocks but emitted no EOT ACK. test12 then retried EOT six times and aborted,
+so the transport close was incorrectly treated as stronger evidence than the already-starting next stage.
+
+## 0.2.0-test13
+
+- Fixes the AN7583 EOT regression seen twice on real Nokia XG-040G-MF hardware.
+- Once every XMODEM data block is ACKed, missing EOT ACK is no longer an immediate fatal error.
+  UrsidoRescue preserves any bytes already emitted by the next stage and requires the caller to prove
+  the transition: the preloader path must reach the second XMODEM receiver, and the FIP path must reach
+  a stable RAM U-Boot prompt before recovery continues.
+- EOT handling is stage-safe: ACK remains definitive, NAK requests another EOT, but ASCII C or boot
+  text is treated as next-stage output instead of an EOT retry. This avoids interpreting the letter C
+  inside strings such as NOTICE as an XMODEM CRC request.
+- CAN CAN CAN is sent only when the data phase itself failed. It is never injected after the final
+  payload block was ACKed, because the peer may already be executing the newly transferred image.
+- XMODEM block response parsing now gives ACK priority over C/NAK noise in the same UART read.
+- EOT retries are bounded to three cautious 1.5 s waits only while there is no next-stage output.
+- EOT-consumed UART bytes are fed into the next-stage parser immediately, so U-Boot autoboot can be
+  interrupted without losing the banner/prompt that arrived in the same serial read.
+
 # UrsidoRescue 0.2.0-test12
 
 Status: **simulation PASS / HW PARTIAL.** Real Nokia XG-040G-MF testing of test11 reached the

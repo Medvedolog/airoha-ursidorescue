@@ -28,6 +28,29 @@ func TestXmodemReplyNoiseAndCancel(t *testing.T) {
 	if got := scanXmodemReply([]byte{0x15}, &can); got != xmodemReplyRetry {
 		t.Fatalf("NAK must trigger immediate retry: reply=%v", got)
 	}
+	can = 0
+	if got := scanXmodemReply([]byte{'C', 0x06}, &can); got != xmodemReplyACK {
+		t.Fatalf("ACK in the same read must win over earlier C noise: reply=%v", got)
+	}
+}
+
+func TestXmodemEOTHandoffClassifier(t *testing.T) {
+	can := 0
+	if got, handoff := scanXmodemEOTReply([]byte{0x15}, &can); got != xmodemReplyRetry || handoff {
+		t.Fatalf("EOT NAK must request one more EOT: reply=%v handoff=%v", got, handoff)
+	}
+	can = 0
+	if got, handoff := scanXmodemEOTReply([]byte("NOTICE: BL31 starting\r\n"), &can); got != xmodemReplyNone || !handoff {
+		t.Fatalf("boot text after EOT must be treated as next-stage handoff: reply=%v handoff=%v", got, handoff)
+	}
+	can = 0
+	if got, handoff := scanXmodemEOTReply([]byte{'C', 'C', 'C'}, &can); got != xmodemReplyNone || !handoff {
+		t.Fatalf("next receiver C stream after EOT must be handoff evidence: reply=%v handoff=%v", got, handoff)
+	}
+	can = 0
+	if got, handoff := scanXmodemEOTReply([]byte{0x06}, &can); got != xmodemReplyACK || handoff {
+		t.Fatalf("EOT ACK must remain definitive: reply=%v handoff=%v", got, handoff)
+	}
 }
 func TestPrompt(t *testing.T) {
 	good := [][]byte{
