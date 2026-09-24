@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UrsidoRescue — подтверждение записи</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="mock.js"></script>
+</head>
+<body data-active="stock">
+<div class="app">
+<header class="top" id="top"></header>
+<div class="body">
+<nav class="side" id="side" aria-label="Действия"></nav>
+<div class="work">
+
+<div class="veil">
+<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="cf-title">
+<div style="display:flex;align-items:center;gap:12px">
+<svg width="28" height="28" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1z" fill="none" stroke="#e8837a" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6v4M8 11.8v.4" stroke="#e8837a" stroke-width="1.4" stroke-linecap="round"/></svg>
+<h2 id="cf-title">Сейчас начнётся запись во flash</h2>
+</div>
+<div style="font-size:15px;line-height:22px;color:var(--uart)">Все проверки только на чтение пройдены. Дальше будет:</div>
+<ol>
+<li>полностью стёрта область OpenWrt UBI (<span class="mono">mtd erase ubi</span>);</li>
+<li>записаны 30 частей заводского <span class="mono">mtd16</span> с проверкой каждой;</li>
+<li>BL2 записан <strong>последним</strong>, только если всё остальное сошлось.</li>
+</ol>
+<div class="facts2">Источник SHA256 <span class="mono" style="color:var(--ink)">9f3c…a41e</span> · bad-блоков в ubi: 2, в безопасном окне · тест TFTP до записи: PASS</div>
+<label>
+<span>Введите точно <strong class="mono" style="color:var(--sand)">RESTORE STOCK BACKUP</strong></span>
+<input id="phrase" class="phrase" type="text" data-want="RESTORE STOCK BACKUP" autocomplete="off" spellcheck="false" autofocus>
+</label>
+<div class="actions">
+<button type="button" class="btn sec">Отмена</button>
+<button type="button" class="btn go" id="go" disabled>Начать запись</button>
+</div>
+</div>
+</div>
+
+<section class="log" id="log" aria-label="Лог UART" style="height:250px">
+<div class="logbar">
+<span class="title">UART</span><span class="path">лог остаётся на виду и под диалогом, порт продолжает читаться</span>
+<div class="seg filter" role="group" aria-label="Фильтр">
+<button type="button" data-v="all" aria-pressed="true">Всё</button>
+<button type="button" data-v="uart" aria-pressed="false">UART</button>
+<button type="button" data-v="ev" aria-pressed="false">События</button>
+</div>
+<span class="spacer"></span>
+<button type="button" class="tool pause" aria-pressed="false">Пауза</button>
+</div>
+<div class="lines">
+<div class="ln ev"><span class="ts">11:59:40</span><span class="tx amb">U-Boot: mtd bad ubi</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">0x05e40000</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">0x0a1a0000</span></div>
+<div class="ln ev"><span class="ts">11:59:47</span><span class="tx">[INFO] bad-блоков в ubi: 2</span></div>
+<div class="ln ev"><span class="ts">11:59:48</span><span class="tx ok">[NET] адрес ПК: 192.168.1.254</span></div>
+<div class="ln ev"><span class="ts">11:59:55</span><span class="tx ok">TFTP PASS: stock-00.bin, 8388608 bytes, block=1468</span></div>
+<div class="ln ev"><span class="ts">11:59:57</span><span class="tx ok">SHA256 в RAM PASS</span></div>
+<div class="ln ev"><span class="ts">11:59:57</span><span class="tx amb">Ожидание подтверждения оператора…</span></div>
+<button type="button" class="jump" hidden>↓ К новым строкам</button>
+</div>
+</section>
+
+</div>
+</div>
+</div>
+</body>
+</html>

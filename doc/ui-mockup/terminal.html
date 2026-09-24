@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UrsidoRescue — UART-терминал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="mock.js"></script>
+</head>
+<body data-active="term">
+<div class="app">
+<header class="top" id="top"></header>
+<div class="body">
+<nav class="side" id="side" aria-label="Действия"></nav>
+<div class="work">
+
+<div class="termhead">
+<div><b>UART-терминал</b><small>Сам ничего не отправляет. Паролей не знает и не подбирает.</small></div>
+<span class="spacer"></span>
+<div class="seg modes" role="group" aria-label="Режим ввода">
+<button type="button" data-v="raw" aria-pressed="true">Прозрачный</button>
+<button type="button" data-v="line" aria-pressed="false">Построчный</button>
+</div>
+<button type="button" class="tool pager" aria-pressed="false" style="height:36px">Пейджер</button>
+<button type="button" class="tool" style="height:36px">XMODEM → устройство</button>
+<button type="button" class="tool" style="height:36px">XMODEM ← приём</button>
+</div>
+
+<section class="term" aria-label="Терминал">
+<div class="lines">
+<div class="ln uart"><span class="tx">U-Boot 2026.07-OpenWrt (RECOVERY_SAFE)</span></div>
+<div class="ln uart"><span class="tx"> </span></div>
+<div class="ln uart"><span class="tx">CPU:   Airoha AN7583</span></div>
+<div class="ln uart"><span class="tx">SPI-NAND: FM25G02B, 256 MiB, block 128 KiB, page 2 KiB</span></div>
+<div class="ln uart"><span class="tx dim">medveflasher_recovery_safe=rc18: autoboot disabled</span></div>
+<div class="ln uart"><span class="tx amb">AN7583&gt; mtd list</span></div>
+<div class="ln uart"><span class="tx">List of MTD devices:</span></div>
+<div class="ln uart"><span class="tx">* spi-nand0</span></div>
+<div class="ln uart"><span class="tx">  - block size: 0x20000 bytes</span></div>
+<div class="ln uart"><span class="tx">  - min I/O: 0x800 bytes</span></div>
+<div class="ln uart"><span class="tx">  - 0x000000000000-0x000010000000 : "spi-nand0"</span></div>
+<div class="ln uart"><span class="tx">          - 0x000000000000-0x000000020000 : "bl2"</span></div>
+<div class="ln uart"><span class="tx">          - 0x000000020000-0x000010000000 : "ubi"</span></div>
+<div class="ln uart"><span class="tx amb">AN7583&gt; printenv ipaddr serverip</span></div>
+<div class="ln uart"><span class="tx">ipaddr=192.168.1.1</span></div>
+<div class="ln uart"><span class="tx">serverip=192.168.1.254</span></div>
+<div class="ln uart"><span class="tx amb">AN7583&gt; ping 192.168.1.254</span></div>
+<div class="ln uart"><span class="tx">Using eth0 device</span></div>
+<div class="ln uart"><span class="tx ok">host 192.168.1.254 is alive</span></div>
+</div>
+<div class="cmd live"><span class="p">AN7583&gt;</span><label style="flex:1;display:flex"><span class="sr">Команда в UART</span><input type="text" value="mtd bad ubi" autofocus></label><span id="termhint" style="font-family:var(--sans);font-size:12px;color:var(--muted)">клавиши уходят сразу · история устройства ↑/↓</span></div>
+<div class="hints"><span>Ctrl+C / Ctrl+Z → в роутер</span><span>Только ASCII: кириллица блокируется</span><span>Полноэкранные TUI (top, vi) обходят пейджер</span><span class="spacer"></span><span class="mono">work/term-20260924-121530.uart.log</span></div>
+</section>
+
+</div>
+</div>
+</div>
+</body>
+</html>

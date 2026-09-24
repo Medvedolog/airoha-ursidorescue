@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UrsidoRescue — вернуть сток</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="mock.js"></script>
+</head>
+<body data-active="stock">
+<div class="app">
+<header class="top" id="top"></header>
+<div class="body">
+<nav class="side" id="side" aria-label="Действия"></nav>
+<div class="work">
+
+<main class="wiz">
+<div class="wizhead">
+<div style="flex:1">
+<div class="eyebrow">СПАСЕНИЕ · ЗАПИСЬ ВО FLASH</div>
+<h1>Вернуть сток Nokia</h1>
+<div class="sub">Источник: <span class="mono">D:\backup\XG040G-MF\mtd16.bin.gz</span> · SHA256 <span class="mono">9f3c…a41e</span></div>
+</div>
+<button type="button" class="ghost" style="height:44px">Остановиться после текущей части</button>
+</div>
+
+<ol class="stages" aria-label="Этапы">
+<li class="stage done"><div class="st"><span class="mk">✓</span>ГОТОВО</div><b>BootROM</b><small>Press x · CCC</small></li>
+<li class="stage done"><div class="st"><span class="mk">✓</span>ГОТОВО</div><b>Preloader</b><small>XMODEM</small></li>
+<li class="stage done"><div class="st"><span class="mk">✓</span>ГОТОВО</div><b>RAM FIP</b><small>BL31 + U-Boot</small></li>
+<li class="stage done"><div class="st"><span class="mk">✓</span>ГОТОВО</div><b>Проверки</b><small>геометрия, bad</small></li>
+<li class="stage done"><div class="st"><span class="mk">✓</span>ГОТОВО</div><b>Стирание</b><small>mtd erase ubi</small></li>
+<li class="stage now" aria-current="step"><div class="st"><span class="mk">•</span>ИДЁТ</div><b>Запись IBU</b><small>9 из 30 частей</small></li>
+<li class="stage"><div class="st"><span class="mk"></span>ЖДЁТ</div><b>BL2</b><small>последним</small></li>
+</ol>
+
+<section class="card" aria-label="Текущий шаг">
+<div class="cardhead"><b>Запись заводской области (IBU)</b><span class="part">часть 10 из 30</span><span class="spacer"></span><span class="mono sub">прошло 06:41 · осталось ≈ 15 мин</span></div>
+<div class="bar" role="progressbar" aria-label="Прогресс записи IBU" aria-valuemin="0" aria-valuemax="30" aria-valuenow="9"><i></i></div>
+<div class="facts">
+<div><span>Сейчас</span>TFTP → RAM, проверка SHA256</div>
+<div><span>Сеть</span><em class="mono" style="font-style:normal">192.168.1.254 → .1 · UDP/1069</em></div>
+<div><span>Bad-блоки ubi</span>2, в безопасном окне</div>
+<div><span>BL2</span><em style="font-style:normal;color:var(--ok)">не тронут, будет последним</em></div>
+</div>
+</section>
+</main>
+
+<section class="log" id="log" aria-label="Лог UART">
+<div class="logbar">
+<span class="title">UART</span><span class="path mono">COM6 · пишется в work/recovery-…uart.log</span>
+<div class="seg filter" role="group" aria-label="Фильтр">
+<button type="button" data-v="all" aria-pressed="true">Всё</button>
+<button type="button" data-v="uart" aria-pressed="false">UART</button>
+<button type="button" data-v="ev" aria-pressed="false">События</button>
+</div>
+<span class="spacer"></span>
+<label class="search"><span aria-hidden="true">⌕</span><span class="sr">Поиск в логе</span><input type="search" placeholder="Поиск"></label>
+<button type="button" class="tool pause" aria-pressed="false">Пауза</button>
+<button type="button" class="tool">Копировать</button>
+<button type="button" class="tool">Сохранить</button>
+<button type="button" class="tool maxi" aria-label="Развернуть лог">⤢</button>
+</div>
+<div class="lines">
+<div class="ln ev"><span class="ts">11:58:02</span><span class="tx amb">Ожидание BootROM Press x / CCC</span></div>
+<div class="ln ev"><span class="ts">11:58:09</span><span class="tx">Press x обнаружен; отправляю x</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">CCCC</span></div>
+<div class="ln ev"><span class="ts">11:58:31</span><span class="tx ok">XMODEM завершён: AN7583 preloader</span></div>
+<div class="ln ev"><span class="ts">11:59:12</span><span class="tx amb">Payload XMODEM подтверждён; вывод следующего этапа виден — проверяю handoff</span></div>
+<div class="ln ev"><span class="ts">11:59:15</span><span class="tx ok">Устойчивый U-Boot prompt получен</span></div>
+<div class="ln ev"><span class="ts">11:59:18</span><span class="tx ok">Геометрия MTD PASS: NAND 256 MiB, erase 0x20000, min I/O 0x800</span></div>
+<div class="ln ev"><span class="ts">12:04:11</span><span class="tx ok">TFTP PASS: stock-08.bin, 8388608 bytes</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">AN7583&gt; mtd write ubi 0x90000000 0x4000000 0x800000</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">Writing 8388608 byte(s) at offset 0x04000000</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">AN7583&gt; mtd read ubi 0x90000000 0x4000000 0x800000</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">AN7583&gt; crc32 0x90000000 0x800000</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">crc32 for 90000000 ... 907fffff ==&gt; 5b1e04c2</span></div>
+<div class="ln ev"><span class="ts">12:04:27</span><span class="tx ok">IBU-часть 9/30 проверка PASS</span></div>
+<div class="ln ev"><span class="ts">12:04:28</span><span class="tx amb">TFTP stock-09.bin: попытка 1/3, 192.168.1.254 -&gt; 0x90000000</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">AN7583&gt; tftpboot 0x90000000 stock-09.bin</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx">Using eth0 device · TFTP from server 192.168.1.254</span></div>
+<div class="ln uart"><span class="ts"></span><span class="tx dim">#################################################</span></div>
+<button type="button" class="jump" hidden>↓ К новым строкам</button>
+</div>
+<div class="cmd"><span>AN7583&gt;</span><label style="flex:1;display:flex"><span class="sr">Команда в UART</span><input type="text" disabled placeholder="Ввод заблокирован, пока работает мастер: команды пойдут в U-Boot между его шагами"></label></div>
+</section>
+
+</div>
+</div>
+</div>
+</body>
+</html>
