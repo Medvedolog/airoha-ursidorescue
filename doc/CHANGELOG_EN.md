@@ -76,6 +76,8 @@ Releases by CI.
   refused, not queued. The confirmation shows the risk class, the ordered actions and the stop boundary.
 - In the console Ctrl+C during an operation is STOP (a second Ctrl+C within 3 s forces exit);
   outside an operation and in the UART terminal nothing changed.
+- Stage 1 (application layer, STOP, Ctrl+C) passed the hardware check in `doc/HW_SMOKE_STAGE1_RU.md`:
+  **HW smoke PASS**.
 - UI spec v3.1 and mockup: STOP states, port chooser, IDs on screen, Porting banners, BootROM wait
   and result screens, compact layout, no external fonts.
 - UI spec v3.2: a backend layer and the degradation ladder (persistent UrsusBoot Web/UART → RAM
