@@ -7,6 +7,9 @@ Airoha devices (see [PROBE.md](PROBE.md)). Russian / English UI. Status: simulat
 
 No Python, pyserial or TFTP utilities are needed; one static binary per platform.
 
+Documentation (RU/EN): [doc/](doc/README.md) — about the Ursus family, operator guide, every menu item, architecture, changelog.
+Документация на русском: [doc/](doc/README.md).
+
 > LAB / UART test builds. 3.3 V TTL UART, GND/TX/RX only — never connect VCC.
 > See [STATUS.md](STATUS.md) for what has and has not been verified on hardware.
 
