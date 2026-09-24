@@ -1,3 +1,55 @@
+# UrsidoRescue 0.2.0-test16
+
+Status: **simulation candidate / HW PARTIAL.** A real MF stock boot under test15 reached the serial
+Login: prompt, but the probe had only manual --linux-user/--linux-password handling and skipped
+the Linux phase when no credentials were typed. The same log shows user_ftp is UID 0 while
+user-telnet is non-root and that stock init refreshes those passwords later in boot.
+
+## 0.2.0-test16
+
+- Interactive Porting probe now has a stock-LAN-assisted UART login path for Nokia XG-040G-MD/MF.
+  At Login: it waits for the stock Web UI on 192.168.1.1, authenticates using the mature family
+  service path, verifies the model, and reads current Telnet/FTP credentials from ftp_cfg.
+- Credentials and passwords are memory-only: they are never printed, put in transcripts, bundles,
+  CLI arguments, or UART log annotations.
+- UART authentication prefers the stock UID-0 FTP service account directly; if the serial getty
+  rejects that, it falls back to the ordinary Telnet account and then su to the UID-0 service
+  account. id -u must return 0 before UID0 is claimed.
+- If the passive path cannot obtain UID 0 and FTP is disabled, interactive mode offers one explicit
+  y/N to enable FTP through the stock Web UI, refresh credentials, and retry. This is truthfully
+  described as a stock-settings change; it does not perform raw MTD/firmware writes.
+- The LAN-assist HTTP work runs while the UART is continuously drained, so long stock boot/service
+  initialization cannot overflow the serial receive path. It waits up to 90 seconds for the Web
+  service and current credentials instead of racing the early Login prompt.
+- CLI can opt into the passive credential bridge with --stock-lan-assist; CLI mode never enables
+  FTP because it has no interactive provisioning confirmation.
+- Probe Linux guard now permits exactly id -u as the UID proof command.
+- Documentation under doc/ is intentionally untouched in this code release.
+
+# UrsidoRescue 0.2.0-test15
+
+Status: **simulation candidate / HW PARTIAL.** Real MF hardware on test14 reached stable RAM U-Boot,
+passed geometry/bad-block checks and transferred/verified multiple 8 MiB stock chunks. The log also
+showed that the network tuple was redundantly replayed before every chunk.
+
+## 0.2.0-test15
+
+- U-Boot network environment is configured once per normal recovery session, matching the proven
+  UrsusFlasher/MedveFlasher pattern. Subsequent stock/physical chunks reuse the same ethaddr/ipaddr/
+  serverip/netmask/TFTP state.
+- The network tuple is re-applied only after an actual TFTP/U-Boot network failure and prompt resync;
+  RAM verification retries do not churn network env.
+- Every LAN/TFTP workflow now prints an operator prerequisite block before starting: direct cable,
+  LAN2/LAN3 recommendation, Nokia/PC IPv4 expectations, UDP/1069, and an explicit request to disable
+  Wi-Fi, VPN, extra Ethernet, virtual adapters and tunnels. Active PC IPv4 interfaces are listed as
+  a non-blocking sanity check.
+- Console operator output now uses the UrsusBoot/UrsusFlasher brown/amber/sand/green/red ANSI palette
+  when attached to a terminal. NO_COLOR and redirected output remain plain text. Raw UART bytes and
+  UART log files are never colour-wrapped.
+- XMODEM EOT no longer retries on silence after a fully ACKed payload. Only an explicit EOT NAK
+  requests another EOT; otherwise control immediately passes to the stronger next-stage proof.
+- Documentation under doc/ is intentionally untouched in this code release.
+
 # UrsidoRescue 0.2.0-test14
 
 Status: **simulation candidate / HW PARTIAL.** This code-only follow-up does not touch the separate

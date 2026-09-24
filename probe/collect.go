@@ -31,6 +31,24 @@ func AllLayers() Layers {
 	return Layers{BootROM: true, UBoot: true, Linux: true, Flash: true, DT: true, Network: true, GPIO: true}
 }
 
+// LinuxLoginPlan contains credentials only in memory. Password fields must
+// never be written to transcripts, bundles or operator logs.
+type LinuxLoginPlan struct {
+	LoginUser       string
+	LoginPassword   string
+	RootUser        string
+	RootPassword    string
+	Model           string
+	Source          string
+	FTPEnabled      bool
+	SettingsChanged bool
+}
+
+// LinuxLoginAssist may use a trusted LAN-side stock-management path to obtain
+// the current console credentials. provision=true explicitly allows it to
+// enable the stock FTP service if needed for the UID-0 service account.
+type LinuxLoginAssist func(provision bool) (LinuxLoginPlan, error)
+
 // Options control one collection run.
 type Options struct {
 	Layers           Layers
@@ -42,6 +60,7 @@ type Options struct {
 	Timeout          time.Duration // whole run
 	LinuxUser        string
 	LinuxPassword    string
+	LinuxLoginAssist LinuxLoginAssist
 	StopKey          string // extra autoboot stop string
 	SampleHead       int    // bytes read from the start of each partition (4 KiB default)
 	Unsafe           bool   // accepted and recorded; never relaxes the guard
@@ -66,7 +85,10 @@ type Outcome struct {
 	UBoot             bool     `json:"uboot"`
 	OtherBootloader   string   `json:"other_bootloader,omitempty"`
 	Linux             bool     `json:"linux"`
+	LinuxUID0         bool     `json:"linux_uid0,omitempty"`
 	LinuxLoginBlock   bool     `json:"linux_login_required,omitempty"`
+	StockLANAssist    bool     `json:"stock_lan_assist,omitempty"`
+	StockProvisioned  bool     `json:"stock_service_provisioned,omitempty"`
 	UBIAttached       bool     `json:"ubi_attached,omitempty"`
 	UnconfirmedPrompt string   `json:"unconfirmed_prompt,omitempty"`
 	Blocked           int      `json:"blocked"`
@@ -394,8 +416,219 @@ func (c *collector) enterLinux() {
 
 var loginNameRE = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,32}$`)
 
+type linuxAssistResult struct {
+	plan LinuxLoginPlan
+	err  error
+}
+
+func (c *collector) runLinuxAssist(provision bool) (LinuxLoginPlan, error) {
+	if c.o.LinuxLoginAssist == nil {
+		return LinuxLoginPlan{}, errors.New("stock LAN login assist is unavailable")
+	}
+	ch := make(chan linuxAssistResult, 1)
+	go func() {
+		p, err := c.o.LinuxLoginAssist(provision)
+		ch <- linuxAssistResult{plan: p, err: err}
+	}()
+	for {
+		select {
+		case r := <-ch:
+			return r.plan, r.err
+		default:
+			d, err := c.s.Read(c.s.T.Poll)
+			if err != nil {
+				return LinuxLoginPlan{}, err
+			}
+			if len(d) > 0 {
+				c.lastRx = c.s.now()
+			}
+		}
+	}
+}
+
+func (c *collector) waitAuthPrompt(timeout time.Duration) PromptKind {
+	end := c.s.now().Add(timeout)
+	for c.s.now().Before(end) {
+		d, err := c.s.Read(c.s.T.Poll)
+		if err != nil {
+			return PromptNone
+		}
+		if len(d) == 0 {
+			continue
+		}
+		switch k := ClassifyPrompt(lastLine(c.s.Tail())); k {
+		case PromptLogin, PromptPassword, PromptLinuxShell:
+			return k
+		}
+	}
+	return PromptNone
+}
+
+func (c *collector) ensureLoginPrompt() bool {
+	if ClassifyPrompt(lastLine(c.s.Tail())) == PromptLogin {
+		return true
+	}
+	_ = c.s.sendKeys("Enter (redraw stock login)", []byte{'\r'})
+	return c.waitAuthPrompt(8*time.Second) == PromptLogin
+}
+
+func (c *collector) tryUARTLogin(user, pass, label string) bool {
+	if !loginNameRE.MatchString(user) || strings.ContainsAny(pass, "\r\n") {
+		return false
+	}
+	if !c.ensureLoginPrompt() {
+		return false
+	}
+	_ = c.s.sendKeys(label+" login name", append([]byte(user), '\r'))
+	k := c.waitAuthPrompt(10 * time.Second)
+	if k == PromptPassword {
+		_ = c.s.sendKeys(label+" password (masked)", append([]byte(pass), '\r'))
+		k = c.waitAuthPrompt(12 * time.Second)
+	}
+	c.s.transcript(TranscriptEntry{
+		Transport: "linux",
+		Command:   "login " + user + " (password masked)",
+		Result:    "prompt: " + lastLine(c.s.Tail()),
+	})
+	return k == PromptLinuxShell
+}
+
+func (c *collector) currentUID() (int, bool) {
+	l := NewLinux(c.s)
+	out, rc, err := l.Exec("id -u", 10*time.Second)
+	if err != nil || rc != 0 {
+		return -1, false
+	}
+	for _, f := range strings.Fields(out) {
+		if n, err := strconv.Atoi(strings.TrimSpace(f)); err == nil {
+			return n, true
+		}
+	}
+	return -1, false
+}
+
+func (c *collector) tryUARTSU(plan LinuxLoginPlan) bool {
+	if !loginNameRE.MatchString(plan.RootUser) || plan.RootPassword == "" ||
+		strings.ContainsAny(plan.RootPassword, "\r\n") {
+		return false
+	}
+	_ = c.s.sendKeys("su "+plan.RootUser, []byte("su "+plan.RootUser+"\r"))
+	k := c.waitAuthPrompt(8 * time.Second)
+	if k == PromptPassword {
+		_ = c.s.sendKeys("su password (masked)", append([]byte(plan.RootPassword), '\r'))
+		k = c.waitAuthPrompt(10 * time.Second)
+	}
+	c.s.transcript(TranscriptEntry{
+		Transport: "linux",
+		Command:   "su " + plan.RootUser + " (password masked)",
+		Result:    "prompt: " + lastLine(c.s.Tail()),
+	})
+	if k != PromptLinuxShell {
+		return false
+	}
+	uid, ok := c.currentUID()
+	return ok && uid == 0
+}
+
+func (c *collector) leaveLinuxShell() {
+	if ClassifyPrompt(lastLine(c.s.Tail())) != PromptLinuxShell {
+		return
+	}
+	_ = c.s.sendKeys("exit (return to login)", []byte("exit\r"))
+	_ = c.waitAuthPrompt(8 * time.Second)
+}
+
+func (c *collector) tryStockUARTPlan(plan LinuxLoginPlan) (root bool, shell bool) {
+	if plan.RootUser != "" && plan.RootPassword != "" {
+		if c.tryUARTLogin(plan.RootUser, plan.RootPassword, "stock UID0") {
+			if uid, ok := c.currentUID(); ok && uid == 0 {
+				return true, true
+			}
+			c.leaveLinuxShell()
+		}
+	}
+	if plan.LoginUser == "" || plan.LoginPassword == "" {
+		return false, false
+	}
+	if !c.tryUARTLogin(plan.LoginUser, plan.LoginPassword, "stock") {
+		return false, false
+	}
+	if uid, ok := c.currentUID(); ok && uid == 0 {
+		return true, true
+	}
+	if c.tryUARTSU(plan) {
+		return true, true
+	}
+	return false, true
+}
+
+func (c *collector) automaticStockLogin() bool {
+	if c.o.LinuxLoginAssist == nil {
+		return false
+	}
+	c.note(L("[STOCK] Найден login stock Linux; получаю актуальные реквизиты через 192.168.1.1. Пароли остаются только в памяти.", "[STOCK] Stock Linux login detected; obtaining current credentials through 192.168.1.1. Passwords stay in memory only."))
+	plan, err := c.runLinuxAssist(false)
+	if err != nil {
+		c.note(L("[WARN] stock LAN assist не сработал: ", "[WARN] stock LAN assist failed: ") + err.Error())
+		return false
+	}
+	c.res.StockLANAssist = true
+	c.note(fmt.Sprintf(L("[STOCK] Web-доступ подтверждён: %s; пробую UART login и UID 0.", "[STOCK] Web access confirmed: %s; trying UART login and UID 0."), plan.Model))
+	root, shell := c.tryStockUARTPlan(plan)
+	if root {
+		c.res.LinuxUID0 = true
+		c.note(L("[OK] UART stock shell: UID 0 подтверждён.", "[OK] UART stock shell: UID 0 confirmed."))
+		c.enterLinux()
+		return true
+	}
+
+	if !plan.FTPEnabled && c.o.Ask != nil {
+		answer := strings.ToLower(strings.TrimSpace(c.o.Ask(L(
+			"UID 0 через stock UART не подтверждён. Включить FTP через штатную Web UI, перечитать user_ftp и повторить? Это изменит stock-настройку, raw MTD/firmware не пишется. [y/N]: ",
+			"UID 0 was not confirmed over stock UART. Enable FTP through the stock Web UI, refresh user_ftp and retry? This changes a stock setting; no raw MTD/firmware write is performed. [y/N]: ",
+		))))
+		if answer == "y" || answer == "yes" || answer == "д" || answer == "да" {
+			refreshed, e := c.runLinuxAssist(true)
+			if e != nil {
+				c.note(L("[WARN] не удалось включить/перечитать stock FTP: ", "[WARN] could not enable/refresh stock FTP: ") + e.Error())
+			} else {
+				plan = refreshed
+				c.res.StockProvisioned = refreshed.SettingsChanged
+				if refreshed.SettingsChanged {
+					c.note(L("[ВНИМАНИЕ] FTP включён штатной Web UI и останется включён после probe.", "[NOTICE] FTP was enabled through the stock Web UI and remains enabled after the probe."))
+				}
+				if shell && c.tryUARTSU(plan) {
+					c.res.LinuxUID0 = true
+					c.note(L("[OK] UART stock shell: UID 0 подтверждён после FTP provisioning.", "[OK] UART stock shell: UID 0 confirmed after FTP provisioning."))
+					c.enterLinux()
+					return true
+				}
+				if shell {
+					c.leaveLinuxShell()
+				}
+				root, shell = c.tryStockUARTPlan(plan)
+				if root {
+					c.res.LinuxUID0 = true
+					c.note(L("[OK] UART stock shell: UID 0 подтверждён после FTP provisioning.", "[OK] UART stock shell: UID 0 confirmed after FTP provisioning."))
+					c.enterLinux()
+					return true
+				}
+			}
+		}
+	}
+	if shell {
+		c.note(L("[WARN] UART login получен без UID 0; продолжаю доступную read-only Linux-диагностику с текущими правами.", "[WARN] UART login succeeded without UID 0; continuing the available read-only Linux diagnostics with current privileges."))
+		c.enterLinux()
+		return true
+	}
+	return false
+}
+
 func (c *collector) login() {
-	s := c.s
+	if c.o.LinuxUser == "" && c.automaticStockLogin() {
+		return
+	}
+
 	user, pass := c.o.LinuxUser, c.o.LinuxPassword
 	if user == "" && c.o.Ask != nil {
 		user = strings.TrimSpace(c.o.Ask(L("Linux требует вход. Логин (пусто = пропустить Linux-часть): ", "Linux asks for a login. User (empty = skip the Linux part): ")))
@@ -405,7 +638,7 @@ func (c *collector) login() {
 	}
 	if user == "" || !loginNameRE.MatchString(user) {
 		c.res.LinuxLoginBlock = true
-		c.note(L("Linux login prompt: учётные данные не заданы (--linux-user/--linux-password) — Linux-часть пропущена", "Linux login prompt: no credentials given (--linux-user/--linux-password) — Linux part skipped"))
+		c.note(L("Linux login prompt: автоматический stock LAN assist и ручные учётные данные недоступны — Linux-часть пропущена", "Linux login prompt: automatic stock LAN assist and manual credentials are unavailable — Linux part skipped"))
 		c.lxDone = true
 		return
 	}
@@ -414,14 +647,10 @@ func (c *collector) login() {
 		c.lxDone = true
 		return
 	}
-	_ = s.sendKeys("login name", append([]byte(user), '\r'))
-	_, _ = s.Drain(s.T.Quiet, 5*time.Second)
-	if ClassifyPrompt(lastLine(s.Tail())) == PromptPassword {
-		_ = s.sendKeys("password (not logged)", append([]byte(pass), '\r'))
-		_, _ = s.Drain(s.T.Quiet*2, 8*time.Second)
-	}
-	s.transcript(TranscriptEntry{Transport: "linux", Command: "login " + user + " (password masked)", Result: "prompt: " + lastLine(s.Tail())})
-	if ClassifyPrompt(lastLine(s.Tail())) == PromptLinuxShell {
+	if c.tryUARTLogin(user, pass, "manual") {
+		if uid, ok := c.currentUID(); ok && uid == 0 {
+			c.res.LinuxUID0 = true
+		}
 		c.enterLinux()
 		return
 	}

@@ -2,6 +2,24 @@ package main
 
 import "testing"
 
+func TestEventTone(t *testing.T) {
+	cases := []struct {
+		msg  string
+		want string
+	}{
+		{"TFTP PASS", uiOK},
+		{"XMODEM retry", uiAmber2},
+		{"WARNING network", uiSand},
+		{"ошибка записи", uiBad},
+		{"U-Boot: version", uiInk},
+	}
+	for _, tc := range cases {
+		if got := eventTone(tc.msg); got != tc.want {
+			t.Fatalf("eventTone(%q)=%q want %q", tc.msg, got, tc.want)
+		}
+	}
+}
+
 func TestGenericRAMFileLimitIs128MiB(t *testing.T) {
 	if got := maxGenericRAMFile / (1024 * 1024); got != 128 {
 		t.Fatalf("maxGenericRAMFile = %d MiB, want 128", got)

@@ -28,7 +28,7 @@ import (
 
 const (
 	appName               = "UrsidoRescue"
-	appVersion            = "0.2.0-test14"
+	appVersion            = "0.2.0-test16"
 	defaultRouterIP       = "192.168.1.1"
 	defaultLocalIP        = "192.168.1.254"
 	defaultTFTPPort       = 1069
@@ -229,11 +229,12 @@ func (a *App) run() error {
 
 // bold wraps text in the ANSI bold SGR; enableVTOutput makes it render on
 // Windows too. Terminals that ignore SGR simply show the text unstyled.
-func bold(s string) string { return "\x1b[1m" + s + "\x1b[22m" }
+func bold(s string) string { return paint(s, uiBold) }
 
 func (a *App) showErr(err error) {
-	fmt.Println("\n[STOP]", err)
-	fmt.Println(L("Никаких дополнительных write/erase команд после этой ошибки не отправлено.", "No further write/erase commands were sent after this error."))
+	fmt.Println()
+	uiStatus(L("СТОП", "STOP"), err.Error(), uiBad)
+	fmt.Println(paint(L("Никаких дополнительных write/erase команд после этой ошибки не отправлено.", "No further write/erase commands were sent after this error."), uiMuted))
 	fmt.Println()
 }
 func (a *App) ask(prompt string) string {
@@ -373,7 +374,7 @@ func (a *App) logBytes(b []byte, echo bool) {
 		_, _ = os.Stdout.Write(b)
 	}
 }
-func (a *App) event(s string) { fmt.Printf("[%s] %s\n", time.Now().Format("15:04:05"), s) }
+func (a *App) event(s string) { uiEvent(time.Now().Format("15:04:05"), s) }
 
 func chooseProfileInteractive(a *App) (Profile, error) {
 	fmt.Println(L("Профиль устройства:", "Device profile:"))
@@ -701,24 +702,24 @@ func (a *App) xmodemSend(s Serial, path, label string) (xmodemResult, error) {
 		sent += int64(n)
 		seq++
 		if idx == 0 || (idx+1)%32 == 0 || idx+1 == blocks {
-			fmt.Printf("\r[XMODEM] %s: %d/%d bytes (%d/%d)", label, sent, size, idx+1, blocks)
+			fmt.Printf("\r%s %s: %d/%d bytes (%d/%d)", paint("[XMODEM]", uiSand), label, sent, size, idx+1, blocks)
 		}
 	}
 	dataComplete = true
 
 	// EOT is a transport close, not stronger evidence than the next-stage
-	// receiver/prompt. AN7583 has now been observed twice ACKing every FIP data
-	// block and then handing off without an EOT ACK. Avoid turning that valid
-	// handoff into a fatal error or sending CAN/EOT bytes into the new stage.
+	// receiver/prompt. Retry EOT only when the receiver explicitly NAKs it.
+	// Silence after a fully ACKed payload immediately hands control to the
+	// next-stage parser, which must prove the second receiver or U-Boot prompt.
 	for attempt := 1; attempt <= 3; attempt++ {
 		if e = s.Write([]byte{0x04}); e != nil {
 			return result, e
 		}
-		deadline := time.Now().Add(1500 * time.Millisecond)
+		deadline := time.Now().Add(900 * time.Millisecond)
 		retryNow := false
 		consecutiveCAN := 0
 		for time.Now().Before(deadline) {
-			n, er := s.Read(resp, 150*time.Millisecond)
+			n, er := s.Read(resp, 120*time.Millisecond)
 			if er != nil {
 				return result, er
 			}
@@ -745,22 +746,23 @@ func (a *App) xmodemSend(s Serial, path, label string) (xmodemResult, error) {
 			}
 			if handoff {
 				fmt.Println()
-				a.event(L("Все XMODEM-блоки подтверждены; вместо EOT ACK уже виден вывод следующего этапа — проверяю handoff", "All XMODEM blocks were ACKed; next-stage output appeared instead of EOT ACK — verifying handoff"))
+				a.event(L("Payload XMODEM подтверждён; уже виден вывод следующего этапа — проверяю handoff", "XMODEM payload is ACKed; next-stage output is already visible — verifying handoff"))
 				return result, nil
 			}
 			if retryNow {
 				break
 			}
 		}
-		if retryNow {
-			a.event(fmt.Sprintf(L("XMODEM EOT получил NAK, повтор %d/3", "XMODEM EOT got NAK, retry %d/3"), attempt))
-		} else {
-			a.event(fmt.Sprintf(L("XMODEM EOT без ACK, осторожный повтор %d/3", "XMODEM EOT without ACK, cautious retry %d/3"), attempt))
+		if !retryNow {
+			fmt.Println()
+			a.event(L("Payload XMODEM подтверждён; EOT ACK не пришёл — без лишних EOT перехожу к проверке следующего этапа", "XMODEM payload is ACKed; no EOT ACK — moving to next-stage proof without extra EOT retries"))
+			return result, nil
 		}
+		a.event(fmt.Sprintf(L("XMODEM EOT получил NAK, повтор %d/3", "XMODEM EOT got NAK, retry %d/3"), attempt))
 		time.Sleep(80 * time.Millisecond)
 	}
 	fmt.Println()
-	a.event(L("Все XMODEM-блоки подтверждены, но EOT ACK не пришёл — не отменяю сессию, проверяю следующий этап по UART", "All XMODEM blocks were ACKed but EOT ACK was not received — not aborting; verifying the next UART stage"))
+	a.event(L("Payload XMODEM подтверждён; EOT трижды получил NAK — проверяю следующий этап по UART", "XMODEM payload is ACKed; EOT was NAKed three times — verifying the next UART stage"))
 	return result, nil
 }
 
@@ -1434,7 +1436,7 @@ func detectLocalIP() string {
 func (a *App) networkIP() (string, error) {
 	ip := detectLocalIP()
 	if ip != "" {
-		fmt.Println(L("[NET] найден адрес ПК:", "[NET] PC address found:"), ip)
+		uiStatus("NET", L("адрес ПК: ", "PC address: ")+ip, uiOK)
 		return ip, nil
 	}
 	fmt.Println(L("На ПК не найден IPv4 192.168.1.x. Настройте Ethernet статически, рекомендуется 192.168.1.254/24.", "No 192.168.1.x IPv4 address on this PC. Configure Ethernet statically, 192.168.1.254/24 recommended."))
@@ -1497,12 +1499,6 @@ func (a *App) tftpLoadKnownLocal(s Serial, path, remote string, addr uint64, loc
 
 	var last error
 	for attempt := 1; attempt <= 3; attempt++ {
-		// Re-apply the complete network tuple for every attempt. A failed U-Boot
-		// network command may leave ARP/net state stale even though the prompt is alive.
-		if e = a.configureUBootNet(s, local); e != nil {
-			return e
-		}
-
 		ready := make(chan error, 1)
 		done := make(chan tftpResult, 1)
 		cancel := make(chan struct{})
@@ -1532,6 +1528,10 @@ func (a *App) tftpLoadKnownLocal(s Serial, path, remote string, addr uint64, loc
 				if re := a.resyncUBootAfterNetError(s); re != nil {
 					return fmt.Errorf("%w; resync: %v", last, re)
 				}
+				if re := a.configureUBootNet(s, local); re != nil {
+					return fmt.Errorf("%w; network reconfigure: %v", last, re)
+				}
+				a.event(L("TFTP retry: сетевой env U-Boot восстановлен после сбоя", "TFTP retry: U-Boot network environment restored after failure"))
 				time.Sleep(time.Duration(attempt) * time.Second)
 				continue
 			}
@@ -1560,9 +1560,8 @@ func (a *App) tftpLoadKnownLocal(s Serial, path, remote string, addr uint64, loc
 
 		a.event(fmt.Sprintf(L("TFTP проверка не прошла; повторяю только текущую передачу (%d/3): %v", "TFTP verification failed; retrying only the current transfer (%d/3): %v"), attempt, last))
 		if attempt < 3 {
-			if re := a.resyncUBootAfterNetError(s); re != nil {
-				return fmt.Errorf("%w; resync: %v", last, re)
-			}
+			// The TFTP command already returned to a working prompt. Do not
+			// churn ethaddr/ipaddr/serverip for a RAM verification retry.
 			time.Sleep(time.Duration(attempt) * time.Second)
 		}
 	}
@@ -1572,6 +1571,9 @@ func (a *App) tftpLoadKnownLocal(s Serial, path, remote string, addr uint64, loc
 func (a *App) tftpLoad(s Serial, path, remote string, addr uint64) (string, error) {
 	local, e := a.networkIP()
 	if e != nil {
+		return "", e
+	}
+	if e = a.configureUBootNet(s, local); e != nil {
 		return "", e
 	}
 	// Actual transfer + RAM hash/CRC is the network preflight. Do not fail the
@@ -1625,6 +1627,7 @@ func (a *App) readbackCRC(s Serial, target string, off, size, ram uint64, expect
 
 // ---------------- Workflows ----------------
 func (a *App) fipRepairWizard() error {
+	a.showNetworkPrerequisites()
 	pref, e := chooseProfileInteractive(a)
 	if e != nil {
 		return e
@@ -1995,6 +1998,7 @@ func (a *App) askStockSource() (string, error) {
 }
 
 func (a *App) stockRestoreWizard() error {
+	a.showNetworkPrerequisites()
 	path, e := a.askStockSource()
 	if e != nil {
 		return e
@@ -2131,6 +2135,7 @@ func (a *App) stockRestoreWizard() error {
 }
 
 func (a *App) physicalRestoreWizard() error {
+	a.showNetworkPrerequisites()
 	path, e := a.askPath(L("Путь к raw physical NAND image 256 MiB: ", "Path to the 256 MiB raw physical NAND image: "))
 	if e != nil {
 		return e
@@ -2162,7 +2167,7 @@ func (a *App) physicalRestoreWizard() error {
 		return e
 	}
 	if len(blbad) > 0 || len(bad) > 0 {
-		return fmt.Errorf(L("восстановление physical image в 0.2.0-test14 требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test14 requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
+		return fmt.Errorf(L("восстановление physical image в 0.2.0-test16 требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test16 requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
 	}
 	local, e := a.networkIP()
 	if e != nil {
@@ -2249,6 +2254,7 @@ func (a *App) physicalRestoreWizard() error {
 }
 
 func (a *App) bootRecoveryWizard() error {
+	a.showNetworkPrerequisites()
 	path, e := a.askPath(L("Путь к OpenWrt initramfs/recovery .itb: ", "Path to the OpenWrt initramfs/recovery .itb: "))
 	if e != nil {
 		return e
@@ -2399,6 +2405,7 @@ func (a *App) uartShellOn(s Serial) error {
 	return a.runTerminalOnMode(s, true)
 }
 func (a *App) expertUBIVolume() error {
+	a.showNetworkPrerequisites()
 	pref, e := chooseProfileInteractive(a)
 	if e != nil {
 		return e
@@ -2458,6 +2465,7 @@ func (a *App) expertUBIVolume() error {
 	return nil
 }
 func (a *App) expertRawMTD() error {
+	a.showNetworkPrerequisites()
 	pref, e := chooseProfileInteractive(a)
 	if e != nil {
 		return e
@@ -2583,7 +2591,7 @@ func (a *App) makeSupportBundle() (string, error) {
 }
 
 func (a *App) selftest() error {
-	if appVersion != "0.2.0-test14" {
+	if appVersion != "0.2.0-test16" {
 		return errors.New("version")
 	}
 	if _, e := probe.CheckUBoot("saveenv"); e == nil {
@@ -2591,6 +2599,9 @@ func (a *App) selftest() error {
 	}
 	if _, e := probe.CheckLinux("dd if=/dev/zero of=/dev/mtd0"); e == nil {
 		return errors.New("probe guard allowed a flash write")
+	}
+	if c, e := probe.CheckLinux("id -u"); e != nil || c != "id -u" {
+		return errors.New("probe guard rejected UID proof")
 	}
 	if c, e := probe.CheckUBoot("mtd  list"); e != nil || c != "mtd list" {
 		return errors.New("probe guard canonicalisation")
