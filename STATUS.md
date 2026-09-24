@@ -1,10 +1,24 @@
-# UrsidoRescue 0.2.0-test5
+# UrsidoRescue 0.2.0-test6
 
-Status: **simulation PASS / HW HOLD.** Unit tests, a simulated AN7581 board and a pseudo-terminal
-U-Boot pass (also with -race); nothing in 0.2.x has run on real hardware yet. First hardware runs
-should be probes on a board you can afford to recover.
+Status: **simulation PASS / HW PARTIAL.** The interactive UART terminal has now run on real
+OpenWrt hardware. That first hardware session exposed Windows terminal usability issues fixed in
+this build; the fixes themselves still need a hardware re-test. Probe/recovery write paths remain
+HW HOLD.
 
 UART testers only: 3.3V TTL, GND/TX/RX only, never connect VCC.
+
+## 0.2.0-test6
+
+- Windows now enumerates only COM ports that actually exist via QueryDosDeviceW and offers a
+  numbered selection; manual COM<n> input remains available.
+- Windows serial writes no longer call FlushFileBuffers after every write. Raw terminal input is
+  forwarded in console chunks, removing the near-second typing latency seen on hardware and
+  keeping ANSI arrow/history sequences together.
+- Windows QuickEdit remains enabled in UART raw mode so native selection/copy/paste works again.
+- Ctrl+Q is a local fast-exit from the UART terminal and is never sent to the router.
+- Regression tests verify one-write delivery of an arrow escape sequence and local Ctrl+Q.
+- Exact pre-release build is still subject to hardware re-test for typing latency, arrows and
+  clipboard behavior.
 
 ## 0.2.0-test5
 
