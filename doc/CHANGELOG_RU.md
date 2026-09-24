@@ -57,6 +57,8 @@
   возможности, принципы, быстрый старт, ссылки на документацию. Таблица происхождения payloads
   перенесена в ARCHITECTURE.
 - `PROBE.md`: номер пункта главного меню Porting Collector исправлен на 7. Номер 8 устарел с test5.
+- Утверждено ТЗ v3 на единый интерфейс Web-GUI / TUI / CLI (`doc/UI_SPEC_RU.md`) и добавлен
+  HTML-макет Web-GUI (`doc/ui-mockup/`). Кода интерфейса пока нет.
 - Документация и `PROBE.md` обновлены до test17: сеть и пререквизиты LAN, цветной вывод, EOT,
   stock LAN assist, `--stock-lan-assist`, Telnet-only passive plan и повторное чтение поздних паролей.
 

@@ -57,6 +57,8 @@ Releases by CI.
   purpose and capabilities, principles, quick start, documentation links. The payload provenance
   table moved to ARCHITECTURE.
 - `PROBE.md`: the Porting Collector main-menu number is now 7. Number 8 has been stale since test5.
+- Approved the unified UI specification v3 for Web-GUI / TUI / CLI (`doc/UI_SPEC_RU.md`, Russian)
+  and added an HTML mockup of the Web-GUI (`doc/ui-mockup/`). No UI code yet.
 - Documentation and `PROBE.md` updated to test17: network and LAN prerequisites, coloured output,
   EOT, stock LAN assist, `--stock-lan-assist`, the Telnet-only passive plan and late credential refresh.
 

@@ -11,6 +11,8 @@
 | [MENU_RU.md](MENU_RU.md) | Все пункты всех меню: что делает, какие шаги выполняет, где остановится |
 | [ARCHITECTURE_RU.md](ARCHITECTURE_RU.md) | Структура исходников, модули, раскладка NAND, сборка, CI, релизы, тесты |
 | [CHANGELOG_RU.md](CHANGELOG_RU.md) | История изменений |
+| [UI_SPEC_RU.md](UI_SPEC_RU.md) | **ТЗ v3 на единый интерфейс** Web-GUI / TUI / CLI — утверждённая основа разработки |
+| [ui-mockup/](ui-mockup/index.html) | Кликабельный HTML-макет Web-GUI в стиле UrsusBoot — дизайн-референс к ТЗ |
 
 ## English
 
@@ -21,6 +23,8 @@
 | [MENU_EN.md](MENU_EN.md) | Every item of every menu: what it does, which steps it runs, where it stops |
 | [ARCHITECTURE_EN.md](ARCHITECTURE_EN.md) | Source layout, modules, NAND layout, build, CI, releases, tests |
 | [CHANGELOG_EN.md](CHANGELOG_EN.md) | Change history |
+| [UI_SPEC_RU.md](UI_SPEC_RU.md) | Unified UI specification v3 (Web-GUI / TUI / CLI), Russian — the approved development baseline |
+| [ui-mockup/](ui-mockup/index.html) | Clickable HTML mockup of the Web-GUI in the UrsusBoot style — design reference for the spec |
 
 Главный README: [../README.ru.md](../README.ru.md) (RU) · [../README.md](../README.md) (EN). Porting Collector reference (EN): [../PROBE.md](../PROBE.md).
 
