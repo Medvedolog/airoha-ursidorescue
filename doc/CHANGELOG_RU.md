@@ -77,6 +77,9 @@
   вне операции и в UART-терминале поведение прежнее.
 - ТЗ v3.1 и макет: состояния СТОП, выбор порта, ID на экране, баннеры Porting, экраны ожидания
   BootROM и результата, компактный режим, без внешних шрифтов.
+- ТЗ v3.2: слой бэкендов и лестница деградации (persistent UrsusBoot Web/UART → RAM RECOVERY_SAFE →
+  BootROM), детектор «кто на том конце» как отдельный этап. ABOUT и ARCHITECTURE уточняют: RAM FIP — ванильный
+  OpenWrt U-Boot по контракту RC18, собранный конвейером UrsusBoot, без кода UrsusBoot.
 - Документация и `PROBE.md` обновлены до test17: сеть и пререквизиты LAN, цветной вывод, EOT,
   stock LAN assist, `--stock-lan-assist`, Telnet-only passive plan и повторное чтение поздних паролей.
 

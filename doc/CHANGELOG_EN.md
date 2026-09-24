@@ -78,6 +78,10 @@ Releases by CI.
   outside an operation and in the UART terminal nothing changed.
 - UI spec v3.1 and mockup: STOP states, port chooser, IDs on screen, Porting banners, BootROM wait
   and result screens, compact layout, no external fonts.
+- UI spec v3.2: a backend layer and the degradation ladder (persistent UrsusBoot Web/UART → RAM
+  RECOVERY_SAFE → BootROM), with a read-only "what is on the other end" detector as its own stage. ABOUT and
+  ARCHITECTURE now state that the RAM FIP is a vanilla OpenWrt U-Boot under the RC18 contract, built by the
+  UrsusBoot pipeline, with no UrsusBoot code.
 - Documentation and `PROBE.md` updated to test17: network and LAN prerequisites, coloured output,
   EOT, stock LAN assist, `--stock-lan-assist`, the Telnet-only passive plan and late credential refresh.
 

@@ -135,6 +135,9 @@ SPI-NAND 256 МиБ (0x10000000), eraseblock 0x20000, страница (min I/O)
 | `payloads/mf/an7583-preloader.bin` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/ursusboot-uart-preloader.bin` |
 | `payloads/mf/an7583-recovery-ram.fip` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/recovery-safe-u-boot.fip` |
 
+RAM FIP собираются конвейером UrsusBoot, но содержат ванильный OpenWrt U-Boot (`3d1645ee` + PR 24025) по
+контракту RECOVERY_SAFE RC18, без кода UrsusBoot (см. [ABOUT](ABOUT_RU.md)).
+
 ## Ключевые механизмы
 
 - **Stock LAN assist (`stockLANLoginAssist` → `collector.automaticStockLogin`).** На stock

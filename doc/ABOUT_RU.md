@@ -80,7 +80,16 @@ https://github.com/Medvedolog/airoha-ursusboot · текущая версия `0
 релиза UrsusBoot `v0.1.0-alpha5-t66`. Это сборки **RECOVERY_SAFE**: `bootdelay=-1`, `bootcmd` только
 печатает текст, сохранённое окружение уходит в заведомо несуществующие UBI-тома — такой U-Boot сам
 ничего не запускает и не пишет. Они знают NAND Fudan FM25S01A и FM25G02B (последний не умели старые
-RAM U-Boot из MedveFlasher RC18). Porting-отчёт UrsidoRescue (`ursusboot-porting-report.md`) — это
+RAM U-Boot из MedveFlasher RC18).
+
+Важно: RAM FIP — это **не код UrsusBoot**. Внутри — ванильный OpenWrt U-Boot (`3d1645ee` + PR 24025 с
+FM25G01B/FM25G02B), собранный конвейером UrsusBoot по контракту RC18 и упакованный в закреплённый RC18 FIP
+(BL31 байт в байт). Сборка UrsusBoot сама проверяет, что в нём нет строк `UrsusBoot-` и `ursusdispatch`.
+UrsusBoot даёт аварийному пути сборку под плату, происхождение и QA, а не свою логику, поэтому команд
+`ursus*` в RAM-пути нет намеренно: аварийный путь не зависит от загрузчика, который он же может чинить.
+Использование живого persistent UrsusBoot — отдельный запланированный слой, см. `UI_SPEC_RU.md` §9a.
+
+Porting-отчёт UrsidoRescue (`ursusboot-porting-report.md`) — это
 входные данные для нового порта UrsusBoot.
 
 ### UrsusFlasher — `airoha-router-ursusflasher`

@@ -79,7 +79,17 @@ self-update and BootROM/UART recovery paths.
 come from the UrsusBoot `v0.1.0-alpha5-t66` release. They are **RECOVERY_SAFE** builds:
 `bootdelay=-1`, `bootcmd` only prints text, and the saved environment goes to UBI volumes that never
 exist. Such a U-Boot neither boots nor writes anything by itself. It knows the Fudan FM25S01A and
-FM25G02B NAND chips (the older MedveFlasher RC18 RAM U-Boots did not know FM25G02B). The UrsidoRescue
+FM25G02B NAND chips (the older MedveFlasher RC18 RAM U-Boots did not know FM25G02B).
+
+Note: the RAM FIP is **not UrsusBoot code**. It holds a vanilla OpenWrt U-Boot (`3d1645ee` + PR 24025 with
+FM25G01B/FM25G02B), built by the UrsusBoot pipeline under the RC18 contract and packed into the pinned
+RC18 FIP (BL31 byte-exact). The UrsusBoot build itself checks that it contains neither `UrsusBoot-` nor
+`ursusdispatch`. UrsusBoot gives the rescue path a board-specific build, provenance and QA, not its own
+logic, so the `ursus*` commands are absent from the RAM path on purpose: the rescue path does not depend on
+the bootloader it may have to repair. Using a live persistent UrsusBoot is a separate planned layer, see
+`UI_SPEC_RU.md` §9a.
+
+The UrsidoRescue
 porting report (`ursusboot-porting-report.md`) is input for a new UrsusBoot port.
 
 ### UrsusFlasher: `airoha-router-ursusflasher`

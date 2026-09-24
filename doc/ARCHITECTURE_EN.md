@@ -135,6 +135,9 @@ a profile update means the program refuses to work. File provenance:
 | `payloads/mf/an7583-preloader.bin` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/ursusboot-uart-preloader.bin` |
 | `payloads/mf/an7583-recovery-ram.fip` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/recovery-safe-u-boot.fip` |
 
+The RAM FIPs are built by the UrsusBoot pipeline but contain a vanilla OpenWrt U-Boot (`3d1645ee` + PR 24025)
+under the RECOVERY_SAFE RC18 contract, with no UrsusBoot code (see [ABOUT](ABOUT_EN.md)).
+
 ## Key mechanisms
 
 - **Stock LAN assist (`stockLANLoginAssist` → `collector.automaticStockLogin`).** On a stock
