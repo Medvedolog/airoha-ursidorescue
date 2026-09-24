@@ -416,6 +416,8 @@ func (c *collector) enterLinux() {
 
 var loginNameRE = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,32}$`)
 
+const stockCredentialRefreshDelay = 12 * time.Second
+
 type linuxAssistResult struct {
 	plan LinuxLoginPlan
 	err  error
@@ -444,6 +446,20 @@ func (c *collector) runLinuxAssist(provision bool) (LinuxLoginPlan, error) {
 			}
 		}
 	}
+}
+
+func (c *collector) waitWithUART(delay time.Duration) error {
+	end := c.s.now().Add(delay)
+	for c.s.now().Before(end) {
+		d, err := c.s.Read(c.s.T.Poll)
+		if err != nil {
+			return err
+		}
+		if len(d) > 0 {
+			c.lastRx = c.s.now()
+		}
+	}
+	return nil
 }
 
 func (c *collector) waitAuthPrompt(timeout time.Duration) PromptKind {
@@ -488,7 +504,7 @@ func (c *collector) tryUARTLogin(user, pass, label string) bool {
 	c.s.transcript(TranscriptEntry{
 		Transport: "linux",
 		Command:   "login " + user + " (password masked)",
-		Result:    "prompt: " + lastLine(c.s.Tail()),
+		Result:    "prompt-kind: " + k.String(),
 	})
 	return k == PromptLinuxShell
 }
@@ -512,7 +528,9 @@ func (c *collector) tryUARTSU(plan LinuxLoginPlan) bool {
 		strings.ContainsAny(plan.RootPassword, "\r\n") {
 		return false
 	}
-	_ = c.s.sendKeys("su "+plan.RootUser, []byte("su "+plan.RootUser+"\r"))
+	if err := c.s.sendAuthLine("su " + plan.RootUser); err != nil {
+		return false
+	}
 	k := c.waitAuthPrompt(8 * time.Second)
 	if k == PromptPassword {
 		_ = c.s.sendKeys("su password (masked)", append([]byte(plan.RootPassword), '\r'))
@@ -521,7 +539,7 @@ func (c *collector) tryUARTSU(plan LinuxLoginPlan) bool {
 	c.s.transcript(TranscriptEntry{
 		Transport: "linux",
 		Command:   "su " + plan.RootUser + " (password masked)",
-		Result:    "prompt: " + lastLine(c.s.Tail()),
+		Result:    "prompt-kind: " + k.String(),
 	})
 	if k != PromptLinuxShell {
 		return false
@@ -534,7 +552,9 @@ func (c *collector) leaveLinuxShell() {
 	if ClassifyPrompt(lastLine(c.s.Tail())) != PromptLinuxShell {
 		return
 	}
-	_ = c.s.sendKeys("exit (return to login)", []byte("exit\r"))
+	if err := c.s.sendAuthLine("exit"); err != nil {
+		return
+	}
 	_ = c.waitAuthPrompt(8 * time.Second)
 }
 
@@ -562,6 +582,40 @@ func (c *collector) tryStockUARTPlan(plan LinuxLoginPlan) (root bool, shell bool
 	return false, true
 }
 
+// tryStockUARTWithRefresh performs one bounded second credential read after a
+// failed login. Stock init on Nokia MD/MF can rotate service passwords after
+// the Web UI is already reachable, so "Web is up" is not proof that the first
+// credentials are final.
+func (c *collector) tryStockUARTWithRefresh(plan LinuxLoginPlan) (LinuxLoginPlan, bool, bool) {
+	root, shell := c.tryStockUARTPlan(plan)
+	if root {
+		return plan, true, shell
+	}
+
+	c.note(fmt.Sprintf(L(
+		"[STOCK] UID 0 не подтверждён; продолжаю читать UART %s и один раз перечитаю stock-реквизиты (init может менять пароли поздно).",
+		"[STOCK] UID 0 not confirmed; keeping UART drained for %s, then re-reading stock credentials once (init may rotate passwords late).",
+	), stockCredentialRefreshDelay))
+	if err := c.waitWithUART(stockCredentialRefreshDelay); err != nil {
+		c.note(L("[WARN] ошибка UART во время ожидания обновления реквизитов: ", "[WARN] UART error while waiting to refresh credentials: ") + err.Error())
+		return plan, false, shell
+	}
+	refreshed, err := c.runLinuxAssist(false)
+	if err != nil {
+		c.note(L("[WARN] повторное чтение stock-реквизитов не удалось: ", "[WARN] stock credential re-read failed: ") + err.Error())
+		return plan, false, shell
+	}
+	plan = refreshed
+	if shell {
+		if c.tryUARTSU(plan) {
+			return plan, true, true
+		}
+		c.leaveLinuxShell()
+	}
+	root, shell = c.tryStockUARTPlan(plan)
+	return plan, root, shell
+}
+
 func (c *collector) automaticStockLogin() bool {
 	if c.o.LinuxLoginAssist == nil {
 		return false
@@ -574,7 +628,7 @@ func (c *collector) automaticStockLogin() bool {
 	}
 	c.res.StockLANAssist = true
 	c.note(fmt.Sprintf(L("[STOCK] Web-доступ подтверждён: %s; пробую UART login и UID 0.", "[STOCK] Web access confirmed: %s; trying UART login and UID 0."), plan.Model))
-	root, shell := c.tryStockUARTPlan(plan)
+	plan, root, shell := c.tryStockUARTWithRefresh(plan)
 	if root {
 		c.res.LinuxUID0 = true
 		c.note(L("[OK] UART stock shell: UID 0 подтверждён.", "[OK] UART stock shell: UID 0 confirmed."))
