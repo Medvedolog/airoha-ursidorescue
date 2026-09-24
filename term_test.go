@@ -135,7 +135,6 @@ func TestRenderPortableAndCursor(t *testing.T) {
 	}
 }
 
-
 func TestTranslateWindowsConsoleKey(t *testing.T) {
 	cases := []struct {
 		name string

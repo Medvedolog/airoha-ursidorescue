@@ -112,7 +112,6 @@ func (d *ansiDecoder) decodeEsc() []keyEvent {
 	return nil // unknown sequence: ignore
 }
 
-
 const (
 	winVKHome   = 0x24
 	winVKLeft   = 0x25
