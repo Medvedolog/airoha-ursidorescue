@@ -1,10 +1,10 @@
-# UrsidoRescue 0.2.0-test7-dev
+# UrsidoRescue 0.2.0-test7
 
-Status: **HW terminal debugging / unreleased.** Real OpenWrt testing of v0.2.0-test6 showed that
+Status: **simulation PASS / HW PARTIAL.** Real OpenWrt testing of v0.2.0-test6 showed that
 the legacy Expert-mode UART Shell still used one-byte console reads and a 250 ms serial read loop,
-so arrow escape sequences were split and interactive input could lag close to a second.
+so arrow escape sequences were split and interactive input could lag close to a second. Those fixes are included here but still need hardware re-test.
 
-## 0.2.0-test7-dev
+## 0.2.0-test7
 
 - Expert item 6 now uses the same low-latency raw backend as item 1; no separate one-byte UART
   shell implementation remains.
