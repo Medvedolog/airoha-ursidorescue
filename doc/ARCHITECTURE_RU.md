@@ -103,7 +103,14 @@ SPI-NAND 256 МиБ (0x10000000), eraseblock 0x20000, страница (min I/O)
 
 Профили `md`/`mf` в `main.go` содержат путь, размер и SHA256 каждого файла из `payloads/`.
 `validatePinned` проверяет их перед каждой отправкой в BootROM и в `--selftest`. Замена файла
-без правки профиля = отказ работать. Происхождение файлов — в [../README.md](../README.md#payloads).
+без правки профиля = отказ работать. Происхождение файлов:
+
+| файл | источник |
+|---|---|
+| `payloads/md/an7581-preloader.bin` | airoha-router-ursusflasher, OpenWrt AN7581 UBI preloader |
+| `payloads/md/an7581-fudan-capable-ram.fip` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-md/recovery-safe-u-boot.fip` |
+| `payloads/mf/an7583-preloader.bin` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/ursusboot-uart-preloader.bin` |
+| `payloads/mf/an7583-recovery-ram.fip` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/recovery-safe-u-boot.fip` |
 
 ## Ключевые механизмы
 
