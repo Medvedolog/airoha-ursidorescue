@@ -370,6 +370,12 @@ func hexTool(fixed []string) linuxRule {
 }
 
 var linuxAllow = map[string]linuxRule{
+	"id": func(a []string, _ bool) string {
+		if len(a) == 1 && a[0] == "-u" {
+			return ""
+		}
+		return "id -u only"
+	},
 	"uname": func(a []string, _ bool) string {
 		if len(a) == 1 && a[0] == "-a" {
 			return ""

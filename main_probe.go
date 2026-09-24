@@ -164,7 +164,7 @@ func probeUsage() string {
 	return L(`использование:
   ursidorescue probe [--uart ПОРТ] [--output КАТАЛОГ] [--no-linux | --uboot-only | --linux-only]
                      [--bootrom] [--ram-uboot md|mf] [--timeout 5m] [--sample 4k|64k]
-                     [--linux-user U] [--linux-password P] [--stop-key S] [--redact] [--no-export] [--unsafe]
+                     [--linux-user U] [--linux-password P] [--stock-lan-assist] [--stop-key S] [--redact] [--no-export] [--unsafe]
                      [--wake] [--ubi-attach]
   ursidorescue export [--input КАТАЛОГ] [--output КАТАЛОГ] [--redact]
   общий флаг: --lang ru|en (или переменная URSIDO_LANG)
@@ -176,7 +176,7 @@ probe строго только читает: erase/write/saveenv/ubi part не 
              5 Linux недоступен, 6 профиль неполный, 7 заблокировано нарушение безопасности`, `usage:
   ursidorescue probe [--uart PORT] [--output DIR] [--no-linux | --uboot-only | --linux-only]
                      [--bootrom] [--ram-uboot md|mf] [--timeout 5m] [--sample 4k|64k]
-                     [--linux-user U] [--linux-password P] [--stop-key S] [--redact] [--no-export] [--unsafe]
+                     [--linux-user U] [--linux-password P] [--stock-lan-assist] [--stop-key S] [--redact] [--no-export] [--unsafe]
                      [--wake] [--ubi-attach]
   ursidorescue export [--input DIR] [--output DIR] [--redact]
   common flag: --lang ru|en (or the URSIDO_LANG variable)
@@ -202,6 +202,7 @@ func (a *App) cliProbe(args []string) int {
 	sample := fs.String("sample", "4k", "")
 	user := fs.String("linux-user", "", "")
 	pass := fs.String("linux-password", "", "")
+	stockAssist := fs.Bool("stock-lan-assist", false, "")
 	stop := fs.String("stop-key", "", "")
 	redact := fs.Bool("redact", false, "")
 	noExport := fs.Bool("no-export", false, "")
@@ -251,11 +252,15 @@ func (a *App) cliProbe(args []string) int {
 	if *unsafe {
 		fmt.Println(L("[SAFETY] --unsafe игнорируется: probe mode остаётся read-only.", "[SAFETY] --unsafe is ignored: probe mode stays read-only."))
 	}
-	req := probeRequest{port: p, dir: dir, ramUBoot: strings.ToLower(*ram), export: !*noExport, redact: *redact, opts: probe.Options{
+	opts := probe.Options{
 		Layers: probe.AllLayers(), NoLinux: *noLinux, UBootOnly: *ubootOnly, LinuxOnly: *linuxOnly, BootROMHandshake: *bootrom,
 		Timeout: *timeout, LinuxUser: *user, LinuxPassword: *pass, StopKey: *stop, SampleHead: head, Unsafe: *unsafe, RAMHint: 0,
 		Wake: *wake, UBIAttach: *ubiAttach,
-	}}
+	}
+	if *stockAssist {
+		opts.LinuxLoginAssist = a.stockLANLoginAssist
+	}
+	req := probeRequest{port: p, dir: dir, ramUBoot: strings.ToLower(*ram), export: !*noExport, redact: *redact, opts: opts}
 	if *ubiAttach {
 		fmt.Println(L("[ADVANCED] --ubi-attach: U-Boot выполнит ubi part. Это НЕ read-only: UBI может изменить volume table (auto-resize), записать fastmap или перенести блоки.", "[ADVANCED] --ubi-attach: U-Boot will run ubi part. This is NOT read-only: UBI may change the volume table (auto-resize), write a fastmap or move blocks."))
 	}
@@ -406,11 +411,13 @@ func (a *App) probeAsk(prompt string) string { return a.ask(prompt) }
 
 func (a *App) menuProbe(o probe.Options, export bool) error {
 	o.Ask = a.probeAsk
+	o.LinuxLoginAssist = a.stockLANLoginAssist
 	if strings.ToLower(a.ask(L("Устройство уже включено и стоит в U-Boot/Linux prompt (разрешить один Ctrl-C)? [y/N]: ", "Is the device already on and sitting at a U-Boot/Linux prompt (allow one Ctrl-C)? [y/N]: "))) == "y" {
 		o.Wake = true
 	}
 	o.Timeout = 5 * time.Minute
-	fmt.Println(L("\nProbe только читает. Подключите UART (GND/TX/RX, 3.3V; VCC не подключать).", "\nThe probe only reads. Connect the UART (GND/TX/RX, 3.3V; never connect VCC)."))
+	fmt.Println(L("\nProbe flash-команды остаются read-only. Stock LAN assist сначала только читает Web-реквизиты; если понадобится включить FTP, будет отдельное y/N с предупреждением об изменении stock-настройки.", "\nProbe flash commands remain read-only. Stock LAN assist first only reads Web credentials; if FTP must be enabled, a separate y/N warns that a stock setting will change."))
+	fmt.Println(L("Подключите UART (GND/TX/RX, 3.3V; VCC не подключать).", "Connect the UART (GND/TX/RX, 3.3V; never connect VCC)."))
 	fmt.Println(L("После запуска включите устройство. Если нужна Linux-часть, probe попросит перезагрузить его после U-Boot.", "After starting, power the device on. For the Linux part the probe will ask you to power-cycle it after U-Boot."))
 	res, err := a.runProbe(probeRequest{dir: a.currentProbeDir(), opts: o, export: export, interactive: true})
 	if err != nil {
