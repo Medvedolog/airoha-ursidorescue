@@ -139,9 +139,9 @@ type captureSerial struct {
 	writes [][]byte
 }
 
-func (s *captureSerial) Name() string      { return "capture" }
-func (s *captureSerial) Close() error      { return nil }
-func (s *captureSerial) ResetInput() error { return nil }
+func (s *captureSerial) Name() string                            { return "capture" }
+func (s *captureSerial) Close() error                            { return nil }
+func (s *captureSerial) ResetInput() error                       { return nil }
 func (s *captureSerial) Read([]byte, time.Duration) (int, error) { return 0, nil }
 func (s *captureSerial) Write(p []byte) error {
 	s.writes = append(s.writes, append([]byte(nil), p...))

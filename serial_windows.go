@@ -42,17 +42,17 @@ type windowsSerial struct {
 }
 
 var (
-	k32               = syscall.NewLazyDLL("kernel32.dll")
-	pCreateFileW      = k32.NewProc("CreateFileW")
-	pGetCommState     = k32.NewProc("GetCommState")
-	pSetCommState     = k32.NewProc("SetCommState")
-	pSetCommTimeouts  = k32.NewProc("SetCommTimeouts")
-	pSetupComm        = k32.NewProc("SetupComm")
-	pPurgeComm        = k32.NewProc("PurgeComm")
-	pReadFile         = k32.NewProc("ReadFile")
-	pWriteFile        = k32.NewProc("WriteFile")
+	k32              = syscall.NewLazyDLL("kernel32.dll")
+	pCreateFileW     = k32.NewProc("CreateFileW")
+	pGetCommState    = k32.NewProc("GetCommState")
+	pSetCommState    = k32.NewProc("SetCommState")
+	pSetCommTimeouts = k32.NewProc("SetCommTimeouts")
+	pSetupComm       = k32.NewProc("SetupComm")
+	pPurgeComm       = k32.NewProc("PurgeComm")
+	pReadFile        = k32.NewProc("ReadFile")
+	pWriteFile       = k32.NewProc("WriteFile")
 	pQueryDosDeviceW = k32.NewProc("QueryDosDeviceW")
-	pCloseHandle      = k32.NewProc("CloseHandle")
+	pCloseHandle     = k32.NewProc("CloseHandle")
 )
 
 func winErr(r uintptr) error {
