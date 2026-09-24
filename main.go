@@ -522,6 +522,7 @@ func crc16Xmodem(data []byte) uint16 {
 	}
 	return crc
 }
+
 type xmodemReply int
 
 const (

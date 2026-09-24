@@ -24,7 +24,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Check formatting
-        run: test -z "$(gofmt -l .)" || { gofmt -d main.go; gofmt -l .; exit 1; }
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - name: Build (vet, tests, 3 targets, selftest)
         run: ./build.sh
       - name: Package
