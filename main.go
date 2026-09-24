@@ -1435,6 +1435,316 @@ func (a *App) loadChunkWithKnownLocal(s Serial, path, remote, local string) erro
 	return a.tftpLoadKnownLocal(s, path, remote, loadAddr, local, true)
 }
 
+func (a *App) verifyRAM(s Serial, path string, addr uint64) error {
+	st, _ := os.Stat(path)
+	sha, _ := shaFile(path)
+	if out, rc, e := a.ubootCommandRaw(s, fmt.Sprintf("hash sha256 0x%x 0x%x", addr, st.Size()), 60*time.Second); e == nil && rc == 0 && strings.Contains(strings.ToLower(string(out)), strings.ToLower(sha)) {
+		a.event(L("SHA256 в RAM PASS: ", "RAM SHA256 PASS: ") + sha)
+		return nil
+	}
+	crc, e := crcFile(path)
+	if e != nil {
+		return e
+	}
+	out, e := a.ubootCommand(s, fmt.Sprintf("crc32 0x%x 0x%x", addr, st.Size()), 60*time.Second)
+	if e != nil {
+		return e
+	}
+	if !regexp.MustCompile(fmt.Sprintf(`(?i)(?:0x)?%08x`, crc)).Match(out) {
+		return fmt.Errorf(L("CRC32 в RAM не совпал; ожидался %08x", "RAM CRC32 mismatch; expected %08x"), crc)
+	}
+	a.event(fmt.Sprintf(L("CRC32 в RAM PASS: %08x (SHA256 источника %s)", "RAM CRC32 PASS: %08x (SHA256 source %s)"), crc, sha))
+	return nil
+}
+
+func (a *App) readbackCRC(s Serial, target string, off, size, ram uint64, expected uint32) error {
+	if _, e := a.ubootCommand(s, fmt.Sprintf("mw.b 0x%x 0x00 0x%x", ram, size), 2*time.Minute); e != nil {
+		return e
+	}
+	if _, e := a.ubootCommand(s, fmt.Sprintf("mtd read %s 0x%x 0x%x 0x%x", target, ram, off, size), 10*time.Minute); e != nil {
+		return e
+	}
+	out, e := a.ubootCommand(s, fmt.Sprintf("crc32 0x%x 0x%x", ram, size), 2*time.Minute)
+	if e != nil {
+		return e
+	}
+	if !regexp.MustCompile(fmt.Sprintf(`(?i)(?:0x)?%08x`, expected)).Match(out) {
+		return fmt.Errorf(L("CRC после записи не совпал target=%s off=0x%x ожидался=%08x", "readback CRC mismatch target=%s off=0x%x expected=%08x"), target, off, expected)
+	}
+	return nil
+}
+
+// ---------------- Workflows ----------------
+func (a *App) fipRepairWizard() error {
+	pref, e := chooseProfileInteractive(a)
+	if e != nil {
+		return e
+	}
+	s, p, _, e := a.acquireRAMUBoot(pref)
+	if e != nil {
+		return e
+	}
+	defer func() { s.Close(); a.closeLog() }()
+	if _, e = a.ubootCommand(s, "ubi part ubi", 3*time.Minute); e != nil {
+		return fmt.Errorf(L("не удалось подключить существующий UBI; ремонт только FIP неприменим: %w", "existing UBI attach failed; FIP-only repair not applicable: %w"), e)
+	}
+	layout, e := a.ubootCommand(s, "ubi info layout", 60*time.Second)
+	if e != nil {
+		return e
+	}
+	if !strings.Contains(strings.ToLower(string(layout)), "fip") {
+		return errors.New(L("UBI volume fip не найден", "UBI volume fip not found"))
+	}
+	fmt.Println(L("\nFIP источник:", "\nFIP source:"))
+	fmt.Println(L("  1. Встроенный RAM FIP текущего профиля (рекомендуется для rescue)", "  1. Built-in RAM FIP of the current profile (recommended for rescue)"))
+	fmt.Println(L("  2. Выбрать другой .fip", "  2. Choose another .fip"))
+	v := a.ask(L("Выбор [1]: ", "Choice [1]: "))
+	path := filepath.Join(a.root, filepath.FromSlash(p.RAMFIPRel))
+	if v == "2" {
+		path, e = a.askPath(L("Путь к .fip: ", "Path to the .fip: "))
+		if e != nil {
+			return e
+		}
+	}
+	if e = validateFIP(path); e != nil {
+		return e
+	}
+	sha, e := shaFile(path)
+	if e != nil {
+		return e
+	}
+	st, _ := os.Stat(path)
+	fmt.Printf("FIP: %s\nsize=%d\nSHA256=%s\n", path, st.Size(), sha)
+	if _, e = a.tftpLoad(s, path, "ursido-fip.bin", loadAddr); e != nil {
+		return e
+	}
+	fmt.Println(L("\nВсе read-only gates пройдены. Будет перезаписан ТОЛЬКО существующий UBI volume fip.", "\nAll read-only gates passed. ONLY the existing UBI volume fip will be overwritten."))
+	if e = a.confirm("WRITE FIP"); e != nil {
+		return e
+	}
+	if _, e = a.ubootCommand(s, fmt.Sprintf("ubi write 0x%x fip 0x%x", loadAddr, st.Size()), 5*time.Minute); e != nil {
+		return e
+	}
+	if _, e = a.ubootCommand(s, fmt.Sprintf("ubi read 0x%x fip 0x%x", verifyAddr, st.Size()), 5*time.Minute); e != nil {
+		return e
+	}
+	crc, _ := crcFile(path)
+	out, e := a.ubootCommand(s, fmt.Sprintf("crc32 0x%x 0x%x", verifyAddr, st.Size()), 60*time.Second)
+	if e != nil {
+		return e
+	}
+	if !regexp.MustCompile(fmt.Sprintf(`(?i)(?:0x)?%08x`, crc)).Match(out) {
+		return errors.New(L("CRC32 FIP после записи не совпал", "FIP readback CRC32 mismatch"))
+	}
+	a.event(L("Запись FIP + проверка PASS; SHA256 источника=", "FIP write + readback PASS; source SHA256=") + sha)
+	fmt.Println(L("Можно выполнить reset. Нажмите Enter для reset или введите N чтобы оставить RAM U-Boot.", "Ready to reset. Press Enter to reset or type N to stay in RAM U-Boot."))
+	if strings.ToLower(a.ask("> ")) != "n" {
+		_ = sendLine(s, "reset")
+	}
+	return nil
+}
+
+func openMaybeGzip(path string) (io.ReadCloser, error) {
+	f, e := os.Open(path)
+	if e != nil {
+		return nil, e
+	}
+	head := make([]byte, 2)
+	n, _ := f.Read(head)
+	_, _ = f.Seek(0, 0)
+	if n == 2 && head[0] == 0x1f && head[1] == 0x8b {
+		g, e := gzip.NewReader(f)
+		if e != nil {
+			f.Close()
+			return nil, e
+		}
+		return &multiCloser{Reader: g, closers: []io.Closer{g, f}}, nil
+	}
+	return f, nil
+}
+
+type multiCloser struct {
+	io.Reader
+	closers []io.Closer
+}
+
+func (m *multiCloser) Close() error {
+	for _, c := range m.closers {
+		_ = c.Close()
+	}
+	return nil
+}
+
+type stockPrepared struct {
+	dir    string
+	bl2    string
+	chunks []string
+	allSHA string
+	bl2SHA string
+}
+
+func rejectKnownOpenWrtBL2(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if len(data) != bl2Size {
+		return fmt.Errorf("BL2 size %d != 0x%x", len(data), bl2Size)
+	}
+	type sig struct {
+		size       int
+		sha, label string
+	}
+	sigs := []sig{
+		{113447, "6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808", "AN7581 OpenWrt preloader (MedveFlasher lineage)"},
+		{112162, "b912be8138e260979eb12768907f7b9a53819ffa392ed8f3ccebe5bd19c291c9", "AN7581 OpenWrt preloader (later snapshot candidate)"},
+		{118322, "c2ac1c183b18bc34632c958dfe0bd1dfdfb607f090e39c41126956641893362f", "AN7583 OpenWrt preloader"},
+	}
+	allFF := true
+	for _, b := range data[:0x800] {
+		if b != 0xff {
+			allFF = false
+			break
+		}
+	}
+	for _, sg := range sigs {
+		if sg.size <= len(data) {
+			h := sha256.Sum256(data[:sg.size])
+			if hex.EncodeToString(h[:]) == sg.sha {
+				return fmt.Errorf(L("BL2 в бэкапе начинается с %s; это не похоже на оригинальный стоковый mtd16", "backup BL2 begins with %s; this does not look like original stock mtd16"), sg.label)
+			}
+		}
+		if allFF && 0x800+sg.size <= len(data) {
+			h := sha256.Sum256(data[0x800 : 0x800+sg.size])
+			if hex.EncodeToString(h[:]) == sg.sha {
+				return fmt.Errorf(L("BL2 в бэкапе содержит %s со сдвигом FF+0x800; это контейнер OpenWrt BL2, а не оригинальный стоковый BL2", "backup BL2 contains FF+0x800 shifted %s; this is an OpenWrt BL2 container, not original stock BL2"), sg.label)
+			}
+		}
+	}
+	return nil
+}
+
+func (a *App) prepareStock(path string) (stockPrepared, error) {
+	r, e := openMaybeGzip(path)
+	if e != nil {
+		return stockPrepared{}, e
+	}
+	defer r.Close()
+	dir := filepath.Join(a.work, "stock-"+time.Now().Format("20060102-150405"))
+	if e = os.MkdirAll(dir, 0755); e != nil {
+		return stockPrepared{}, e
+	}
+	bl2p := filepath.Join(dir, "stock-bl2.bin")
+	bl2f, e := os.Create(bl2p)
+	if e != nil {
+		return stockPrepared{}, e
+	}
+	hAll := sha256.New()
+	hBL := sha256.New()
+	total := int64(0)
+	chunkIndex := 0
+	var chunks []string
+	var cf *os.File
+	var chunkRemain int64
+	buf := make([]byte, 1024*1024)
+	for {
+		n, er := r.Read(buf)
+		if n > 0 {
+			d := buf[:n]
+			_, _ = hAll.Write(d)
+			pos := 0
+			for pos < n {
+				if total < bl2Size {
+					take := n - pos
+					if int64(take) > bl2Size-total {
+						take = int(bl2Size - total)
+					}
+					part := d[pos : pos+take]
+					_, _ = bl2f.Write(part)
+					_, _ = hBL.Write(part)
+					pos += take
+					total += int64(take)
+					continue
+				}
+				if total >= stockRestoreSpan {
+					return stockPrepared{}, errors.New(L("бэкап больше канонического размера mtd16", "backup larger than canonical mtd16 span"))
+				}
+				if cf == nil || chunkRemain == 0 {
+					if cf != nil {
+						cf.Close()
+					}
+					name := filepath.Join(dir, fmt.Sprintf("stock-ibu-%02d.bin", chunkIndex))
+					cf, e = os.Create(name)
+					if e != nil {
+						return stockPrepared{}, e
+					}
+					chunks = append(chunks, name)
+					chunkIndex++
+					remain := stockRestoreSpan - total
+					chunkRemain = chunkSize
+					if remain < chunkRemain {
+						chunkRemain = remain
+					}
+				}
+				take := n - pos
+				if int64(take) > chunkRemain {
+					take = int(chunkRemain)
+				}
+				part := d[pos : pos+take]
+				_, _ = cf.Write(part)
+				pos += take
+				total += int64(take)
+				chunkRemain -= int64(take)
+			}
+		}
+		if er == io.EOF {
+			break
+		}
+		if er != nil {
+			return stockPrepared{}, er
+		}
+	}
+	bl2f.Close()
+	if cf != nil {
+		cf.Close()
+	}
+	if total != stockRestoreSpan {
+		return stockPrepared{}, fmt.Errorf(L("размер mtd16 без сжатия %d, ожидался %d", "mtd16 uncompressed size %d, expected %d"), total, stockRestoreSpan)
+	}
+	if err := rejectKnownOpenWrtBL2(bl2p); err != nil {
+		return stockPrepared{}, err
+	}
+	return stockPrepared{dir: dir, bl2: bl2p, chunks: chunks, allSHA: hex.EncodeToString(hAll.Sum(nil)), bl2SHA: hex.EncodeToString(hBL.Sum(nil))}, nil
+}
+
+func (a *App) configureUBootNet(s Serial, local string) error {
+	for _, cmd := range []string{"setenv ethaddr 02:00:00:04:0d:10", "setenv eth1addr 02:00:00:04:0d:11", "setenv ipaddr " + defaultRouterIP, "setenv serverip " + local, "setenv netmask 255.255.255.0", fmt.Sprintf("setenv tftpdstp %d", defaultTFTPPort), "setenv autoload no"} {
+		if _, e := a.ubootCommand(s, cmd, 20*time.Second); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+func (a *App) mtdBad(s Serial, part string, size uint64) ([]uint64, error) {
+	out, e := a.ubootCommand(s, "mtd bad "+part, 3*time.Minute)
+	if e != nil {
+		return nil, e
+	}
+	return parseBadBlocks(out, size)
+}
+func crcRange(path string, off, size int64) (uint32, error) {
+	f, e := os.Open(path)
+	if e != nil {
+		return 0, e
+	}
+	defer f.Close()
+	if _, e = f.Seek(off, 0); e != nil {
+		return 0, e
+	}
+	h := crc32.NewIEEE()
+	_, e = io.CopyN(h, f, size)
+	return h.Sum32(), e
+}
 func findMTD16InDirectory(dir string) (string, error) {
 	patterns := []string{"mtd16.bin.gz", "mtd16_*.bin.gz", "mtd16.gz", "mtd16.bin", "mtd16_*.bin"}
 	var hits []string
