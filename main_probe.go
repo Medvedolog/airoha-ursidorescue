@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"ursidorescue/app"
 	"ursidorescue/probe"
 )
 
@@ -114,7 +115,7 @@ func (a *App) runProbe(r probeRequest) (probeResult, error) {
 		s = ser
 	}
 	defer s.Close()
-	sess, err := probe.NewSession(r.dir, s, os.Stdout, probe.DefaultTiming)
+	sess, err := probe.NewSession(r.dir, s, uiWriter{a.ui}, probe.DefaultTiming)
 	if err != nil {
 		return res, err
 	}
@@ -467,7 +468,7 @@ func (a *App) menuUBIAttach() error {
 	fmt.Println(L("\\nADVANCED: U-Boot выполнит ubi part для раздела с UBI-заголовком, чтобы прочитать список томов и хеш FIP.", "\\nADVANCED: U-Boot will run ubi part on the partition with a UBI header to read the volume list and the FIP hash."))
 	fmt.Println(L("Это НЕ read-only: при attach UBI может изменить volume table (auto-resize), записать fastmap или перенести блоки.", "This is NOT read-only: attaching UBI may change the volume table (auto-resize), write a fastmap or move blocks."))
 	fmt.Println(L("Для списка томов без записи лучше загрузить Linux и взять ubinfo -a (обычный probe делает это сам).", "For the volume list without writes, boot Linux and use ubinfo -a (the normal probe does that)."))
-	if err := a.confirm("UBI ATTACH"); err != nil {
+	if err := a.confirm(app.UBIMetadata, "UBI ATTACH"); err != nil {
 		return err
 	}
 	return a.menuProbe(probe.Options{Layers: probe.Layers{UBoot: true, Flash: true}, UBootOnly: true, UBIAttach: true}, false)

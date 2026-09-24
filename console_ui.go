@@ -6,6 +6,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"ursidorescue/app"
 )
 
 const (
@@ -99,34 +101,34 @@ func activeIPv4Interfaces() []string {
 	return out
 }
 
+// showNetworkPrerequisites reports the LAN/TFTP checklist as one section of
+// labelled events; each front end draws it its own way.
 func (a *App) showNetworkPrerequisites() {
-	fmt.Println()
-	uiRule(L("СЕТЕВЫЕ ПРЕРЕКВИЗИТЫ", "NETWORK PREREQUISITES"), uiAmber)
-	uiStatus(L("КАБЕЛЬ", "CABLE"),
+	a.ui.Event(app.Event{Kind: app.KindSectionStart, Text: L("СЕТЕВЫЕ ПРЕРЕКВИЗИТЫ", "NETWORK PREREQUISITES")})
+	a.status(L("КАБЕЛЬ", "CABLE"),
 		L("ПК напрямую к Nokia; для recovery используйте LAN2 или LAN3. LAN1 не рекомендуется; LAN4 лучше не использовать для переходов/boot.", "Connect PC directly to Nokia; use LAN2 or LAN3 for recovery. LAN1 is not recommended; avoid LAN4 for transition/boot workflows."),
-		uiSand)
-	uiStatus("IP",
+		app.LevelWarn)
+	a.status("IP",
 		L("Nokia RAM U-Boot: 192.168.1.1/24. ПК: статический 192.168.1.254/24 (или другой свободный 192.168.1.x); DHCP на recovery NIC выключить.", "Nokia RAM U-Boot: 192.168.1.1/24. PC: static 192.168.1.254/24 (or another free 192.168.1.x); disable DHCP on the recovery NIC."),
-		uiAmber2)
-	uiStatus("TFTP",
+		app.LevelInfo)
+	a.status("TFTP",
 		fmt.Sprintf(L("Встроенный сервер UrsidoRescue слушает UDP/%d; отдельный TFTP-сервер не нужен.", "Built-in UrsidoRescue server listens on UDP/%d; no external TFTP server is required."), defaultTFTPPort),
-		uiAmber2)
-	uiStatus(L("АДАПТЕРЫ", "ADAPTERS"),
+		app.LevelInfo)
+	a.status(L("АДАПТЕРЫ", "ADAPTERS"),
 		L("На время recovery отключите Wi-Fi, VPN, прочие Ethernet, Hyper-V/виртуальные адаптеры и туннели. Оставьте только NIC, подключённый к Nokia.", "During recovery disable Wi-Fi, VPN, other Ethernet, Hyper-V/virtual adapters and tunnels. Leave only the NIC connected to Nokia."),
-		uiSand)
+		app.LevelWarn)
 	active := activeIPv4Interfaces()
 	if len(active) > 0 {
-		style := uiMuted
+		level := app.LevelNote
 		if len(active) > 1 {
-			style = uiSand
+			level = app.LevelWarn
 		}
-		uiStatus(L("СЕЙЧАС", "ACTIVE"), strings.Join(active, "  "), style)
+		a.status(L("СЕЙЧАС", "ACTIVE"), strings.Join(active, "  "), level)
 		if len(active) > 1 {
-			uiStatus(L("ВНИМАНИЕ", "WARNING"),
+			a.status(L("ВНИМАНИЕ", "WARNING"),
 				L("Видно несколько активных IPv4-интерфейсов. Это не блокирует запуск, но перед TFTP лишние интерфейсы лучше погасить.", "Multiple active IPv4 interfaces are visible. This does not block startup, but disable the extras before TFTP."),
-				uiSand)
+				app.LevelWarn)
 		}
 	}
-	uiRule("", uiAmber)
-	fmt.Println()
+	a.ui.Event(app.Event{Kind: app.KindSectionEnd})
 }

@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"ursidorescue/app"
 	"ursidorescue/probe"
 )
 
@@ -96,6 +97,10 @@ type App struct {
 
 	probeDir     string // current porting-probe session
 	portOverride string // UART chosen on the command line
+
+	// ui is the front end the core reports to and asks through
+	// (application layer, doc/UI_SPEC_RU.md §6).
+	ui app.UI
 }
 
 func main() { os.Exit(realMain()) }
@@ -113,6 +118,7 @@ func realMain() int {
 	}
 	enableVTOutput()
 	a := &App{root: root, work: filepath.Join(root, "work"), reader: bufio.NewReader(os.Stdin), lang: uiLang}
+	a.ui = newConsoleUI(a.reader)
 	_ = os.MkdirAll(a.work, 0755)
 	if !interactive {
 		switch args[0] {
@@ -238,12 +244,12 @@ func (a *App) showErr(err error) {
 	fmt.Println()
 }
 func (a *App) ask(prompt string) string {
-	fmt.Print(prompt)
-	s, _ := a.reader.ReadString('\n')
-	return strings.TrimSpace(s)
+	v, _ := a.ui.Ask(app.AskRequest{Kind: app.AskText, Prompt: prompt})
+	return strings.TrimSpace(v)
 }
 func (a *App) askPath(prompt string) (string, error) {
-	p := strings.Trim(strings.TrimSpace(a.ask(prompt)), "\"")
+	v, _ := a.ui.Ask(app.AskRequest{Kind: app.AskPath, Prompt: prompt})
+	p := strings.Trim(strings.TrimSpace(v), "\"")
 	if p == "" {
 		return "", errors.New(L("пустой путь", "empty path"))
 	}
@@ -256,12 +262,26 @@ func (a *App) askPath(prompt string) (string, error) {
 	}
 	return abs, nil
 }
-func (a *App) confirm(exact string) error {
-	fmt.Printf(L("Введите точно %s: ", "Type exactly %s: "), exact)
-	if a.ask("") != exact {
+
+// confirm is the single confirmation of an operation with risk; its form
+// follows the risk class (doc/UI_SPEC_RU.md §13).
+func (a *App) confirm(risk app.Risk, phrase string) error {
+	err := a.ui.Confirm(app.ConfirmRequest{Risk: risk, Phrase: phrase})
+	if errors.Is(err, app.ErrCancelled) {
 		return errors.New(L("операция отменена пользователем", "operation cancelled by the user"))
 	}
-	return nil
+	return err
+}
+
+// note is plain operator guidance; status is a labelled line; event is a
+// timestamped event. All go through the UI.
+func (a *App) note(s string)      { a.ui.Event(app.Event{Level: app.LevelNote, Text: s}) }
+func (a *App) noteln(args ...any) { a.note(strings.TrimSuffix(fmt.Sprintln(args...), "\n")) }
+func (a *App) notef(format string, args ...any) {
+	a.note(strings.TrimSuffix(fmt.Sprintf(format, args...), "\n"))
+}
+func (a *App) status(label, text string, l app.Level) {
+	a.ui.Event(app.Event{Level: l, Label: label, Text: text})
 }
 
 func shaFile(path string) (string, error) {
@@ -357,7 +377,7 @@ func (a *App) startLog(prefix string) (*os.File, error) {
 		return nil, e
 	}
 	a.logFile = f
-	fmt.Println(L("UART-лог:", "UART log:"), p)
+	a.note(L("UART-лог: ", "UART log: ") + p)
 	return f, nil
 }
 func (a *App) logBytes(b []byte, echo bool) {
@@ -371,17 +391,22 @@ func (a *App) logBytes(b []byte, echo bool) {
 		_ = a.logFile.Sync()
 	}
 	if echo {
-		_, _ = os.Stdout.Write(b)
+		a.ui.Output(append([]byte(nil), b...))
 	}
 }
-func (a *App) event(s string) { uiEvent(time.Now().Format("15:04:05"), s) }
+func (a *App) event(s string) {
+	a.ui.Event(app.Event{Time: time.Now(), Level: app.LevelInfo, Text: s})
+}
 
 func chooseProfileInteractive(a *App) (Profile, error) {
-	fmt.Println(L("Профиль устройства:", "Device profile:"))
-	fmt.Println(L("  1. Auto (определить по UART, если возможно)", "  1. Auto (detect from UART if possible)"))
-	fmt.Println("  2. Nokia XG-040G-MD / AN7581")
-	fmt.Println("  3. Nokia XG-040G-MF / AN7583")
-	v := a.ask(L("Выбор [1]: ", "Choice [1]: "))
+	v, _ := a.ui.Ask(app.AskRequest{Kind: app.AskChoice, Title: L("Профиль устройства:", "Device profile:"),
+		Choices: []app.Choice{
+			{Key: "1", Label: L("Auto (определить по UART, если возможно)", "Auto (detect from UART if possible)")},
+			{Key: "2", Label: "Nokia XG-040G-MD / AN7581"},
+			{Key: "3", Label: "Nokia XG-040G-MF / AN7583"},
+		},
+		Prompt: L("Выбор [1]: ", "Choice [1]: ")})
+	v = strings.TrimSpace(v)
 	if v == "" || v == "1" {
 		return Profile{ID: "auto"}, nil
 	}
@@ -399,18 +424,20 @@ func (a *App) choosePort() (string, error) {
 		return a.portOverride, nil
 	}
 	ports := listSerialPorts()
-	fmt.Println(L("Найденные UART:", "UART ports found:"))
-	for i, p := range ports {
-		fmt.Printf("  %d. %s\n", i+1, p)
-	}
+	title := L("Найденные UART:", "UART ports found:")
 	if len(ports) == 0 {
-		fmt.Println(L("  (автообнаружение пусто; можно ввести порт вручную)", "  (none detected; you can type a port manually)"))
+		title += "\n" + L("  (автообнаружение пусто; можно ввести порт вручную)", "  (none detected; you can type a port manually)")
+	}
+	var choices []app.Choice
+	for i, p := range ports {
+		choices = append(choices, app.Choice{Key: strconv.Itoa(i + 1), Label: p})
 	}
 	prompt := L("UART порт (номер пункта или имя): ", "UART port (list number or name): ")
 	if len(ports) == 1 {
 		prompt = L("UART порт [1]: ", "UART port [1]: ")
 	}
-	v := a.ask(prompt)
+	v, _ := a.ui.Ask(app.AskRequest{Kind: app.AskChoice, Title: title, Choices: choices, Prompt: prompt})
+	v = strings.TrimSpace(v)
 	if v == "" && len(ports) == 1 {
 		return ports[0], nil
 	}
@@ -470,7 +497,7 @@ func (a *App) waitReceiver(s Serial, timeout time.Duration, keepExisting bool, i
 			return phaseUnknown, Profile{}, false
 		}
 		if alreadyLogged {
-			_, _ = os.Stdout.Write(d)
+			a.ui.Output(append([]byte(nil), d...))
 		} else {
 			a.logBytes(d, true)
 		}
@@ -702,7 +729,8 @@ func (a *App) xmodemSend(s Serial, path, label string) (xmodemResult, error) {
 		sent += int64(n)
 		seq++
 		if idx == 0 || (idx+1)%32 == 0 || idx+1 == blocks {
-			fmt.Printf("\r%s %s: %d/%d bytes (%d/%d)", paint("[XMODEM]", uiSand), label, sent, size, idx+1, blocks)
+			a.ui.Progress(app.Progress{Label: "XMODEM", Current: sent, Total: size, Unit: "bytes",
+				Detail: fmt.Sprintf("%s: %d/%d bytes (%d/%d)", label, sent, size, idx+1, blocks)})
 		}
 	}
 	dataComplete = true
@@ -735,7 +763,7 @@ func (a *App) xmodemSend(s Serial, path, label string) (xmodemResult, error) {
 			reply, handoff := scanXmodemEOTReply(d, &consecutiveCAN)
 			switch reply {
 			case xmodemReplyACK:
-				fmt.Println()
+				a.ui.Progress(app.Progress{Label: "XMODEM", Done: true})
 				a.event(L("XMODEM завершён: ", "XMODEM complete: ") + label)
 				result.EOTAck = true
 				return result, nil
@@ -745,7 +773,7 @@ func (a *App) xmodemSend(s Serial, path, label string) (xmodemResult, error) {
 				return result, fmt.Errorf(L("Receiver подтвердил отмену XMODEM %s на EOT (CAN CAN)", "Receiver confirmed XMODEM cancellation %s at EOT (CAN CAN)"), label)
 			}
 			if handoff {
-				fmt.Println()
+				a.ui.Progress(app.Progress{Label: "XMODEM", Done: true})
 				a.event(L("Payload XMODEM подтверждён; уже виден вывод следующего этапа — проверяю handoff", "XMODEM payload is ACKed; next-stage output is already visible — verifying handoff"))
 				return result, nil
 			}
@@ -754,14 +782,14 @@ func (a *App) xmodemSend(s Serial, path, label string) (xmodemResult, error) {
 			}
 		}
 		if !retryNow {
-			fmt.Println()
+			a.ui.Progress(app.Progress{Label: "XMODEM", Done: true})
 			a.event(L("Payload XMODEM подтверждён; EOT ACK не пришёл — без лишних EOT перехожу к проверке следующего этапа", "XMODEM payload is ACKed; no EOT ACK — moving to next-stage proof without extra EOT retries"))
 			return result, nil
 		}
 		a.event(fmt.Sprintf(L("XMODEM EOT получил NAK, повтор %d/3", "XMODEM EOT got NAK, retry %d/3"), attempt))
 		time.Sleep(80 * time.Millisecond)
 	}
-	fmt.Println()
+	a.ui.Progress(app.Progress{Label: "XMODEM", Done: true})
 	a.event(L("Payload XMODEM подтверждён; EOT трижды получил NAK — проверяю следующий этап по UART", "XMODEM payload is ACKed; EOT was NAKed three times — verifying the next UART stage"))
 	return result, nil
 }
@@ -826,7 +854,7 @@ func (a *App) waitUBootPrompt(s Serial, timeout time.Duration, initial []byte) (
 			return false, nil
 		}
 		if alreadyLogged {
-			_, _ = os.Stdout.Write(d)
+			a.ui.Output(append([]byte(nil), d...))
 		} else {
 			a.logBytes(d, true)
 		}
@@ -1069,8 +1097,8 @@ func (a *App) acquireRAMUBoot(preferred Profile) (Serial, Profile, []byte, error
 		return nil, Profile{}, nil, e
 	}
 	_ = log
-	fmt.Println(L("\nЕсли сейчас уже видите 'Press x to load BL31 + U-Boot FIP' и CCC — ничего не перезагружайте.", "\nIf you already see 'Press x to load BL31 + U-Boot FIP' and CCC, do not reboot anything."))
-	fmt.Println(L("Иначе выключите Nokia, подключите UART, удерживайте Reset и подайте питание для BootROM recovery.", "Otherwise power the Nokia off, connect the UART, hold Reset and power it on for BootROM recovery."))
+	a.noteln(L("\nЕсли сейчас уже видите 'Press x to load BL31 + U-Boot FIP' и CCC — ничего не перезагружайте.", "\nIf you already see 'Press x to load BL31 + U-Boot FIP' and CCC, do not reboot anything."))
+	a.noteln(L("Иначе выключите Nokia, подключите UART, удерживайте Reset и подайте питание для BootROM recovery.", "Otherwise power the Nokia off, connect the UART, hold Reset and power it on for BootROM recovery."))
 	phase, det, trans, e := a.waitReceiver(s, 180*time.Second, true, nil)
 	if e != nil {
 		s.Close()
@@ -1087,7 +1115,7 @@ func (a *App) acquireRAMUBoot(preferred Profile) (Serial, Profile, []byte, error
 		p = det
 	}
 	if p.ID == "auto" || p.ID == "" {
-		fmt.Println(L("SoC не удалось определить из текущего UART окна.", "The SoC could not be identified from the current UART output."))
+		a.noteln(L("SoC не удалось определить из текущего UART окна.", "The SoC could not be identified from the current UART output."))
 		var er error
 		p, er = chooseProfileInteractive(a)
 		if er != nil {
@@ -1107,7 +1135,7 @@ func (a *App) acquireRAMUBoot(preferred Profile) (Serial, Profile, []byte, error
 		return nil, Profile{}, trans, e
 	}
 	a.event(fmt.Sprintf(L("Профиль: %s / %s", "Profile: %s / %s"), p.Model, p.SoC))
-	fmt.Println("[INFO]", L(p.StatusRU, p.Status))
+	a.noteln("[INFO]", L(p.StatusRU, p.Status))
 	pre := filepath.Join(a.root, filepath.FromSlash(p.PreloaderRel))
 	fip := filepath.Join(a.root, filepath.FromSlash(p.RAMFIPRel))
 	if phase == phasePreloader {
@@ -1436,10 +1464,10 @@ func detectLocalIP() string {
 func (a *App) networkIP() (string, error) {
 	ip := detectLocalIP()
 	if ip != "" {
-		uiStatus("NET", L("адрес ПК: ", "PC address: ")+ip, uiOK)
+		a.status("NET", L("адрес ПК: ", "PC address: ")+ip, app.LevelOK)
 		return ip, nil
 	}
-	fmt.Println(L("На ПК не найден IPv4 192.168.1.x. Настройте Ethernet статически, рекомендуется 192.168.1.254/24.", "No 192.168.1.x IPv4 address on this PC. Configure Ethernet statically, 192.168.1.254/24 recommended."))
+	a.noteln(L("На ПК не найден IPv4 192.168.1.x. Настройте Ethernet статически, рекомендуется 192.168.1.254/24.", "No 192.168.1.x IPv4 address on this PC. Configure Ethernet statically, 192.168.1.254/24 recommended."))
 	v := a.ask(L("Введите локальный IP после настройки [192.168.1.254]: ", "Enter the local IP after configuring it [192.168.1.254]: "))
 	if v == "" {
 		v = defaultLocalIP
@@ -1647,9 +1675,9 @@ func (a *App) fipRepairWizard() error {
 	if !strings.Contains(strings.ToLower(string(layout)), "fip") {
 		return errors.New(L("UBI volume fip не найден", "UBI volume fip not found"))
 	}
-	fmt.Println(L("\nFIP источник:", "\nFIP source:"))
-	fmt.Println(L("  1. Встроенный RAM FIP текущего профиля (рекомендуется для rescue)", "  1. Built-in RAM FIP of the current profile (recommended for rescue)"))
-	fmt.Println(L("  2. Выбрать другой .fip", "  2. Choose another .fip"))
+	a.noteln(L("\nFIP источник:", "\nFIP source:"))
+	a.noteln(L("  1. Встроенный RAM FIP текущего профиля (рекомендуется для rescue)", "  1. Built-in RAM FIP of the current profile (recommended for rescue)"))
+	a.noteln(L("  2. Выбрать другой .fip", "  2. Choose another .fip"))
 	v := a.ask(L("Выбор [1]: ", "Choice [1]: "))
 	path := filepath.Join(a.root, filepath.FromSlash(p.RAMFIPRel))
 	if v == "2" {
@@ -1666,12 +1694,12 @@ func (a *App) fipRepairWizard() error {
 		return e
 	}
 	st, _ := os.Stat(path)
-	fmt.Printf("FIP: %s\nsize=%d\nSHA256=%s\n", path, st.Size(), sha)
+	a.notef("FIP: %s\nsize=%d\nSHA256=%s\n", path, st.Size(), sha)
 	if _, e = a.tftpLoad(s, path, "ursido-fip.bin", loadAddr); e != nil {
 		return e
 	}
-	fmt.Println(L("\nВсе read-only gates пройдены. Будет перезаписан ТОЛЬКО существующий UBI volume fip.", "\nAll read-only gates passed. ONLY the existing UBI volume fip will be overwritten."))
-	if e = a.confirm("WRITE FIP"); e != nil {
+	a.noteln(L("\nВсе read-only gates пройдены. Будет перезаписан ТОЛЬКО существующий UBI volume fip.", "\nAll read-only gates passed. ONLY the existing UBI volume fip will be overwritten."))
+	if e = a.confirm(app.Write, "WRITE FIP"); e != nil {
 		return e
 	}
 	if _, e = a.ubootCommand(s, fmt.Sprintf("ubi write 0x%x fip 0x%x", loadAddr, st.Size()), 5*time.Minute); e != nil {
@@ -1689,7 +1717,7 @@ func (a *App) fipRepairWizard() error {
 		return errors.New(L("CRC32 FIP после записи не совпал", "FIP readback CRC32 mismatch"))
 	}
 	a.event(L("Запись FIP + проверка PASS; SHA256 источника=", "FIP write + readback PASS; source SHA256=") + sha)
-	fmt.Println(L("Можно выполнить reset. Нажмите Enter для reset или введите N чтобы оставить RAM U-Boot.", "Ready to reset. Press Enter to reset or type N to stay in RAM U-Boot."))
+	a.noteln(L("Можно выполнить reset. Нажмите Enter для reset или введите N чтобы оставить RAM U-Boot.", "Ready to reset. Press Enter to reset or type N to stay in RAM U-Boot."))
 	if strings.ToLower(a.ask("> ")) != "n" {
 		_ = sendLine(s, "reset")
 	}
@@ -1910,7 +1938,7 @@ func findMTD16InDirectory(dir string) (string, error) {
 	sort.Strings(hits)
 	return hits[0], nil
 }
-func verifyManifestEntry(dir, selected string) error {
+func (a *App) verifyManifestEntry(dir, selected string) error {
 	for _, name := range []string{"SHA256SUMS", "SHA256SUMS.txt"} {
 		mp := filepath.Join(dir, name)
 		if !fileExists(mp) {
@@ -1946,13 +1974,13 @@ func verifyManifestEntry(dir, selected string) error {
 			return err
 		}
 		if found {
-			fmt.Println(L("[OK] SHA256SUMS проверен:", "[OK] SHA256SUMS verified:"), base)
+			a.noteln(L("[OK] SHA256SUMS проверен:", "[OK] SHA256SUMS verified:"), base)
 		} else {
-			fmt.Println(L("[INFO] SHA256SUMS есть, но для выбранного mtd16 нет записи; проверки размера/потока/BL2 остаются", "[INFO] SHA256SUMS exists but selected mtd16 has no direct entry; size/stream/BL2 checks remain active"))
+			a.noteln(L("[INFO] SHA256SUMS есть, но для выбранного mtd16 нет записи; проверки размера/потока/BL2 остаются", "[INFO] SHA256SUMS exists but selected mtd16 has no direct entry; size/stream/BL2 checks remain active"))
 		}
 		return nil
 	}
-	fmt.Println(L("[INFO] SHA256SUMS не найден; mtd16 будет проверен полным чтением, точным размером и происхождением BL2", "[INFO] SHA256SUMS not found; mtd16 will be checked by full stream, exact size and BL2 provenance"))
+	a.noteln(L("[INFO] SHA256SUMS не найден; mtd16 будет проверен полным чтением, точным размером и происхождением BL2", "[INFO] SHA256SUMS not found; mtd16 will be checked by full stream, exact size and BL2 provenance"))
 	return nil
 }
 func (a *App) askStockSource() (string, error) {
@@ -1990,8 +2018,8 @@ func (a *App) askStockSource() (string, error) {
 			present++
 		}
 	}
-	fmt.Printf(L("[INFO] Найдены файлы бэкапа MedveFlasher: mtd0..mtd16, есть %d/17; источник восстановления=%s\n", "[INFO] MedveFlasher backup files found: mtd0..mtd16 present count=%d/17; restore source=%s\n"), present, filepath.Base(m))
-	if e = verifyManifestEntry(abs, m); e != nil {
+	a.notef(L("[INFO] Найдены файлы бэкапа MedveFlasher: mtd0..mtd16, есть %d/17; источник восстановления=%s\n", "[INFO] MedveFlasher backup files found: mtd0..mtd16 present count=%d/17; restore source=%s\n"), present, filepath.Base(m))
+	if e = a.verifyManifestEntry(abs, m); e != nil {
 		return "", e
 	}
 	return m, nil
@@ -2003,12 +2031,12 @@ func (a *App) stockRestoreWizard() error {
 	if e != nil {
 		return e
 	}
-	fmt.Println(L("Проверяю и раскладываю mtd16 на BL2 + IBU chunks без записи NAND...", "Checking mtd16 and splitting it into BL2 + IBU chunks without writing NAND..."))
+	a.noteln(L("Проверяю и раскладываю mtd16 на BL2 + IBU chunks без записи NAND...", "Checking mtd16 and splitting it into BL2 + IBU chunks without writing NAND..."))
 	prep, e := a.prepareStock(path)
 	if e != nil {
 		return e
 	}
-	fmt.Printf("mtd16 SHA256: %s\nBL2 SHA256: %s\nchunks: %d\n", prep.allSHA, prep.bl2SHA, len(prep.chunks))
+	a.notef("mtd16 SHA256: %s\nBL2 SHA256: %s\nchunks: %d\n", prep.allSHA, prep.bl2SHA, len(prep.chunks))
 	pref, e := chooseProfileInteractive(a)
 	if e != nil {
 		return e
@@ -2032,7 +2060,7 @@ func (a *App) stockRestoreWizard() error {
 	if e = validateStockBadBlocks(bad); e != nil {
 		return e
 	}
-	fmt.Printf(L("[INFO] bad-блоков в ubi: %d\n", "[INFO] bad blocks in ubi: %d\n"), len(bad))
+	a.notef(L("[INFO] bad-блоков в ubi: %d\n", "[INFO] bad blocks in ubi: %d\n"), len(bad))
 	local, e := a.networkIP()
 	if e != nil {
 		return e
@@ -2043,8 +2071,8 @@ func (a *App) stockRestoreWizard() error {
 	if e = a.loadChunkWithKnownLocal(s, prep.chunks[0], "stock-00.bin", local); e != nil {
 		return fmt.Errorf(L("тест TFTP перед записью не прошёл: %w", "pre-write TFTP test failed: %w"), e)
 	}
-	fmt.Println(L("\nВНИМАНИЕ: будет полностью очищен OpenWrt UBI region, затем восстановлен stock mtd16; BL2 пишется ПОСЛЕДНИМ.", "\nWARNING: the OpenWrt UBI region will be erased completely, then stock mtd16 restored; BL2 is written LAST."))
-	if e = a.confirm("RESTORE STOCK BACKUP"); e != nil {
+	a.noteln(L("\nВНИМАНИЕ: будет полностью очищен OpenWrt UBI region, затем восстановлен stock mtd16; BL2 пишется ПОСЛЕДНИМ.", "\nWARNING: the OpenWrt UBI region will be erased completely, then stock mtd16 restored; BL2 is written LAST."))
+	if e = a.confirm(app.Erase, "RESTORE STOCK BACKUP"); e != nil {
 		return e
 	}
 	if _, e = a.ubootCommand(s, "mtd erase ubi", 20*time.Minute); e != nil {
@@ -2127,7 +2155,7 @@ func (a *App) stockRestoreWizard() error {
 		return e
 	}
 	a.event(L("Восстановление стока PASS: IBU проверен, BL2 проверен последним. SHA256 источника mtd16=", "Stock restore PASS: IBU verified, BL2 verified last. Source mtd16 SHA256=") + prep.allSHA)
-	fmt.Println(L("Нажмите Enter для reset или N чтобы оставить U-Boot.", "Press Enter to reset or N to stay in U-Boot."))
+	a.noteln(L("Нажмите Enter для reset или N чтобы оставить U-Boot.", "Press Enter to reset or N to stay in U-Boot."))
 	if strings.ToLower(a.ask("> ")) != "n" {
 		_ = sendLine(s, "reset")
 	}
@@ -2148,7 +2176,7 @@ func (a *App) physicalRestoreWizard() error {
 	if e != nil {
 		return e
 	}
-	fmt.Println("SHA256:", sha)
+	a.noteln("SHA256:", sha)
 	pref, e := chooseProfileInteractive(a)
 	if e != nil {
 		return e
@@ -2212,8 +2240,8 @@ func (a *App) physicalRestoreWizard() error {
 	if e = a.loadChunkWithKnownLocal(s, chunks[0], "physical-00.bin", local); e != nil {
 		return e
 	}
-	fmt.Println(L("Будет восстановлен raw physical image; UBI region erase/write/readback, BL2 LAST.", "The raw physical image will be restored; UBI region erase/write/readback, BL2 LAST."))
-	if e = a.confirm("RESTORE PHYSICAL NAND"); e != nil {
+	a.noteln(L("Будет восстановлен raw physical image; UBI region erase/write/readback, BL2 LAST.", "The raw physical image will be restored; UBI region erase/write/readback, BL2 LAST."))
+	if e = a.confirm(app.Erase, "RESTORE PHYSICAL NAND"); e != nil {
 		return e
 	}
 	if _, e = a.ubootCommand(s, "mtd erase ubi", 20*time.Minute); e != nil {
@@ -2275,16 +2303,16 @@ func (a *App) bootRecoveryWizard() error {
 		return e
 	}
 	if out, rc, _ := a.ubootCommandRaw(s, fmt.Sprintf("iminfo 0x%x", loadAddr), 60*time.Second); rc != 0 {
-		fmt.Println(L("[WARN] iminfo недоступен/ошибка; FIT magic проверен на ПК. Вывод:", "[WARN] iminfo unavailable/failed; FIT magic was checked on PC. Output:"), string(out))
+		a.noteln(L("[WARN] iminfo недоступен/ошибка; FIT magic проверен на ПК. Вывод:", "[WARN] iminfo unavailable/failed; FIT magic was checked on PC. Output:"), string(out))
 	}
-	fmt.Println(L("Следующая команда bootm запускает ITB только из RAM и не пишет NAND.", "The next bootm command runs the ITB from RAM only and does not write NAND."))
-	if e = a.confirm("BOOT RAM ITB"); e != nil {
+	a.noteln(L("Следующая команда bootm запускает ITB только из RAM и не пишет NAND.", "The next bootm command runs the ITB from RAM only and does not write NAND."))
+	if e = a.confirm(app.NonPersistent, "BOOT RAM ITB"); e != nil {
 		return e
 	}
 	if e = sendLine(s, fmt.Sprintf("bootm 0x%x", loadAddr)); e != nil {
 		return e
 	}
-	fmt.Println(L("bootm отправлен. UART вывод продолжается 60 секунд; Ctrl+C здесь не отправляется в роутер.", "bootm sent. UART output continues for 60 seconds; Ctrl+C here is not sent to the router."))
+	a.noteln(L("bootm отправлен. UART вывод продолжается 60 секунд; Ctrl+C здесь не отправляется в роутер.", "bootm sent. UART output continues for 60 seconds; Ctrl+C here is not sent to the router."))
 	end := time.Now().Add(60 * time.Second)
 	buf := make([]byte, 4096)
 	for time.Now().Before(end) {
@@ -2306,23 +2334,23 @@ func (a *App) diagnosticsWizard() error {
 		return e
 	}
 	defer func() { s.Close(); a.closeLog() }()
-	fmt.Printf("\n[PROFILE] %s / %s\n", p.Model, p.SoC)
-	fmt.Println("[NAND vendor INFO]", identifyVendor(trans))
+	a.notef("\n[PROFILE] %s / %s\n", p.Model, p.SoC)
+	a.noteln("[NAND vendor INFO]", identifyVendor(trans))
 	if out, e := a.ubootCommand(s, "mtd bad bl2", 2*time.Minute); e == nil {
-		fmt.Println("--- mtd bad bl2 ---\n", string(out))
+		a.noteln("--- mtd bad bl2 ---\n", string(out))
 	}
 	if out, e := a.ubootCommand(s, "mtd bad ubi", 2*time.Minute); e == nil {
-		fmt.Println("--- mtd bad ubi ---\n", string(out))
+		a.noteln("--- mtd bad ubi ---\n", string(out))
 	}
 	if out, e := a.ubootCommand(s, "mtd list", 60*time.Second); e == nil {
-		fmt.Println("--- MTD layout (read-only) ---\n", string(out))
+		a.noteln("--- MTD layout (read-only) ---\n", string(out))
 	}
-	fmt.Println(L("[INFO] UBI attach пропущен: обычная диагностика не отправляет 'ubi part', потому что attach может изменить UBI metadata/fastmap. Для явного advanced attach используйте режим портирования A / --ubi-attach.",
+	a.noteln(L("[INFO] UBI attach пропущен: обычная диагностика не отправляет 'ubi part', потому что attach может изменить UBI metadata/fastmap. Для явного advanced attach используйте режим портирования A / --ubi-attach.",
 		"[INFO] UBI attach skipped: normal diagnostics never sends 'ubi part' because attach may change UBI metadata/fastmap. Use Porting mode A / --ubi-attach for an explicit advanced attach."))
 	if out, e := a.ubootCommand(s, "printenv", 60*time.Second); e == nil {
-		fmt.Println("--- environment ---\n", string(out))
+		a.noteln("--- environment ---\n", string(out))
 	}
-	fmt.Println(L("Read-only диагностика завершена. NAND/UBI write, erase и attach не выполнялись.", "Read-only diagnostics finished. No NAND/UBI write, erase, or attach was performed."))
+	a.noteln(L("Read-only диагностика завершена. NAND/UBI write, erase и attach не выполнялись.", "Read-only diagnostics finished. No NAND/UBI write, erase, or attach was performed."))
 	return nil
 }
 
@@ -2422,7 +2450,7 @@ func (a *App) expertUBIVolume() error {
 	if e != nil {
 		return e
 	}
-	fmt.Println(string(layout))
+	a.noteln(string(layout))
 	name := a.ask(L("Существующий volume name: ", "Existing volume name: "))
 	if name == "" || !regexp.MustCompile(`^[A-Za-z0-9_.-]+$`).MatchString(name) {
 		return errors.New(L("недопустимое имя volume", "invalid volume name"))
@@ -2440,11 +2468,11 @@ func (a *App) expertUBIVolume() error {
 			maxGenericRAMFile/(1024*1024), appVersion)
 	}
 	sha, _ := shaFile(path)
-	fmt.Printf("WRITE EXISTING UBI VOLUME %s size=%d SHA256=%s\n", name, st.Size(), sha)
+	a.notef("WRITE EXISTING UBI VOLUME %s size=%d SHA256=%s\n", name, st.Size(), sha)
 	if _, e = a.tftpLoad(s, path, "ursido-volume.bin", loadAddr); e != nil {
 		return e
 	}
-	if e = a.confirm("WRITE UBI VOLUME " + name); e != nil {
+	if e = a.confirm(app.Write, "WRITE UBI VOLUME "+name); e != nil {
 		return e
 	}
 	if _, e = a.ubootCommand(s, fmt.Sprintf("ubi write 0x%x %s 0x%x", loadAddr, name, st.Size()), 10*time.Minute); e != nil {
@@ -2502,15 +2530,15 @@ func (a *App) expertRawMTD() error {
 		return errors.New(L("файл выходит за границы target", "file exceeds target range"))
 	}
 	if target == "bl2" && (off != 0 || st.Size() != bl2Size) {
-		fmt.Println(L("[WARN] частичная запись BL2 — только для экспертов, может лишить безопасной передачи управления из BootROM.", "[WARN] BL2 partial/odd write is expert-only and can remove BootROM handoff safety."))
+		a.noteln(L("[WARN] частичная запись BL2 — только для экспертов, может лишить безопасной передачи управления из BootROM.", "[WARN] BL2 partial/odd write is expert-only and can remove BootROM handoff safety."))
 	}
 	sha, _ := shaFile(path)
-	fmt.Printf("Target=%s offset=0x%x size=0x%x SHA256=%s\n", target, off, st.Size(), sha)
+	a.notef("Target=%s offset=0x%x size=0x%x SHA256=%s\n", target, off, st.Size(), sha)
 	if _, e = a.tftpLoad(s, path, "ursido-raw.bin", loadAddr); e != nil {
 		return e
 	}
 	exact := fmt.Sprintf("WRITE RAW %s 0x%x", strings.ToUpper(target), off)
-	if e = a.confirm(exact); e != nil {
+	if e = a.confirm(app.Write, exact); e != nil {
 		return e
 	}
 	if _, e = a.ubootCommand(s, fmt.Sprintf("mtd write %s 0x%x 0x%x 0x%x", target, loadAddr, off, st.Size()), 10*time.Minute); e != nil {
