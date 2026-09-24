@@ -8,6 +8,7 @@ go vet ./...
 go test ./...
 export CGO_ENABLED=0
 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "$OUT/UrsidoRescue.exe" .
+go run ./tools/embedicon "$OUT/UrsidoRescue.exe" assets/ursus-bear.png
 GOOS=linux   GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "$OUT/UrsidoRescue-linux-amd64" .
 GOOS=linux   GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o "$OUT/UrsidoRescue-linux-arm64" .
 cp -r payloads VERSION STATUS.md PROBE.md "$OUT/"

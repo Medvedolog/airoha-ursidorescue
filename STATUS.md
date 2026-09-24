@@ -1,3 +1,18 @@
+# UrsidoRescue 0.2.0-test10
+
+Status: **simulation PASS / HW PARTIAL.** UART/recovery hardware status is unchanged from test9.
+This release adds Windows branding to the executable itself.
+
+## 0.2.0-test10
+
+- UrsidoRescue.exe now embeds the canonical Ursus bear as native Windows RT_ICON/RT_GROUP_ICON
+  resources instead of shipping with the generic Go executable icon.
+- Seven icon sizes are generated at build time: 16, 24, 32, 48, 64, 128 and 256 px.
+- The canonical SVG and a 256 px raster master live under assets/ for reuse by the planned GUI.
+- Resource injection is a small pure-Go build tool under tools/embedicon, so release builds do not
+  require MinGW, windres, Python, ImageMagick or an external resource compiler.
+- The test9 UART/TUI/Ctrl+C/Ctrl+Z fixes are unchanged.
+
 # UrsidoRescue 0.2.0-test9
 
 Status: **simulation PASS / HW PARTIAL.** Windows/OpenWrt hardware testing of v0.2.0-test8
