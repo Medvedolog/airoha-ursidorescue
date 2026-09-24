@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 )
@@ -203,16 +202,24 @@ func (e *lineEditor) set(s string) {
 	e.pos = len(e.buf)
 }
 
-// render draws the prompt and the line, leaving the cursor at e.pos.
-func (e *lineEditor) render(prompt string) string {
+// render redraws the input line using only portable control bytes (CR, space,
+// backspace) so it works on any terminal and never injects escape sequences
+// into copyable output. prevWidth is the rune width drawn last time; it returns
+// the new drawn text and the new width. The cursor is left at e.pos.
+func (e *lineEditor) render(prompt string, prevWidth int) (string, int) {
+	line := prompt + string(e.buf)
+	width := len([]rune(line))
 	var b strings.Builder
-	b.WriteString("\r\x1b[K") // return to start, clear to end of line
-	b.WriteString(prompt)
-	b.WriteString(string(e.buf))
-	if back := len(e.buf) - e.pos; back > 0 {
-		fmt.Fprintf(&b, "\x1b[%dD", back)
+	b.WriteByte('\r')
+	b.WriteString(line)
+	if pad := prevWidth - width; pad > 0 { // erase leftovers from a longer line
+		b.WriteString(strings.Repeat(" ", pad))
+		b.WriteString(strings.Repeat("\b", pad))
 	}
-	return b.String()
+	if back := len(e.buf) - e.pos; back > 0 { // move cursor back to e.pos
+		b.WriteString(strings.Repeat("\b", back))
+	}
+	return b.String(), width
 }
 
 // ---------------- XMODEM receive ----------------

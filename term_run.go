@@ -11,14 +11,16 @@ import (
 
 // uartTerm is one interactive terminal session on a serial port.
 type uartTerm struct {
-	a      *App
-	s      Serial
-	mu     sync.Mutex // guards stdout and the shared editor display
-	ed     lineEditor
-	dec    ansiDecoder
-	raw    bool
-	prompt string
-	quit   bool
+	a         *App
+	s         Serial
+	mu        sync.Mutex // guards stdout and the shared editor display
+	ed        lineEditor
+	dec       ansiDecoder
+	raw       bool
+	prompt    string
+	quit      bool
+	shownW    int  // rune width of the input line currently on screen (line mode)
+	lineShown bool // an input line is drawn and needs erasing before device output
 }
 
 // runTerminal opens the port and runs the interactive terminal.
@@ -40,12 +42,15 @@ func (a *App) runTerminal() error {
 }
 
 func (a *App) runTerminalOn(s Serial) error {
-	t := &uartTerm{a: a, s: s, prompt: "] "}
+	// Raw passthrough is the default: device output is printed verbatim, so it
+	// is clean and copyable, and the device's own line editing/history works.
+	t := &uartTerm{a: a, s: s, prompt: "] ", raw: true}
 	t.ed.hidx = 0
-	fmt.Println(L("\nUART-терминал 115200 8N1. Строка отправляется по Enter; ↑/↓ — история; Ctrl+] — меню.",
-		"\nUART terminal 115200 8N1. Enter sends the line; ↑/↓ history; Ctrl+] menu."))
-	fmt.Println(L("Всё логируется. В меню: s — XMODEM отправить, r — принять, t — сырой режим, q — выход.",
-		"Everything is logged. Menu: s XMODEM send, r receive, t raw mode, q quit."))
+	fmt.Println(L("\nUART-терминал 115200 8N1 — прозрачный режим (вывод как есть, копируется).",
+		"\nUART terminal 115200 8N1 — raw passthrough (verbatim output, copyable)."))
+	fmt.Println(L("Ctrl+] — меню: l — построчный ввод с историей ↑/↓, s/r — XMODEM отправка/приём, g — лог, q — выход.",
+		"Ctrl+] — menu: l line-input with ↑/↓ history, s/r XMODEM send/receive, g log, q quit."))
+	fmt.Println(L("Всё пишется в лог.", "Everything is logged."))
 	state, e := consoleRaw()
 	if e != nil {
 		return fmt.Errorf(L("raw-консоль: %w", "raw console: %w"), e)
@@ -54,7 +59,6 @@ func (a *App) runTerminalOn(s Serial) error {
 
 	rxErr := make(chan error, 1)
 	go t.readLoop(rxErr)
-	t.redraw()
 
 	ib := make([]byte, 256)
 	for !t.quit {
@@ -69,6 +73,19 @@ func (a *App) runTerminalOn(s Serial) error {
 			return err
 		}
 		for _, b := range ib[:n] {
+			if t.raw {
+				// Raw passthrough: forward every byte verbatim (clean paste),
+				// except Ctrl+] which opens the menu.
+				if b == 0x1d {
+					t.menu()
+				} else {
+					_ = t.s.Write([]byte{b})
+				}
+				if t.quit {
+					return nil
+				}
+				continue
+			}
 			for _, ev := range t.dec.push(b) {
 				t.onKey(ev)
 				if t.quit {
@@ -80,8 +97,10 @@ func (a *App) runTerminalOn(s Serial) error {
 	return nil
 }
 
-// readLoop prints device output, erasing and redrawing the input line so the
-// line the operator is typing stays intact under asynchronous output.
+// readLoop prints device output verbatim. In line mode it first erases the
+// pending input line (with spaces, no escape codes) and redraws it after, so
+// what the operator is typing survives asynchronous output while the device
+// output itself stays clean and copyable.
 func (t *uartTerm) readLoop(done chan<- error) {
 	buf := make([]byte, 4096)
 	for {
@@ -95,39 +114,48 @@ func (t *uartTerm) readLoop(done chan<- error) {
 		}
 		d := append([]byte(nil), buf[:n]...)
 		t.mu.Lock()
-		if !t.raw {
-			fmt.Print("\r\x1b[K") // clear the input line before device output
+		if !t.raw && t.lineShown {
+			t.eraseLineLocked()
 		}
 		os.Stdout.Write(d)
 		t.a.logBytes(d, false)
 		if !t.raw {
-			t.renderLocked()
+			t.drawLineLocked(0)
 		}
 		t.mu.Unlock()
 	}
 }
 
-func (t *uartTerm) redraw() {
-	t.mu.Lock()
-	t.renderLocked()
-	t.mu.Unlock()
+// eraseLineLocked clears the current input line using only CR and spaces.
+func (t *uartTerm) eraseLineLocked() {
+	if t.shownW > 0 {
+		fmt.Print("\r" + strings.Repeat(" ", t.shownW) + "\r")
+	}
+	t.shownW = 0
+	t.lineShown = false
 }
 
-func (t *uartTerm) renderLocked() {
+// drawLineLocked (re)draws the prompt and buffer; prevW is the width already on
+// screen (0 when the line was just erased).
+func (t *uartTerm) drawLineLocked(prevW int) {
 	if t.raw {
 		return
 	}
-	fmt.Print(t.ed.render(t.prompt))
+	seq, w := t.ed.render(t.prompt, prevW)
+	fmt.Print(seq)
+	t.shownW = w
+	t.lineShown = true
+}
+
+func (t *uartTerm) redraw() {
+	t.mu.Lock()
+	t.drawLineLocked(t.shownW)
+	t.mu.Unlock()
 }
 
 func (t *uartTerm) onKey(ev keyEvent) {
 	if ev.kind == kMenu {
 		t.menu()
-		return
-	}
-	if t.raw {
-		// Raw mode: forward the byte(s) verbatim, except the menu key above.
-		t.forwardRaw(ev)
 		return
 	}
 	switch ev.kind {
@@ -140,39 +168,17 @@ func (t *uartTerm) onKey(ev keyEvent) {
 	}
 	line, send := t.ed.handle(ev)
 	t.mu.Lock()
-	t.renderLocked()
+	prev := t.shownW
+	if send {
+		t.eraseLineLocked()
+		fmt.Print(t.prompt + line + "\r\n")
+	} else {
+		t.drawLineLocked(prev)
+	}
 	t.mu.Unlock()
 	if send {
-		fmt.Print("\r\n")
 		t.logSent(line)
 		_ = t.s.Write(append([]byte(line), '\r'))
-	}
-}
-
-func (t *uartTerm) forwardRaw(ev keyEvent) {
-	var b []byte
-	switch ev.kind {
-	case kRune:
-		b = []byte(string(ev.r))
-	case kEnter:
-		b = []byte{'\r'}
-	case kBackspace:
-		b = []byte{0x7f}
-	case kCtrlC:
-		b = []byte{0x03}
-	case kInterrupt:
-		b = []byte{0x04}
-	case kUp:
-		b = []byte("\x1b[A")
-	case kDown:
-		b = []byte("\x1b[B")
-	case kLeft:
-		b = []byte("\x1b[D")
-	case kRight:
-		b = []byte("\x1b[C")
-	}
-	if len(b) > 0 {
-		_ = t.s.Write(b)
 	}
 }
 
@@ -188,8 +194,17 @@ func (t *uartTerm) logSent(line string) {
 
 // menu leaves raw single-key handling for a short prompt.
 func (t *uartTerm) menu() {
-	fmt.Print(L("\r\n[меню: s=XMODEM отпр, r=XMODEM приём, t=сырой/строчный, l=лог, q=выход, Enter=назад] ",
-		"\r\n[menu: s=XMODEM send, r=XMODEM recv, t=raw/line, l=log, q=quit, Enter=back] "))
+	t.mu.Lock()
+	if !t.raw && t.lineShown {
+		t.eraseLineLocked()
+	}
+	t.mu.Unlock()
+	mode := L("сейчас: прозрачный", "now: raw")
+	if !t.raw {
+		mode = L("сейчас: построчный", "now: line")
+	}
+	fmt.Print(L("\r\n[меню ("+mode+"): l=прозрачный/построчный, s=XMODEM отпр, r=XMODEM приём, g=лог, q=выход, Enter=назад] ",
+		"\r\n[menu ("+mode+"): l=raw/line, s=XMODEM send, r=XMODEM recv, g=log, q=quit, Enter=back] "))
 	c := t.readByte()
 	fmt.Print("\r\n")
 	switch c {
@@ -197,14 +212,16 @@ func (t *uartTerm) menu() {
 		t.xmodemSendInteractive()
 	case 'r', 'R':
 		t.xmodemRecvInteractive()
-	case 't', 'T':
+	case 'l', 'L':
 		t.raw = !t.raw
 		if t.raw {
-			fmt.Print(L("[сырой режим: ввод идёт как есть, истории нет]\r\n", "[raw mode: input passes through, no history]\r\n"))
+			fmt.Print(L("[прозрачный режим: вывод как есть, копируется; история — стрелками устройства]\r\n",
+				"[raw mode: verbatim output, copyable; history via the device's own arrows]\r\n"))
 		} else {
-			fmt.Print(L("[строчный режим]\r\n", "[line mode]\r\n"))
+			fmt.Print(L("[построчный режим: ↑/↓ — история, строка уходит по Enter]\r\n",
+				"[line mode: ↑/↓ history, Enter sends the line]\r\n"))
 		}
-	case 'l', 'L':
+	case 'g', 'G':
 		t.a.logMu.Lock()
 		f := t.a.logFile
 		t.a.logMu.Unlock()

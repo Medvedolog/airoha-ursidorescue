@@ -1,10 +1,22 @@
-# UrsidoRescue 0.2.0-test4
+# UrsidoRescue 0.2.0-test5
 
 Status: **simulation PASS / HW HOLD.** Unit tests, a simulated AN7581 board and a pseudo-terminal
 U-Boot pass (also with -race); nothing in 0.2.x has run on real hardware yet. First hardware runs
 should be probes on a board you can afford to recover.
 
 UART testers only: 3.3V TTL, GND/TX/RX only, never connect VCC.
+
+## 0.2.0-test5
+
+- Terminal fixed: raw passthrough is now the default, so device output is
+  printed verbatim — clean, copyable, and the device's own shell history
+  (busybox/U-Boot arrows) works. The garbled "[K" litter came from the old
+  line-mode redraw injecting ANSI erase codes into the output stream.
+- Line-input mode (menu: l) is still available for devices without their own
+  editing; its redraw now uses only CR/space/backspace, no escape sequences.
+- Main menu: Expert mode moved to the last position and shown in bold.
+- Windows: ENABLE_VIRTUAL_TERMINAL_PROCESSING is turned on so bold and any
+  ANSI render correctly.
 
 ## 0.2.0-test4
 

@@ -106,15 +106,32 @@ func TestLineEditorStashPreservesTyping(t *testing.T) {
 	}
 }
 
-func TestRenderPlacesCursor(t *testing.T) {
+func TestRenderPortableAndCursor(t *testing.T) {
 	var e lineEditor
 	typeLine(&e, "abcd\x1b[D\x1b[D") // cursor two left of end
-	out := e.render("] ")
-	if !strings.HasPrefix(out, "\r\x1b[K] abcd") {
+	out, w := e.render("] ", 0)
+	if w != 6 {
+		t.Fatalf("width %d", w)
+	}
+	// Portable only: no ESC anywhere.
+	if strings.Contains(out, "\x1b") {
+		t.Fatalf("render leaked an escape sequence: %q", out)
+	}
+	if !strings.HasPrefix(out, "\r] abcd") {
 		t.Fatalf("render %q", out)
 	}
-	if !strings.HasSuffix(out, "\x1b[2D") {
+	if !strings.HasSuffix(out, "\b\b") { // cursor moved two left of end
 		t.Fatalf("cursor move %q", out)
+	}
+	// Redraw of a shorter line pads and backs over the old tail.
+	e2 := lineEditor{}
+	typeLine(&e2, "ab")
+	out2, _ := e2.render("] ", 10)
+	if !strings.Contains(out2, "    ") { // spaces to erase the longer previous line
+		t.Fatalf("no pad in %q", out2)
+	}
+	if strings.Contains(out2, "\x1b") {
+		t.Fatalf("pad leaked escape: %q", out2)
 	}
 }
 

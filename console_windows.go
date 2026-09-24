@@ -35,3 +35,14 @@ func consoleRestore(s *consoleState) {
 	}
 	pSetConsoleMode.Call(uintptr(syscall.Handle(os.Stdin.Fd())), uintptr(s.mode))
 }
+
+// enableVTOutput turns on ENABLE_VIRTUAL_TERMINAL_PROCESSING on stdout so ANSI
+// SGR/erase sequences render on modern Windows consoles.
+func enableVTOutput() {
+	h := syscall.Handle(os.Stdout.Fd())
+	var mode uint32
+	if r, _, _ := pGetConsoleMode.Call(uintptr(h), uintptr(unsafe.Pointer(&mode))); r == 0 {
+		return
+	}
+	pSetConsoleMode.Call(uintptr(h), uintptr(mode|0x0004))
+}

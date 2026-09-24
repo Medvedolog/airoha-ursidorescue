@@ -37,3 +37,6 @@ func consoleRestore(s *consoleState) {
 	fd := int(os.Stdin.Fd())
 	syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), uintptr(syscall.TCSETS), uintptr(unsafe.Pointer(&s.t)))
 }
+
+// enableVTOutput is a no-op on Linux; ANSI is always understood.
+func enableVTOutput() {}

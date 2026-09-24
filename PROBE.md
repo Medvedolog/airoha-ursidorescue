@@ -46,9 +46,11 @@ Main menu → 8. PORTING / HARDWARE DISCOVERY:
 
 ## Interactive terminal
 
-Expert mode → item 1 is a UART terminal with ↑/↓ command history, line editing,
-manual XMODEM send/receive and full logging. It only drives the port you open;
-it holds no credentials and never guesses any. Item 6 is the old raw passthrough.
+Expert mode → item 1 is a UART terminal. It starts in raw passthrough (verbatim,
+copyable output; the device's own shell history works). Ctrl+] opens a menu:
+l toggles a local line-input mode with ↑/↓ history, s/r do manual XMODEM
+send/receive, g shows the log path, q quits. Everything is logged. It only
+drives the port you open; it holds no credentials and never guesses any.
 
 ## Command line
 

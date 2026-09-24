@@ -28,7 +28,7 @@ import (
 
 const (
 	appName               = "UrsidoRescue"
-	appVersion            = "0.2.0-test4"
+	appVersion            = "0.2.0-test5"
 	defaultRouterIP       = "192.168.1.1"
 	defaultLocalIP        = "192.168.1.254"
 	defaultTFTPPort       = 1069
@@ -111,6 +111,7 @@ func realMain() int {
 		fmt.Fprintln(os.Stderr, "[FATAL]", err)
 		return 2
 	}
+	enableVTOutput()
 	a := &App{root: root, work: filepath.Join(root, "work"), reader: bufio.NewReader(os.Stdin), lang: uiLang}
 	_ = os.MkdirAll(a.work, 0755)
 	if !interactive {
@@ -176,9 +177,9 @@ func (a *App) run() error {
 		fmt.Println(L("  3. Восстановить полный physical NAND image (256 MiB)", "  3. Restore a full physical NAND image (256 MiB)"))
 		fmt.Println(L("  4. Загрузить OpenWrt recovery ITB в RAM", "  4. Boot an OpenWrt recovery ITB from RAM"))
 		fmt.Println(L("  5. Диагностика NAND / UBI / U-Boot", "  5. NAND / UBI / U-Boot diagnostics"))
-		fmt.Println(L("  6. Экспертный режим", "  6. Expert mode"))
-		fmt.Println(L("  7. Собрать пакет логов для отчёта", "  7. Build a log bundle for a report"))
-		fmt.Println(L("  8. Портирование / исследование оборудования (read-only probe новых Airoha)", "  8. PORTING / HARDWARE DISCOVERY (read-only probe of new Airoha devices)"))
+		fmt.Println(L("  6. Собрать пакет логов для отчёта", "  6. Build a log bundle for a report"))
+		fmt.Println(L("  7. Портирование / исследование оборудования (read-only probe новых Airoha)", "  7. PORTING / HARDWARE DISCOVERY (read-only probe of new Airoha devices)"))
+		fmt.Println(bold(L("  8. Экспертный режим", "  8. Expert mode")))
 		fmt.Println(L("  0. Выход", "  0. Exit"))
 		v := a.ask(L("Выбор: ", "Choice: "))
 		switch v {
@@ -203,18 +204,18 @@ func (a *App) run() error {
 				a.showErr(err)
 			}
 		case "6":
-			if err := a.expertMenu(); err != nil {
-				a.showErr(err)
-			}
-		case "7":
 			p, err := a.makeSupportBundle()
 			if err != nil {
 				a.showErr(err)
 			} else {
 				fmt.Println(L("Пакет для отчёта:", "Report bundle:"), p)
 			}
-		case "8":
+		case "7":
 			if err := a.portingMenu(); err != nil {
+				a.showErr(err)
+			}
+		case "8":
+			if err := a.expertMenu(); err != nil {
 				a.showErr(err)
 			}
 		case "0":
@@ -225,6 +226,11 @@ func (a *App) run() error {
 		}
 	}
 }
+
+// bold wraps text in the ANSI bold SGR; enableVTOutput makes it render on
+// Windows too. Terminals that ignore SGR simply show the text unstyled.
+func bold(s string) string { return "\x1b[1m" + s + "\x1b[22m" }
+
 func (a *App) showErr(err error) {
 	fmt.Println("\n[STOP]", err)
 	fmt.Println(L("Никаких дополнительных write/erase команд после этой ошибки не отправлено.", "No further write/erase commands were sent after this error."))
@@ -1846,7 +1852,7 @@ func (a *App) physicalRestoreWizard() error {
 		return e
 	}
 	if len(blbad) > 0 || len(bad) > 0 {
-		return fmt.Errorf(L("восстановление physical image в 0.2.0-test4 требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test4 requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
+		return fmt.Errorf(L("восстановление physical image в 0.2.0-test5 требует отсутствия bad-блоков (bl2=%d ubi=%d); используйте восстановление с учётом формата", "physical-image restore 0.2.0-test5 requires zero bad blocks (bl2=%d ubi=%d); use a format-aware restore instead"), len(blbad), len(bad))
 	}
 	local, e := a.networkIP()
 	if e != nil {
@@ -2154,7 +2160,7 @@ func (a *App) expertUBIVolume() error {
 	}
 	st, _ := os.Stat(path)
 	if st.Size() > maxGenericRAMFile {
-		return errors.New(L("файл volume >64 MiB за один раз не поддерживается в 0.2.0-test4", "expert one-shot volume file >64 MiB is not supported in 0.2.0-test4"))
+		return errors.New(L("файл volume >64 MiB за один раз не поддерживается в 0.2.0-test5", "expert one-shot volume file >64 MiB is not supported in 0.2.0-test5"))
 	}
 	sha, _ := shaFile(path)
 	fmt.Printf("WRITE EXISTING UBI VOLUME %s size=%d SHA256=%s\n", name, st.Size(), sha)
@@ -2306,7 +2312,7 @@ func (a *App) makeSupportBundle() (string, error) {
 }
 
 func (a *App) selftest() error {
-	if appVersion != "0.2.0-test4" {
+	if appVersion != "0.2.0-test5" {
 		return errors.New("version")
 	}
 	if _, e := probe.CheckUBoot("saveenv"); e == nil {
