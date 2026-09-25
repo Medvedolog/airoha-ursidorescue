@@ -94,6 +94,18 @@ Releases by CI.
     failed; the console output is unchanged;
   - a long confirmation is never cut: the answer line (phrase and input, or buttons) is pinned at the
     bottom and the text above scrolls with ↑/↓ and a "lines N–M of K" indicator.
+- TUI and menu texts, after the second review:
+  - after an incomplete probe the result states what actually happened ("no flash write commands were
+    sent", "ubi part was run: UBI may have changed its metadata", "FTP was enabled on the stock firmware",
+    "the RAM U-Boot was loaded into RAM only"), from the real outcome rather than one sentence for all;
+  - "NAND / UBI / U-Boot diagnostics" is now "NAND / MTD / U-Boot diagnostics" (console, TUI, MENU): it does
+    not attach UBI or list volumes, and the description says where to go for volumes;
+  - main menu item 2 is "Restore the FIP if UBI is intact" (was "Repair OpenWrt boot / replace the FIP");
+  - the full probe description: writes no flash, enabling FTP is asked separately;
+  - the TUI has no duplicate Diagnostics under Expert (console item numbers are unchanged);
+  - the result screen shows the session and operation IDs, the full log path is in the log;
+  - at 80×24 the item description always fits: while idle the log shrinks to 3 rows and the bear only
+    takes free space.
 - TUI: the logo is a winking ASCII bear with the UrsidoRescue name and version: big in the top-left
   corner when the height allows, otherwise small in a free corner of the menu; it never pushes the menu or
   the description off the screen.

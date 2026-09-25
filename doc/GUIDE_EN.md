@@ -222,7 +222,10 @@ UrsidoRescue.exe --tui --lang en
 
 Next to the menu the TUI explains what the selected item does, what it needs and its risk. Yes/no
 questions and short options are buttons (← → and Enter), lists (COM port, profile) use the arrows; typing
-an answer still works. The hotkeys also work with the Russian layout and through F-keys.
+an answer still works. The hotkeys also work with the Russian layout and through F-keys. The TUI's Expert section has no
+duplicate Diagnostics (it is in Main). While no operation runs the log may shrink to 3 rows so the item
+description fits at 80×24; during an operation it takes about a third of the screen again. After an
+operation the screen shows its result and session ID; the full path to the log directory is in the log.
 
 | key | action |
 |---|---|

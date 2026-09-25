@@ -60,6 +60,7 @@ func (a *App) RunOperation(kind string) error {
 func (a *App) inSession(sess *app.Session, kind string, risk app.Risk, fn func() error, closeAfter bool) error {
 	opID := sess.NewOperation(kind)
 	a.cancelMu.Lock()
+	a.lastSess, a.lastOp = sess.Dir, opID
 	prevUI, prevSess, prevOp, prevKind := a.ui, a.sess, a.op, a.opKind
 	a.ui = &app.SessionUI{Inner: a.front, Session: sess, Op: opID}
 	a.sess, a.op, a.opKind = sess, opID, kind
@@ -302,6 +303,14 @@ func (a *App) cancelMode() app.CancelMode {
 	a.cancelMu.Lock()
 	defer a.cancelMu.Unlock()
 	return a.cancel.Mode
+}
+
+// LastOperation is the session directory and ID of the latest operation, so a
+// front end can say which logs to attach. Safe from any goroutine.
+func (a *App) LastOperation() (sessionDir, op string) {
+	a.cancelMu.Lock()
+	defer a.cancelMu.Unlock()
+	return a.lastSess, a.lastOp
 }
 
 // Busy reports whether an operation is running. Safe from any goroutine.

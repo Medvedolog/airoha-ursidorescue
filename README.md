@@ -43,7 +43,7 @@ a new UrsusBoot port needs, strictly read-only, and packs it into one bundle.
 |---|---|
 | 🧸 **Revive a brick** | BootROM → preloader → RAM U-Boot over XMODEM, with nothing written to flash |
 | 🏭 **Return to stock** | Restore factory Nokia firmware from an `mtd16` / MedveFlasher backup, BL2 written last |
-| 🔧 **Repair the boot** | Replace the OpenWrt `fip` UBI volume when the system is intact but will not start |
+| 🔧 **Restore the FIP** | Replace the OpenWrt `fip` UBI volume when UBI is intact but the system will not start |
 | 💾 **Restore all of NAND** | Write a full 256 MiB raw image with readback of every chunk |
 | 🚀 **Boot from RAM** | Start an OpenWrt initramfs / recovery ITB without touching flash |
 | 🩺 **Diagnose** | Bad blocks, MTD layout and environment, fully read-only |

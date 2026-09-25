@@ -53,7 +53,7 @@ func (a *App) runProbeIn(kind string, risk app.Risk, r probeRequest) (probeResul
 		var e error
 		res, e = a.runProbe(r)
 		if e == nil && res.code != exitProbeOK {
-			e = probeCodeError{res.code}
+			e = probeCodeError{code: res.code, effects: probeEffects(res, r)}
 		}
 		return e
 	})
@@ -64,7 +64,33 @@ func (a *App) runProbeIn(kind string, risk app.Risk, r probeRequest) (probeResul
 // (no UART, no BootROM/U-Boot/Linux, an incomplete profile). Nothing was
 // written; the session records it as failed and front ends must not show it
 // as success.
-type probeCodeError struct{ code int }
+type probeCodeError struct {
+	code int
+	// effects says what the run changed, from its mode and outcome.
+	effects string
+}
+
+// probeEffects states what a finished probe changed on the device. It is
+// derived from what actually happened, not from the menu item: UBI attach
+// and stock FTP provisioning are the only things a probe may change.
+func probeEffects(res probeResult, r probeRequest) string {
+	var parts []string
+	switch {
+	case res.outcome.UBIAttached:
+		parts = append(parts, L("выполнялся ubi part — UBI мог изменить метаданные во flash (advanced)", "ubi part was run: UBI may have changed its metadata in flash (advanced)"))
+	case r.opts.UBIAttach:
+		parts = append(parts, L("ubi part разрешён, но не выполнялся — во flash ничего не писалось", "ubi part was allowed but not run: nothing was written to flash"))
+	default:
+		parts = append(parts, L("команд записи во flash не отправлялось", "no flash write commands were sent"))
+	}
+	if res.outcome.StockProvisioned {
+		parts = append(parts, L("на stock-прошивке включён FTP (изменена настройка по вашему согласию)", "FTP was enabled on the stock firmware (a setting changed with your consent)"))
+	}
+	if r.ramUBoot != "" {
+		parts = append(parts, L("RAM U-Boot загружен только в память", "the RAM U-Boot was loaded into RAM only"))
+	}
+	return strings.Join(parts, "; ") + "."
+}
 
 func (e probeCodeError) Error() string {
 	return fmt.Sprintf(L("probe завершён с кодом %d: %s", "probe finished with code %d: %s"), e.code, exitText(e.code))

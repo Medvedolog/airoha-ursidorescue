@@ -239,14 +239,22 @@ func TestTUILogo(t *testing.T) {
 	for _, sz := range [][2]int{{80, 24}, {120, 36}} {
 		m, _, _ := testTUI(t, sz[0], sz[1])
 		for tab := range m.menu {
-			m.tab = tab
-			v := checkFits(t, m, "menu with logo")
-			if !strings.Contains(v, "o   -") || !strings.Contains(v, appVersion) {
-				t.Errorf("%dx%d tab %d: the winking bear with the version must be on screen:\n%s", sz[0], sz[1], tab, v)
+			for cur := range m.menu[tab].items {
+				m.tab, m.cur = tab, cur
+				v := checkFits(t, m, "menu")
+				items := m.menu[tab].items
+				if last := items[len(items)-1].label; !strings.Contains(v, last) {
+					t.Errorf("%dx%d tab %d: %q must stay on screen", sz[0], sz[1], tab, last)
+				}
+				if sz[0] == 80 && strings.Contains(v, L("подробно — doc/MENU_RU.md", "details: doc/MENU_EN.md")) {
+					t.Errorf("80x24 tab %d item %d: the description must fit; the bear and the log give way first:\n%s", tab, cur, v)
+				}
 			}
-			if last := m.menu[tab].items[len(m.menu[tab].items)-1].label; !strings.Contains(v, last) {
-				t.Errorf("%dx%d tab %d: the logo must not push %q off the menu", sz[0], sz[1], tab, last)
-			}
+		}
+		// Where there is room the winking bear and the version are shown.
+		m.tab, m.cur = 0, 0
+		if v := m.View(); !strings.Contains(v, "o   -") || !strings.Contains(v, appVersion) {
+			t.Errorf("%dx%d: the bear with the version must be in the main tab:\n%s", sz[0], sz[1], v)
 		}
 	}
 }
@@ -273,7 +281,7 @@ func TestTUIPortDialogWithoutPorts(t *testing.T) {
 func TestTUIProbeCodeIsNotSuccess(t *testing.T) {
 	m, _, _ := testTUI(t, 80, 24)
 	m.busy, m.opTitle = true, "Full probe"
-	m.finish(probeCodeError{exitNoUBoot})
+	m.finish(probeCodeError{code: exitNoUBoot, effects: probeEffects(probeResult{}, probeRequest{})})
 	if m.resultBad || !m.resultWarn {
 		t.Fatalf("a probe with a non-zero code is incomplete, not success or a crash: bad=%v warn=%v", m.resultBad, m.resultWarn)
 	}
@@ -282,7 +290,7 @@ func TestTUIProbeCodeIsNotSuccess(t *testing.T) {
 		t.Fatalf("the result must name the probe code and never say Done:\n%s", v)
 	}
 	var pc probeCodeError
-	if !errors.As(error(probeCodeError{exitIncomplete}), &pc) || pc.code != exitIncomplete {
+	if !errors.As(error(probeCodeError{code: exitIncomplete}), &pc) || pc.code != exitIncomplete {
 		t.Fatal("probeCodeError must be recognisable through errors.As")
 	}
 }
@@ -313,5 +321,54 @@ func TestTUIConfirmAnswerAlwaysVisible(t *testing.T) {
 		if !strings.Contains(v, want) {
 			t.Fatalf("after scrolling, %q must be visible with the phrase still pinned:\n%s", want, v)
 		}
+	}
+}
+
+func TestProbeEffectsFollowWhatHappened(t *testing.T) {
+	plain := probeEffects(probeResult{}, probeRequest{})
+	attach := probeRequest{}
+	attach.opts.UBIAttach = true
+	allowed := probeEffects(probeResult{}, attach)
+	ran := probeResult{}
+	ran.outcome.UBIAttached = true
+	attached := probeEffects(ran, attach)
+	ftp := probeResult{}
+	ftp.outcome.StockProvisioned = true
+	provisioned := probeEffects(ftp, probeRequest{})
+	for _, tc := range []struct {
+		name, got, want, not string
+	}{
+		{"read-only", plain, L("не отправлялось", "no flash write"), "ubi part"},
+		{"attach allowed, not run", allowed, L("не выполнялся", "not run"), L("мог изменить", "may have changed")},
+		{"attach run", attached, L("мог изменить метаданные", "may have changed its metadata"), L("не отправлялось", "no flash write")},
+		{"stock FTP", provisioned, "FTP", ""},
+	} {
+		if !strings.Contains(tc.got, tc.want) || (tc.not != "" && strings.Contains(tc.got, tc.not)) {
+			t.Errorf("%s: %q must contain %q and not %q", tc.name, tc.got, tc.want, tc.not)
+		}
+	}
+	m, _, _ := testTUI(t, 80, 24)
+	m.busy = true
+	m.finish(probeCodeError{code: exitIncomplete, effects: attached})
+	if v := m.View(); strings.Contains(v, L("ничего не писалось", "Nothing was written")) || !strings.Contains(v, "ubi part") {
+		t.Fatalf("after an attach the result screen must not claim nothing was written:\n%s", v)
+	}
+}
+
+func TestTUIResultNamesTheSession(t *testing.T) {
+	m, _, _ := testTUI(t, 80, 24)
+	m.busy, m.opTitle = true, "Diagnostics"
+	dir := "/work/sessions/20260925-101500-diagnostics-7f3c"
+	m.Update(tuiOpDoneMsg{err: errors.New("no UART"), sess: dir, op: "op-20260925-101501-diagnostics-a121"})
+	v := checkFits(t, m, "failed result")
+	if !strings.Contains(v, "7f3c") || !strings.Contains(v, "a121") {
+		t.Fatalf("a finished operation must show its session and op IDs:\n%s", v)
+	}
+	found := false
+	for _, l := range m.log {
+		found = found || strings.Contains(l.text, dir)
+	}
+	if !found {
+		t.Fatal("the full session path must be in the log")
 	}
 }

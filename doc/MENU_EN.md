@@ -17,10 +17,10 @@ Contents:
   - [Confirmation phrases](#confirmation-phrases)
 - [Main menu](#main-menu)
   - [1. Restore stock Nokia firmware from mtd16/all_flash](#1-restore-stock-nokia-firmware-from-an-mtd16all_flash-backup)
-  - [2. Repair OpenWrt boot / replace the FIP](#2-repair-openwrt-boot--replace-the-fip)
+  - [2. Restore the FIP if UBI is intact](#2-restore-the-fip-if-ubi-is-intact)
   - [3. Restore a full physical NAND image](#3-restore-a-full-physical-nand-image-256-mib)
   - [4. Boot an OpenWrt recovery ITB from RAM](#4-boot-an-openwrt-recovery-itb-from-ram)
-  - [5. NAND / UBI / U-Boot diagnostics](#5-nand--ubi--u-boot-diagnostics)
+  - [5. NAND / MTD / U-Boot diagnostics](#5-nand--mtd--u-boot-diagnostics)
   - [6. Build a log bundle for a report](#6-build-a-log-bundle-for-a-report)
   - [7. Porting / hardware discovery](#7-porting--hardware-discovery)
   - [8. Expert mode](#8-expert-mode)
@@ -190,10 +190,10 @@ and UART Shell Ctrl+C still goes to the router. Every press is recorded in the s
 ```
 Main menu
   1. Restore stock Nokia firmware from an mtd16/all_flash backup
-  2. Repair OpenWrt boot / replace the FIP
+  2. Restore the FIP if UBI is intact
   3. Restore a full physical NAND image (256 MiB)
   4. Boot an OpenWrt recovery ITB from RAM
-  5. NAND / UBI / U-Boot diagnostics
+  5. NAND / MTD / U-Boot diagnostics
   6. Build a log bundle for a report
   7. PORTING / HARDWARE DISCOVERY (read-only probe of new Airoha devices)
   8. Expert mode
@@ -241,7 +241,7 @@ the whole stock area), UART, an Ethernet cable.
 **Why BL2 last:** while the old BL2 is in place, a half-written stock area does not stop you from
 entering the BootROM again and repeating. A broken BL2 on top of a half-written rest is the worst case.
 
-### 2. Repair OpenWrt boot / replace the FIP
+### 2. Restore the FIP if UBI is intact
 
 **Why:** OpenWrt in UBI is intact but does not boot because the loader in the `fip` UBI volume
 (BL31 + U-Boot) is damaged or wrong.
@@ -294,7 +294,7 @@ touching flash, e.g. to take a backup or sysupgrade from there.
 5. For 60 seconds the UART output is shown and logged, then back to the menu. Ctrl+C on the PC is
    **not** forwarded to the router here. Continue through the terminal (Expert → 1) or the network.
 
-### 5. NAND / UBI / U-Boot diagnostics
+### 5. NAND / MTD / U-Boot diagnostics
 
 **Why:** see the NAND state before a repair or for a report.
 
@@ -457,7 +457,7 @@ item does not check the bad-block map.
 
 #### Expert 5. Diagnostics
 
-Same as [main menu item 5](#5-nand--ubi--u-boot-diagnostics).
+Same as [main menu item 5](#5-nand--mtd--u-boot-diagnostics).
 
 #### Expert 6. UART Shell
 

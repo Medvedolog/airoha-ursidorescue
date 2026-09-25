@@ -110,6 +110,8 @@ type App struct {
 	stop      app.StopFlag   // STOP from the front end, polled at checkpoints
 	cancel    app.CancelState
 	cancelMu  sync.Mutex   // guards cancel, ui/sess/op/opKind swaps against RequestStop
+	lastSess  string       // directory of the latest operation's session
+	lastOp    string       // ID of the latest operation
 	op        string       // its operation ID
 	probeSess *app.Session // current Porting session (spans probe items)
 }
@@ -216,10 +218,10 @@ func (a *App) run() error {
 	for {
 		fmt.Println(L("Главное меню", "Main menu"))
 		fmt.Println(L("  1. Восстановить заводскую Nokia из mtd16/all_flash backup", "  1. Restore stock Nokia firmware from an mtd16/all_flash backup"))
-		fmt.Println(L("  2. Починить загрузку OpenWrt / заменить FIP", "  2. Repair OpenWrt boot / replace the FIP"))
+		fmt.Println(L("  2. Восстановить FIP, если UBI цел", "  2. Restore the FIP if UBI is intact"))
 		fmt.Println(L("  3. Восстановить полный physical NAND image (256 MiB)", "  3. Restore a full physical NAND image (256 MiB)"))
 		fmt.Println(L("  4. Загрузить OpenWrt recovery ITB в RAM", "  4. Boot an OpenWrt recovery ITB from RAM"))
-		fmt.Println(L("  5. Диагностика NAND / UBI / U-Boot", "  5. NAND / UBI / U-Boot diagnostics"))
+		fmt.Println(L("  5. Диагностика NAND / MTD / U-Boot", "  5. NAND / MTD / U-Boot diagnostics"))
 		fmt.Println(L("  6. Собрать пакет логов для отчёта", "  6. Build a log bundle for a report"))
 		fmt.Println(L("  7. Портирование / исследование оборудования (read-only probe новых Airoha)", "  7. PORTING / HARDWARE DISCOVERY (read-only probe of new Airoha devices)"))
 		fmt.Println(bold(L("  8. Экспертный режим", "  8. Expert mode")))

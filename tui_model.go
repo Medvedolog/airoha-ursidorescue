@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -80,6 +81,9 @@ type (
 	tuiOpDoneMsg struct {
 		err  error
 		held []tea.Msg
+		// sess and op name the session this item ran in ("" when it
+		// opened none, such as "view profile").
+		sess, op string
 	}
 	tuiStopMsg app.CancelState
 	tuiPortMsg struct {
@@ -102,6 +106,9 @@ type tuiModel struct {
 	result     string
 	resultBad  bool
 	resultWarn bool // finished, but not everything asked was obtained
+	resultNote string
+	lastSess   string // session of the finished item, for the report
+	lastOp     string
 	progress   *app.Progress
 	cancel     app.CancelState
 	lastCtrlC  time.Time
@@ -169,6 +176,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Update(h)
 		}
 		m.finish(msg.err)
+		m.lastSess, m.lastOp = msg.sess, msg.op
+		if msg.sess != "" {
+			m.addEvent(app.Event{Level: app.LevelNote, Text: L("Сессия (приложите к отчёту): ", "Session (attach to a report): ") + msg.sess})
+		}
 	}
 	return m, nil
 }
@@ -202,7 +213,7 @@ func (m *tuiModel) finish(err error) {
 	case err == nil:
 		m.result = L("Готово.", "Done.")
 	case errors.As(err, &pc):
-		m.result, m.resultWarn = err.Error(), true
+		m.result, m.resultWarn, m.resultNote = err.Error(), true, pc.effects
 		m.addEvent(app.Event{Level: app.LevelWarn, Label: "PROBE", Text: err.Error()})
 	default:
 		m.result, m.resultBad = err.Error(), true
@@ -339,8 +350,13 @@ func (m *tuiModel) start(it tuiItem) tea.Cmd {
 	a := m.a
 	if consoleOwning[it.kind] {
 		c := &consoleOp{a: a, ui: m.ui, kind: it.kind}
-		return tea.Exec(c, func(error) tea.Msg { return tuiOpDoneMsg{err: c.err, held: c.held} })
+		_, before := a.LastOperation()
+		return tea.Exec(c, func(error) tea.Msg {
+			sess, op := sinceOp(a, before)
+			return tuiOpDoneMsg{err: c.err, held: c.held, sess: sess, op: op}
+		})
 	}
+	_, before := a.LastOperation()
 	return func() tea.Msg {
 		var err error
 		if it.porting != "" {
@@ -348,7 +364,8 @@ func (m *tuiModel) start(it tuiItem) tea.Cmd {
 		} else {
 			err = a.RunOperation(it.kind)
 		}
-		return tuiOpDoneMsg{err: err}
+		sess, op := sinceOp(a, before)
+		return tuiOpDoneMsg{err: err, sess: sess, op: op}
 	}
 }
 
@@ -658,9 +675,10 @@ func (m *tuiModel) View() string {
 		mainLines = m.viewOperation(mainH)
 	default:
 		title = L("МЕНЮ", "MENU")
-		// The whole menu stays visible; the log gives way down to 5 rows.
-		mainLines = m.viewMenu(body - 6)
-		mainH = max(mainH, min(len(mainLines), body-6))
+		// Idle menu: the menu and the item description come first; the log
+		// gives way down to 3 rows and grows back once an operation runs.
+		mainLines = m.viewMenu(body - 4)
+		mainH = max(mainH, min(len(mainLines), body-4))
 		logH = body - mainH
 	}
 	out := []string{m.viewTop(), m.rule(title)}
@@ -830,9 +848,10 @@ func (m *tuiModel) viewMenu(h int) []string {
 			descText = append(descText, tsMuted.Render(l))
 		}
 	}
-	// The winking bear goes where it takes nothing away: big in the top-left
-	// corner when the whole menu and description still fit, otherwise small
-	// under the list, otherwise small over the description.
+	// The winking bear only takes free space: big in the top-left corner when
+	// the whole menu and description still fit under it, otherwise small in
+	// the rows the list leaves empty beside a longer description, otherwise
+	// not at all. The description always wins.
 	need := 1 + len(list)
 	if twoCol {
 		need = 1 + max(len(list), len(desc)+len(descText))
@@ -841,10 +860,9 @@ func (m *tuiModel) viewMenu(h int) []string {
 	}
 	if logo := tuiLogo(h-need-1, m.w); logo != nil && len(logo) == len(bearBig) {
 		lines = append(append(logo, ""), lines...)
-	} else if small := tuiLogo(len(bearSmall), listW-1); twoCol && small != nil && len(list)+1+len(small) <= h-1 {
+	} else if small := tuiLogo(len(bearSmall), listW-1); twoCol && small != nil &&
+		len(list)+1+len(small) <= min(h-1, len(desc)+len(descText)) {
 		list = append(append(list, ""), small...)
-	} else if small := tuiLogo(len(bearSmall), descW); twoCol && small != nil {
-		desc = append(append(small, ""), desc...)
 	}
 	if twoCol {
 		// Two columns: the list │ what the selected item does.
@@ -885,7 +903,9 @@ func (m *tuiModel) viewOperation(h int) []string {
 		for _, l := range wrapLines(L("НЕ ПОЛНОСТЬЮ: ", "INCOMPLETE: ")+m.result, m.w) {
 			lines = append(lines, tsSand.Render(l))
 		}
-		lines = append(lines, tsMuted.Render(L("Во flash ничего не писалось. Сводка профиля и причина — в логе ниже.", "Nothing was written to flash. The profile summary and the reason are in the log below.")))
+		for _, l := range wrapLines(capFirst(m.resultNote)+" "+L("Сводка профиля и причина — в логе ниже.", "The profile summary and the reason are in the log below."), m.w) {
+			lines = append(lines, tsMuted.Render(l))
+		}
 	case m.resultBad:
 		for _, l := range wrapLines(L("ОШИБКА: ", "FAILED: ")+m.result, m.w) {
 			lines = append(lines, tsBad.Render(l))
@@ -901,6 +921,10 @@ func (m *tuiModel) viewOperation(h int) []string {
 		for _, l := range wrapLines(m.toast, m.w) {
 			lines = append(lines, tsSand.Render(l))
 		}
+	}
+	if !m.busy && m.lastOp != "" {
+		lines = append(lines, tsFaint.Render(L("сессия ", "session ")+"…"+tail(filepath.Base(m.lastSess), 9)+" · op …"+tail(m.lastOp, 4)+
+			L(" · полный путь — в логе", " · full path in the log")))
 	}
 	if !m.busy {
 		lines = append(lines, tsSand.Render(L("Enter — вернуться в меню", "Enter — back to the menu")))
@@ -1107,4 +1131,22 @@ func (m *tuiModel) viewHelp() string {
 		s = L(" окно меньше 80×24 ·", " window below 80×24 ·") + s
 	}
 	return bar(tsBar.Foreground(tcMuted), m.w, s, "")
+}
+
+// sinceOp returns the latest operation if it started after before.
+func sinceOp(a *App, before string) (sess, op string) {
+	sess, op = a.LastOperation()
+	if op == before {
+		return "", ""
+	}
+	return sess, op
+}
+
+// capFirst upper-cases the first letter of a sentence.
+func capFirst(s string) string {
+	r := []rune(s)
+	if len(r) > 0 {
+		r[0] = []rune(strings.ToUpper(string(r[0])))[0]
+	}
+	return string(r)
 }
