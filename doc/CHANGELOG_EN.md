@@ -205,6 +205,12 @@ Releases by CI.
   and shown as "○ COM6 free" between operations (a vanished port is asked again); status marks √ and ×
   instead of ✓ and ✗, which Windows console fonts lack; both bears are redrawn mirror-symmetric without the wink
   (the small one: half-cell eyes, a nose, a short smile; a test keeps them symmetric).
+- **HW PASS:** a stock restore on Nokia XG-040G-MD (AN7581) through the TUI on Windows, build `4f2b474`:
+  30/30 IBU chunks and BL2 written and verified, the stock firmware booted; the same backup used to stop
+  on the false CRC error fixed in `245a3ed`.
+- Result screen: a full-width banner, "√ DONE · <operation> — completed successfully" (green),
+  "× FAILED" (bordeaux) or "! INCOMPLETE" (sand), with the same result at the right of the top bar; after
+  a success the overall bar shows 100 % ("all done and verified"), not the last step announced.
 ---
 
 ## 0.2.0-test17 (2026-09-24 12:39–12:49)

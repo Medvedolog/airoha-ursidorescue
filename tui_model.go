@@ -61,6 +61,9 @@ var (
 	tsTabOn   = lipgloss.NewStyle().Bold(true).Foreground(tcDark).Background(tcAmber).Padding(0, 1)
 	tsBar     = lipgloss.NewStyle().Foreground(tcInk).Background(tcBarBg)
 	tsLogBar  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#d6e8a8")).Background(lipgloss.Color("#2f4418"))
+	tsDoneBar = lipgloss.NewStyle().Bold(true).Foreground(tcDark).Background(tcOK)
+	tsFailBar = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff")).Background(tcStopBg)
+	tsWarnBar = lipgloss.NewStyle().Bold(true).Foreground(tcDark).Background(tcSand)
 	tsHelpBar = lipgloss.NewStyle().Foreground(lipgloss.Color("#a9c27a")).Background(lipgloss.Color("#2f4418")) // continues the log frame
 	tsGutter  = lipgloss.NewStyle().Foreground(lipgloss.Color("#6f8f3a"))
 	tsBtn     = lipgloss.NewStyle().Foreground(tcInk).Border(lipgloss.RoundedBorder()).BorderForeground(tcFaint).Padding(0, 2)
@@ -251,6 +254,13 @@ func (m *tuiModel) finish(err error) {
 	switch {
 	case err == nil:
 		m.result = L("Готово.", "Done.")
+		// Every step ran and checked out: the overall bar says so, whatever
+		// the last step the wizard reported (BL2 is the step after 30/30).
+		if m.overall != nil {
+			done := *m.overall
+			done.Current, done.Detail = done.Total, L("всё выполнено и проверено", "all done and verified")
+			m.overall = &done
+		}
 	case errors.As(err, &pc):
 		m.result, m.resultWarn, m.resultNote = err.Error(), true, pc.effects
 		m.addEvent(app.Event{Level: app.LevelWarn, Label: "PROBE", Text: err.Error()})
@@ -904,6 +914,16 @@ func (m *tuiModel) viewTop() string {
 	}
 	brand := on(tsBrand, " UrsidoRescue")
 	right := m.stopLabel()
+	if !m.busy && m.result != "" {
+		switch {
+		case m.resultBad:
+			right = tsFailBar.Padding(0, 1).Render(L("× ОШИБКА", "× FAILED"))
+		case m.resultWarn:
+			right = tsWarnBar.Padding(0, 1).Render(L("! НЕ ПОЛНОСТЬЮ", "! INCOMPLETE"))
+		default:
+			right = tsDoneBar.Padding(0, 1).Render(L("√ ГОТОВО", "√ DONE"))
+		}
+	}
 	var left string
 	for _, l := range []string{
 		brand + on(tsFaint, " "+appVersion) + sep + port + full,
@@ -1100,14 +1120,16 @@ func (m *tuiModel) viewMenu(h int) []string {
 }
 
 func (m *tuiModel) viewOperation(h int) []string {
-	lines := []string{tsBrand.Render(m.opTitle)}
+	var lines []string
 	switch {
 	case m.busy:
+		lines = append(lines, tsBrand.Render(m.opTitle))
 		lines = append(lines, tsMuted.Render(L("выполняется…", "running…")))
 		for _, l := range wrapLines(m.stopNote(), m.w) {
 			lines = append(lines, tsMuted.Render(l))
 		}
 	case m.resultWarn:
+		lines = append(lines, bar(tsWarnBar, m.w, " ! "+L("НЕ ПОЛНОСТЬЮ", "INCOMPLETE")+" · "+m.opTitle, ""))
 		for _, l := range wrapLines(L("НЕ ПОЛНОСТЬЮ: ", "INCOMPLETE: ")+m.result, m.w) {
 			lines = append(lines, tsSand.Render(l))
 		}
@@ -1115,12 +1137,13 @@ func (m *tuiModel) viewOperation(h int) []string {
 			lines = append(lines, tsMuted.Render(l))
 		}
 	case m.resultBad:
+		lines = append(lines, bar(tsFailBar, m.w, " × "+L("ОШИБКА", "FAILED")+" · "+m.opTitle, ""))
 		for _, l := range wrapLines(L("ОШИБКА: ", "FAILED: ")+m.result, m.w) {
 			lines = append(lines, tsErr.Render(l))
 		}
 		lines = append(lines, tsMuted.Render(L("Никаких дополнительных write/erase команд после этой ошибки не отправлено.", "No further write/erase commands were sent after this error.")))
 	default:
-		lines = append(lines, tsOK.Render(m.result))
+		lines = append(lines, bar(tsDoneBar, m.w, " √ "+L("ГОТОВО", "DONE")+" · "+m.opTitle+L(" — завершено успешно", " — completed successfully"), ""))
 	}
 	if p := m.overall; p != nil {
 		lines = append(lines, m.overallLine(p))

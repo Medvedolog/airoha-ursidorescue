@@ -503,3 +503,25 @@ func TestBearSymmetric(t *testing.T) {
 		}
 	}
 }
+
+// A finished operation says so in a banner and the top bar, and the
+// overall bar reaches 100 % on success.
+func TestTUIResultBanner(t *testing.T) {
+	m, _, _ := testTUI(t, 100, 30)
+	m.busy, m.opTitle = true, "Восстановить заводскую Nokia"
+	m.Update(tuiProgressMsg{Label: "ВСЕГО", Current: 30, Total: 31, Overall: true, Detail: "последний шаг — BL2"})
+	m.finish(nil)
+	v := m.View()
+	if m.overall == nil || m.overall.Current != m.overall.Total || !strings.Contains(v, "100%") {
+		t.Fatalf("overall after success: %+v\n%s", m.overall, v)
+	}
+	if !strings.Contains(v, "√ ГОТОВО · Восстановить заводскую Nokia") || !strings.Contains(m.viewTop(), "√ ГОТОВО") {
+		t.Fatalf("no success banner:\n%s", v)
+	}
+	t.Log("\n" + v)
+	m.busy = true
+	m.finish(errors.New("CRC"))
+	if v := m.View(); !strings.Contains(v, "× ОШИБКА · ") || !strings.Contains(m.viewTop(), "× ОШИБКА") {
+		t.Fatalf("no failure banner:\n%s", v)
+	}
+}
