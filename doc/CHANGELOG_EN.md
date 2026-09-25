@@ -45,10 +45,11 @@ Releases by CI.
 | 0.2.0-test15 | `115c87c` | yes | network once per session, LAN prerequisites, colour, EOT |
 | 0.2.0-test16 | `8f72817` | yes | stock LAN assist: UART login and UID 0 |
 | 0.2.0-test17 | `6008769` | yes | Telnet-only passive plan, late credential refresh, auth hardening |
+| 0.2.0-test18 | branch | not yet | application layer and STOP, TUI by default, UrsusBoot install over UART, UART frame, false CRC error fixed |
 
 ---
 
-## Unreleased
+## 0.2.0-test18 (2026-09-25, branch `claude/gracious-hypatia-ditksb`, no pre-release yet)
 
 - Added `doc/` with Russian and English documentation: about the project and the Ursus family,
   operator guide, every menu in detail, architecture, and this complete changelog.

@@ -1,3 +1,28 @@
+# UrsidoRescue 0.2.0-test18
+
+Status: **CI PASS / HW PARTIAL.** A stock restore on MD (AN7581) through the new TUI on Windows
+passed on hardware (30/30 IBU chunks and BL2 written and verified, stock booted). The UrsusBoot UART
+install, the UART console frame and the file/folder dialogs are not hardware-tested yet; see
+`doc/HW_SMOKE_STAGE2_RU.md`.
+
+## 0.2.0-test18
+
+- Application layer (UI spec stage 1): one UI contract for every front end, sessions under
+  `work/sessions/<id>/` with operation IDs and `operations.jsonl`, the port leased by `PortOwner`,
+  STOP decided by the core (at once, at a checkpoint, or refused with a reason). Hardware smoke
+  PASS (`doc/HW_SMOKE_STAGE1_RU.md`).
+- Full-screen TUI (Bubble Tea) is the default; `--console` keeps the text menu, which is also the
+  fallback. Coloured log, a time column, busy COM port retry, port remembered between operations,
+  overall progress, result banners, F-keys, hideable log, risk shown under every item.
+- UART consoles keep an UrsidoRescue frame (header and key bar over an ANSI scroll region) around
+  the raw stream; it steps aside for alternate-screen programs and bootmenus.
+- Expert → Install UrsusBoot (UART): persistent UrsusBoot 0.1.0-alpha5-t67 on MD and MF, stock or
+  UBI layout, built from the device's own boot area read over the UART; pinned payloads.
+- Recent paths per operation and Browse (Windows file/folder dialogs, zenity/kdialog on Linux).
+- Fixed a false "readback CRC mismatch": the U-Boot prompt detector took the "=>" of crc32's
+  "==>" for a prompt when a UART read ended right after it; readback mismatches are also re-read
+  twice before failing.
+
 # UrsidoRescue 0.2.0-test17
 
 Status: **simulation candidate / HW PARTIAL.** test16's stock-LAN-assisted UART login remains

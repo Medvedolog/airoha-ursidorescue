@@ -1,6 +1,6 @@
 # Руководство оператора UrsidoRescue
 
-[English version](GUIDE_EN.md) · [Оглавление](README.md) · версия 0.2.0-test17
+[English version](GUIDE_EN.md) · [Оглавление](README.md) · версия 0.2.0-test18
 
 ## 0. Прежде чем начать
 
@@ -32,7 +32,7 @@
 3. Внутри:
 
 ```
-UrsidoRescue-0.2.0-test17/
+UrsidoRescue-0.2.0-test18/
   UrsidoRescue.exe            Windows x64
   UrsidoRescue-linux-amd64    Linux x86_64
   UrsidoRescue-linux-arm64    Linux aarch64 (Raspberry Pi 4/5, ARM-ноутбуки)
