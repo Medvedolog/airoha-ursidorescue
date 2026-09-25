@@ -42,10 +42,25 @@ func (r *recentPaths) remember(kind, path string) {
 	r.m[kind] = xs
 }
 
+// Browse answers: "*" opens the file dialog, "**" the folder dialog (only
+// where a folder is a valid answer, such as the stock backup directory).
+const (
+	browseFileKey = "*"
+	browseDirKey  = "**"
+)
+
+// The system dialogs, as variables so tests can stand in for them.
+var (
+	browseAvailable = filePickerAvailable
+	browseFile      = pickFile
+	browseDir       = pickDir
+)
+
 // askPathAnswer asks for a path offering this operation's recent paths and,
-// where the system has one, a file dialog ("*"). An answer that is a number
-// of the list picks that path; anything else is the typed path.
-func (a *App) askPathAnswer(prompt string) string {
+// where the system has one, a file dialog; dirOK adds a folder dialog. An
+// answer that is a number of the list picks that path; anything else is the
+// typed path.
+func (a *App) askPathAnswer(prompt string, dirOK bool) string {
 	failed := false
 	for {
 		recent := a.recent.list(a.opKind)
@@ -53,9 +68,15 @@ func (a *App) askPathAnswer(prompt string) string {
 		for i, p := range recent {
 			ch = append(ch, app.Choice{Key: strconv.Itoa(i + 1), Label: p})
 		}
-		browse := !failed && filePickerAvailable()
+		browse := !failed && browseAvailable()
 		if browse {
-			ch = append(ch, app.Choice{Key: "*", Label: L("Обзор… (окно выбора файла)", "Browse… (file dialog)")})
+			if dirOK {
+				ch = append(ch,
+					app.Choice{Key: browseFileKey, Label: L("Обзор: файл бэкапа…", "Browse: a backup file…")},
+					app.Choice{Key: browseDirKey, Label: L("Обзор: каталог с бэкапом…", "Browse: a backup folder…")})
+			} else {
+				ch = append(ch, app.Choice{Key: browseFileKey, Label: L("Обзор… (окно выбора файла)", "Browse… (file dialog)")})
+			}
 		}
 		title := ""
 		switch {
@@ -69,7 +90,8 @@ func (a *App) askPathAnswer(prompt string) string {
 		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= len(recent) {
 			return recent[n-1]
 		}
-		if v != "*" || !browse {
+		folder := dirOK && v == browseDirKey
+		if !browse || (v != browseFileKey && !folder) {
 			return v
 		}
 		dir := ""
@@ -79,11 +101,18 @@ func (a *App) askPathAnswer(prompt string) string {
 				dir = filepath.Dir(dir)
 			}
 		}
-		p, err := pickFile(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(prompt), ":")), dir)
+		title = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(prompt), ":"))
+		var p string
+		var err error
+		if folder {
+			p, err = browseDir(title, dir)
+		} else {
+			p, err = browseFile(title, dir)
+		}
 		switch {
 		case err != nil:
 			failed = true
-			a.status("!", L("Окно выбора файла недоступно: ", "The file dialog is unavailable: ")+err.Error()+L(". Введите путь вручную.", ". Type the path."), app.LevelWarn)
+			a.status("!", L("Окно выбора недоступно: ", "The file dialog is unavailable: ")+err.Error()+L(". Введите путь вручную.", ". Type the path."), app.LevelWarn)
 		case p != "":
 			return p
 		}

@@ -188,7 +188,8 @@ Releases by CI.
 - A new TUI operation starts without the previous one's overall progress.
 - File paths: up to three recent paths per operation in the run (a number or ↑↓), and "Browse…", the
   Windows file dialog (comdlg32, no cgo) or zenity/kdialog on Linux. A path is remembered as soon as it
-  checks out.
+  checks out. The stock backup can also be a folder: the Explorer window in folder mode
+  (IFileOpenDialog, FOS_PICKFOLDERS, over COM without cgo); on Linux `zenity --directory` / kdialog.
 ---
 
 ## 0.2.0-test17 (2026-09-24 12:39–12:49)

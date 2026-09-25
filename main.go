@@ -315,7 +315,7 @@ func (a *App) askResetOrStay() bool {
 		app.Choice{Key: "n", Label: L("Остаться в U-Boot", "Stay in U-Boot")})) != "n"
 }
 func (a *App) askPath(prompt string) (string, error) {
-	p := a.askPathAnswer(prompt)
+	p := a.askPathAnswer(prompt, false)
 	if p == "" {
 		return "", errors.New(L("пустой путь", "empty path"))
 	}
@@ -2156,7 +2156,7 @@ func (a *App) verifyManifestEntry(dir, selected string) error {
 	return nil
 }
 func (a *App) askStockSource() (string, error) {
-	p := a.askPathAnswer(L("Путь к бэкапу: файл mtd16 / all_flash (.bin или .bin.gz) или каталог с mtd16.bin(.gz): ", "Backup path: an mtd16 / all_flash file (.bin or .bin.gz) or a directory with mtd16.bin(.gz): "))
+	p := a.askPathAnswer(L("Путь к бэкапу: файл mtd16 / all_flash (.bin или .bin.gz) или каталог с mtd16.bin(.gz): ", "Backup path: an mtd16 / all_flash file (.bin or .bin.gz) or a directory with mtd16.bin(.gz): "), true)
 	if p == "" {
 		return "", errors.New(L("пустой путь", "empty path"))
 	}

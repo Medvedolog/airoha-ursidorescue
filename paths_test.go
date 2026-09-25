@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"ursidorescue/app"
@@ -44,5 +45,52 @@ func TestAskPathOffersRecent(t *testing.T) {
 	}
 	if _, err := a.askPath("Path: "); err == nil {
 		t.Fatal("an empty answer must still be an error")
+	}
+}
+
+func stubBrowse(t *testing.T, file, dir string) *[]string {
+	t.Helper()
+	sa, sf, sd := browseAvailable, browseFile, browseDir
+	t.Cleanup(func() { browseAvailable, browseFile, browseDir = sa, sf, sd })
+	var calls []string
+	browseAvailable = func() bool { return true }
+	browseFile = func(string, string) (string, error) { calls = append(calls, "file"); return file, nil }
+	browseDir = func(string, string) (string, error) { calls = append(calls, "dir"); return dir, nil }
+	return &calls
+}
+
+// The stock backup may be a folder: its ask offers both dialogs.
+func TestBrowseFolderForStock(t *testing.T) {
+	calls := stubBrowse(t, "/f/mtd16.bin.gz", "/backups/nokia")
+	rec := &app.Recorder{Answers: []string{"**", "*"}}
+	a := &App{ui: rec.UI(), opKind: "stock-restore"}
+	if got := a.askPathAnswer("Backup: ", true); got != "/backups/nokia" {
+		t.Fatalf("folder: %q", got)
+	}
+	keys := ""
+	for _, c := range rec.Asks[0].Choices {
+		keys += c.Key + " "
+	}
+	if keys != "* ** " {
+		t.Fatalf("choices %q", keys)
+	}
+	if got := a.askPathAnswer("Backup: ", true); got != "/f/mtd16.bin.gz" {
+		t.Fatalf("file: %q", got)
+	}
+	if strings.Join(*calls, ",") != "dir,file" {
+		t.Fatalf("dialogs %v", *calls)
+	}
+}
+
+// Elsewhere only a file makes sense: no folder dialog.
+func TestBrowseFileOnlyElsewhere(t *testing.T) {
+	calls := stubBrowse(t, "/f/x.itb", "/d")
+	rec := &app.Recorder{Answers: []string{"**"}}
+	a := &App{ui: rec.UI(), opKind: "itb-boot"}
+	if got := a.askPathAnswer("ITB: ", false); got != "**" {
+		t.Fatalf("got %q", got)
+	}
+	if len(rec.Asks[0].Choices) != 1 || rec.Asks[0].Choices[0].Key != "*" || len(*calls) != 0 {
+		t.Fatalf("choices %+v calls %v", rec.Asks[0].Choices, *calls)
 	}
 }
