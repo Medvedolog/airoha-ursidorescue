@@ -20,9 +20,9 @@ type tuiGroup struct {
 func tuiMenu() []tuiGroup {
 	return []tuiGroup{
 		{L("Главное", "Main"), []tuiItem{
-			{label: L("Восстановить заводскую Nokia", "Restore stock Nokia"), hint: "mtd16 / all_flash", kind: "stock-restore",
-				desc: L("Возвращает заводскую прошивку Nokia XG-040G-MD/MF из вашего бэкапа mtd16 или all_flash (MedveFlasher).\n\nКак: BootROM → RAM U-Boot → образ по LAN/TFTP частями, каждая часть сверяется; BL2 пишется последним.\n\nНужно: UART, кабель в LAN2/LAN3, на ПК 192.168.1.254/24, файл бэкапа.\n\nРиск: ERASE — перед записью подтверждение фразой.",
-					"Returns the stock Nokia XG-040G-MD/MF firmware from your mtd16 or all_flash backup (MedveFlasher).\n\nHow: BootROM → RAM U-Boot → the image in chunks over LAN/TFTP, each chunk verified; BL2 is written last.\n\nNeeds: UART, a cable in LAN2/LAN3, 192.168.1.254/24 on the PC, the backup file.\n\nRisk: ERASE; a typed phrase is required before writing.")},
+			{label: L("Восстановить заводскую Nokia", "Restore stock Nokia"), hint: L("mtd16 / all_flash, .bin или .gz", "mtd16 / all_flash, .bin or .gz"), kind: "stock-restore",
+				desc: L("Возвращает заводскую прошивку Nokia XG-040G-MD/MF из бэкапа: файл mtd16 или all_flash (.bin / .bin.gz) или каталог с mtd16.bin(.gz).\n\nКак: BootROM → RAM U-Boot → образ по LAN/TFTP частями со сверкой; BL2 последним.\n\nНужно: UART, LAN2/LAN3, ПК 192.168.1.254/24.\n\nРиск: ERASE — подтверждение фразой.",
+					"Returns the stock Nokia XG-040G-MD/MF firmware from a backup: an mtd16 or all_flash file (.bin / .bin.gz) or a directory with mtd16.bin(.gz).\n\nHow: BootROM → RAM U-Boot → the image in verified chunks over LAN/TFTP; BL2 last.\n\nNeeds: UART, LAN2/LAN3, PC at 192.168.1.254/24.\n\nRisk: ERASE; typed phrase.")},
 			{label: L("Восстановить FIP (UBI цел)", "Restore the FIP (UBI intact)"), hint: L("только UBI-том fip", "UBI volume fip only"), kind: "fip-repair",
 				desc: L("Только когда UBI цел, а испорчен том fip (BL31 + U-Boot): перезаписывает этот том встроенным RAM FIP или вашим .fip и сверяет CRC. Если UBI не подключается, мастер остановится — тогда нужен «Вернуть сток» или «Весь NAND».\n\nНужно: UART и LAN.\n\nРиск: WRITE — подтверждение фразой WRITE FIP.",
 					"Only when UBI is intact and the fip volume (BL31 + U-Boot) is damaged: overwrites that volume with the built-in RAM FIP or your .fip and checks the CRC. If UBI does not attach the wizard stops; then use Restore stock or Full NAND.\n\nNeeds: UART and LAN.\n\nRisk: WRITE; typed phrase WRITE FIP.")},

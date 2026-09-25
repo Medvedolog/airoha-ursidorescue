@@ -38,6 +38,7 @@ var (
 
 	tsBrand   = lipgloss.NewStyle().Bold(true).Foreground(tcAmber)
 	tsInk     = lipgloss.NewStyle().Foreground(tcInk)
+	tsMenu    = lipgloss.NewStyle().Bold(true).Foreground(tcInk)
 	tsUART    = lipgloss.NewStyle().Foreground(tcLime)
 	tsErr     = lipgloss.NewStyle().Foreground(tcBordo)
 	tsErrTag  = lipgloss.NewStyle().Bold(true).Foreground(tcBordo)
@@ -56,7 +57,8 @@ var (
 	tsTab     = lipgloss.NewStyle().Foreground(tcMuted).Padding(0, 1)
 	tsTabOn   = lipgloss.NewStyle().Bold(true).Foreground(tcDark).Background(tcAmber).Padding(0, 1)
 	tsBar     = lipgloss.NewStyle().Foreground(tcInk).Background(tcBarBg)
-	tsLogBar  = lipgloss.NewStyle().Bold(true).Foreground(tcSand).Background(tcLogBg)
+	tsLogBar  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#d6e8a8")).Background(lipgloss.Color("#2f4418"))
+	tsGutter  = lipgloss.NewStyle().Foreground(lipgloss.Color("#6f8f3a"))
 	tsBtn     = lipgloss.NewStyle().Foreground(tcInk).Border(lipgloss.RoundedBorder()).BorderForeground(tcFaint).Padding(0, 2)
 	tsBtnOn   = lipgloss.NewStyle().Bold(true).Foreground(tcDark).Background(tcSand).Border(lipgloss.RoundedBorder()).BorderForeground(tcSand).Padding(0, 2)
 	tsBox     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(tcAmber).Padding(0, 1)
@@ -885,21 +887,31 @@ func (m *tuiModel) viewMenu(h int) []string {
 	items := m.menu[m.tab].items
 	listW := 0
 	for _, it := range items {
-		listW = max(listW, lipgloss.Width(it.label)+4)
+		listW = max(listW, lipgloss.Width(it.label)+4, lipgloss.Width(it.hint)+6)
 	}
-	var list []string
-	for i, it := range items {
-		if i == m.cur {
-			list = append(list, tsSel.Render(" › "+it.label+" "))
-		} else {
-			list = append(list, tsInk.Render("   "+it.label))
+	// buildList draws the items; spaced gives each item two rows (the
+	// label in bold, its hint faint below), so the menu reads larger on a
+	// big screen. A terminal program cannot change its font size.
+	buildList := func(spaced bool) []string {
+		var list []string
+		for i, it := range items {
+			label := " › " + it.label + " "
+			if i == m.cur {
+				label = tsSel.Render(label + strings.Repeat(" ", max(0, listW-lipgloss.Width(label)-1)))
+			} else if spaced {
+				label = tsMenu.Render("   " + it.label)
+			} else {
+				label = tsInk.Render("   " + it.label)
+			}
+			list = append(list, label)
+			if spaced {
+				list = append(list, tsFaint.Render("     "+it.hint))
+			}
 		}
+		return list
 	}
 	it := items[m.cur]
 	var desc []string
-	if it.hint != "" {
-		desc = append(desc, tsSand.Render(it.hint))
-	}
 	if m.tab == 1 {
 		desc = append(desc, tsFaint.Render(L("сессия: ", "session: ")+displayDir(m.a.probeDir)))
 	}
@@ -916,6 +928,21 @@ func (m *tuiModel) viewMenu(h int) []string {
 			descText = append(descText, tsMuted.Render(l))
 		}
 	}
+	list := buildList(false)
+	spaced := false
+	if twoCol {
+		descLen := len(desc) + len(descText)
+		if it.hint != "" {
+			descLen++
+		}
+		// Spaced only with room left for at least the small bear under it.
+		if sp := buildList(true); 1+max(len(sp)+1+len(bearSmall), descLen) <= h {
+			list, spaced = sp, true
+		}
+	}
+	if !spaced && it.hint != "" {
+		desc = append([]string{tsSand.Render(it.hint)}, desc...)
+	}
 	// The winking bear only takes free space: big in the top-left corner when
 	// the whole menu and description still fit under it, otherwise small in
 	// the rows the list leaves empty beside a longer description, otherwise
@@ -929,7 +956,7 @@ func (m *tuiModel) viewMenu(h int) []string {
 	if logo := tuiLogo(h-need-1, m.w); logo != nil && len(logo) == len(bearBig) {
 		lines = append(append(logo, ""), lines...)
 	} else if small := tuiLogo(len(bearSmall), listW-1); twoCol && small != nil &&
-		len(list)+1+len(small) <= min(h-1, len(desc)+len(descText)) {
+		len(list)+1+len(small) <= h-1 {
 		list = append(append(list, ""), small...)
 	}
 	if twoCol {
@@ -1171,9 +1198,13 @@ func (m *tuiModel) viewLog(h int) []string {
 	// Long lines wrap: fill the rows from the newest line upwards.
 	var vis []string
 	for i := end - 1; i >= 0 && len(vis) < rows; i-- {
-		wrapped := lines[i].render(m.w-2, false)
+		l := lines[i]
+		if l.st.GetForeground() == tsInk.GetForeground() {
+			l.st = tsUART // plain log text is dark lime; status colours stay
+		}
+		wrapped := l.render(m.w-2, false)
 		for j := len(wrapped) - 1; j >= 0 && len(vis) < rows; j-- {
-			vis = append(vis, tsFaint.Render("│ ")+wrapped[j])
+			vis = append(vis, tsGutter.Render("│ ")+wrapped[j])
 		}
 	}
 	out := []string{bar(tsLogBar, m.w, left, right)}

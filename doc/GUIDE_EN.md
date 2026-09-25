@@ -244,8 +244,9 @@ operation the screen shows its result and session ID; the full path to the log d
 | l | language: Russian / English |
 | q, F10 | quit (when no operation runs) |
 
-The running log at the bottom shows no times, only events and UART output (router output in dark
-lime, errors in bordeaux, stage tags such as `[XMODEM]` in amber). Times stay in the session log files
+The running log at the bottom shows no times, only events and UART output (the log bar and plain log
+text are dark lime; only statuses are coloured: errors bordeaux, PASS green, stage tags such as `[XMODEM]`
+amber). Times stay in the session log files
 and show in the operation panel as a faint column.
 
 The UART terminal, UART Shell and "RAM U-Boot and prompt" open full screen as in the console; the TUI

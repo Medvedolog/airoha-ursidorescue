@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"ursidorescue/app"
 )
@@ -419,5 +420,25 @@ func TestTUILanguageToggle(t *testing.T) {
 	m.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("д")}) // l in the Russian layout
 	if uiLang != "en" || !strings.Contains(m.View(), "Restore stock Nokia") {
 		t.Fatalf("l must switch the language and rebuild the menu, lang=%s", uiLang)
+	}
+}
+
+func TestTUILogPlainTextIsLime(t *testing.T) {
+	saved := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor) // tests have no terminal: force colours
+	defer lipgloss.SetColorProfile(saved)
+	m, _, _ := testTUI(t, 80, 24)
+	m.Update(tuiEventMsg{Level: app.LevelNote, Text: "plain note"})
+	m.Update(tuiEventMsg{Level: app.LevelError, Text: "broken"})
+	v := m.View()
+	lime := tsUART.Render("plain note")
+	if !strings.Contains(lime, "\x1b[") {
+		t.Fatal("the colour profile did not apply; the test would prove nothing")
+	}
+	if !strings.Contains(v, lime) {
+		t.Error("plain log text must be dark lime")
+	}
+	if !strings.Contains(v, tsErr.Render("broken")) {
+		t.Error("statuses keep their colours")
 	}
 }

@@ -2084,7 +2084,7 @@ func (a *App) verifyManifestEntry(dir, selected string) error {
 	return nil
 }
 func (a *App) askStockSource() (string, error) {
-	p := strings.Trim(strings.TrimSpace(a.ask(L("Путь к MedveFlasher backup-каталогу ИЛИ canonical mtd16/all_flash файлу: ", "Path to a MedveFlasher backup directory OR a canonical mtd16/all_flash file: "))), "\"")
+	p := strings.Trim(strings.TrimSpace(a.ask(L("Путь к бэкапу: файл mtd16 / all_flash (.bin или .bin.gz) или каталог с mtd16.bin(.gz): ", "Backup path: an mtd16 / all_flash file (.bin or .bin.gz) or a directory with mtd16.bin(.gz): "))), "\"")
 	if p == "" {
 		return "", errors.New(L("пустой путь", "empty path"))
 	}
@@ -2118,7 +2118,7 @@ func (a *App) askStockSource() (string, error) {
 			present++
 		}
 	}
-	a.notef(L("[INFO] Найдены файлы бэкапа MedveFlasher: mtd0..mtd16, есть %d/17; источник восстановления=%s\n", "[INFO] MedveFlasher backup files found: mtd0..mtd16 present count=%d/17; restore source=%s\n"), present, filepath.Base(m))
+	a.notef(L("[INFO] В каталоге файлы бэкапа mtd0..mtd16: есть %d/17; источник восстановления=%s\n", "[INFO] Backup files mtd0..mtd16 in the directory: %d/17 present; restore source=%s\n"), present, filepath.Base(m))
 	if e = a.verifyManifestEntry(abs, m); e != nil {
 		return "", e
 	}

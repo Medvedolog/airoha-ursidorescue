@@ -6,33 +6,28 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// The winking teddy bear of the Ursus family, sitting, drawn with half-block
-// characters (▀▄█), which every console font has. The big one is generated
-// from ellipses (head, ears, body, arms, feet) with the eyes, nose and foot
-// pads cut out; the small one is drawn by hand for short terminals. The
-// right eye winks: its "▀▀▀" is the only accent.
+// The winking, smiling teddy-bear head of the Ursus family, drawn with
+// half-block characters (▀▄█), which every console font has. The big one is
+// generated from ellipses (head, ears) with the inner ears, the eyes, the
+// nose and the smile cut out; the small one is drawn by hand for short
+// terminals. The right eye winks: its "▀▀▀" is the only accent.
 var (
 	bearBig = []string{
-		" ▄██▄        ▄██▄",
-		" █  █▄▄████▄▄█  █",
-		" ▀██████████████▀",
-		" ████  ████▀▀▀███",
-		" ███████▀▀███████",
-		"  ▀█████▄▄█████▀",
-		"▄▄▄ ▀▀██████▀▀ ▄▄▄",
-		"███ ▄████████▄ ███",
-		"▀██ ██████████ ██▀",
-		"   ▄██████████▄",
-		"  ██▀▀██████▀▀██",
-		"  ▀▀▄█▀    ▀█▄▀▀",
+		" ████        ████",
+		"▀█  ██████████  █▀",
+		" ████████████████",
+		"▄████  ████▀▀▀███▄",
+		"████████▀▀████████",
+		" ████▀██▄▄██▀████",
+		"  ▀███▄▄▄▄▄▄███▀",
+		"      ▀▀▀▀▀▀",
 	}
 	bearSmall = []string{
 		"▄███▄    ▄███▄",
 		"▀█▄▄██████▄▄█▀",
 		" ██  ███▀▀▀██",
-		" ▀████▄▄████▀",
-		"██ ████████ ██",
-		"  ▄███▀▀███▄",
+		" ███▀█▄▄█▀███",
+		"  ▀▀█▄▄▄▄█▀▀",
 	}
 )
 
@@ -50,12 +45,12 @@ func tuiLogo(rows, width int) []string {
 		return nil
 	}
 	var text []string
-	first := 3 // the text starts beside the eyes
+	first := 2 // the text starts beside the eyes
 	if len(art) == len(bearBig) {
 		text = []string{
 			tsBrand.Render("UrsidoRescue") + " " + tsFaint.Render(appVersion),
 			tsMuted.Render(L("UART-спасатель роутеров Airoha", "UART rescue for Airoha routers")),
-			tsFaint.Render(L("семейство Ursus · только то, что вы подтвердили", "Ursus family · only what you confirm")),
+			tsFaint.Render(L("семейство Ursus · Bearborn utility", "Ursus family · Bearborn utility")),
 		}
 	} else {
 		first = 1
