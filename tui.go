@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/term"
 
 	"ursidorescue/app"
 )
@@ -18,7 +19,10 @@ import (
 // through app.UI (tuiUI below); the screen never decides anything itself.
 func (a *App) runTUI() error {
 	if t := os.Getenv("TERM"); t == "dumb" {
-		return errTUIUnavailable
+		return fmt.Errorf("TERM=dumb: %w", errTUIUnavailable)
+	}
+	if !term.IsTerminal(os.Stdin.Fd()) || !term.IsTerminal(os.Stdout.Fd()) {
+		return fmt.Errorf(L("ввод или вывод — не терминал: %w", "input or output is not a terminal: %w"), errTUIUnavailable)
 	}
 	a.portOwner() // created here, before any operation goroutine can race for it
 	bridge := &tuiUI{console: newConsoleUI(a.reader)}
@@ -30,7 +34,7 @@ func (a *App) runTUI() error {
 	return err
 }
 
-var errTUIUnavailable = errors.New("TERM=dumb: full-screen TUI unavailable")
+var errTUIUnavailable = errors.New("full-screen TUI unavailable")
 
 // tuiUI is app.UI for the TUI. Calls come from the operation goroutine: they
 // are turned into messages for the Bubble Tea loop, and Ask/Confirm wait for

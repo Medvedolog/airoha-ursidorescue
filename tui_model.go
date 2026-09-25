@@ -31,10 +31,19 @@ var (
 	tcBarBg  = lipgloss.Color("#3a2616")
 	tcLogBg  = lipgloss.Color("#2e1f16")
 	tcDark   = lipgloss.Color("#241610")
+	tcLime   = lipgloss.Color("#8fb04a") // device output: dark lime
+	tcBordo  = lipgloss.Color("#c4394f") // errors: bordeaux, readable on dark
+	tcAmber2 = lipgloss.Color("#c8873a")
+	tcTS     = lipgloss.Color("#5f4d3e") // timestamps: barely visible
 
 	tsBrand   = lipgloss.NewStyle().Bold(true).Foreground(tcAmber)
 	tsInk     = lipgloss.NewStyle().Foreground(tcInk)
-	tsUART    = lipgloss.NewStyle().Foreground(tcUART)
+	tsUART    = lipgloss.NewStyle().Foreground(tcLime)
+	tsErr     = lipgloss.NewStyle().Foreground(tcBordo)
+	tsErrTag  = lipgloss.NewStyle().Bold(true).Foreground(tcBordo)
+	tsTag     = lipgloss.NewStyle().Bold(true).Foreground(tcAmber)
+	tsAmber2  = lipgloss.NewStyle().Foreground(tcAmber2)
+	tsTS      = lipgloss.NewStyle().Foreground(tcTS)
 	tsMuted   = lipgloss.NewStyle().Foreground(tcMuted)
 	tsFaint   = lipgloss.NewStyle().Foreground(tcFaint)
 	tsSand    = lipgloss.NewStyle().Bold(true).Foreground(tcSand)
@@ -60,10 +69,16 @@ const (
 	logEvent
 )
 
+// tuiLogLine is one log entry. The time is kept apart from the text: the
+// running log hides it (the session files keep it), the operation panel
+// shows it as a faint column so texts stay aligned.
 type tuiLogLine struct {
-	kind tuiLogKind
-	text string
-	st   lipgloss.Style
+	kind  tuiLogKind
+	ts    string // "15:04:05", "" for notes and device output
+	label string // "XMODEM", "NET"…; drawn as a coloured tag
+	text  string
+	st    lipgloss.Style
+	lst   lipgloss.Style // label style
 }
 
 const tuiLogCap = 5000
@@ -102,7 +117,7 @@ type tuiModel struct {
 	tab, cur   int
 	busy       bool
 	opTitle    string
-	opEvents   []string
+	opEvents   []tuiLogLine
 	result     string
 	resultBad  bool
 	resultWarn bool // finished, but not everything asked was obtained
@@ -164,7 +179,9 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tuiStopMsg:
 		m.toast = tuiStopText(app.CancelState(msg))
 	case tuiPortMsg:
-		if msg.err != nil {
+		if errors.Is(msg.err, errPortInUse) {
+			m.toast = msg.err.Error() + L(". Закройте её и нажмите p ещё раз.", ". Close it and press p again.")
+		} else if msg.err != nil {
 			m.toast = msg.err.Error()
 		} else if msg.name != "" {
 			m.toast = L("Подключено: ", "Connected: ") + msg.name
@@ -237,7 +254,7 @@ func hotkey(k tea.KeyMsg) string {
 	case tea.KeyRunes:
 		if len(k.Runes) == 1 {
 			r := k.Runes[0]
-			if l, ok := map[rune]string{'а': "f", 'А': "f", 'ь': "m", 'Ь': "m", 'ы': "s", 'Ы': "s", 'з': "p", 'З': "p", 'й': "q", 'Й': "q", 'о': "j", 'л': "k"}[r]; ok {
+			if l, ok := map[rune]string{'а': "f", 'А': "f", 'ь': "m", 'Ь': "m", 'ы': "s", 'Ы': "s", 'з': "p", 'З': "p", 'й': "q", 'Й': "q", 'о': "j", 'л': "k", 'д': "l", 'Д': "l"}[r]; ok {
 				return l
 			}
 			return strings.ToLower(string(r))
@@ -293,6 +310,15 @@ func (m *tuiModel) key(k tea.KeyMsg) tea.Cmd {
 	switch {
 	case hk == "q":
 		return tea.Quit
+	case hk == "l":
+		// Switch the language; the menu is rebuilt in it.
+		if uiLang == "ru" {
+			setLang("en")
+		} else {
+			setLang("ru")
+		}
+		m.a.lang = uiLang
+		m.menu = tuiMenu()
 	case k.Type == tea.KeyLeft || k.Type == tea.KeyShiftTab:
 		m.tab = (m.tab + len(m.menu) - 1) % len(m.menu)
 		m.cur = 0
@@ -519,7 +545,9 @@ func (m *tuiModel) portKey(k tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		return func() tea.Msg {
-			if err := owner.Connect(name); err != nil {
+			if err := owner.Connect(name); errors.Is(err, errPortInUse) {
+				return tuiPortMsg{err: err}
+			} else if err != nil {
 				return tuiPortMsg{err: fmt.Errorf("%s: %w", name, err)}
 			}
 			return tuiPortMsg{name: name}
@@ -532,53 +560,96 @@ func (m *tuiModel) portKey(k tea.KeyMsg) tea.Cmd {
 
 // ---------- log ----------
 
-func eventStyle(l app.Level) lipgloss.Style {
+// tuiTone colours an event like the console and UrsusFlasher do: by its
+// level, and for plain events by what it says.
+func tuiTone(l app.Level, text string) (st, tag lipgloss.Style) {
 	switch l {
-	case app.LevelOK:
-		return tsOK
-	case app.LevelWarn:
-		return tsSand
 	case app.LevelError:
-		return tsBad
+		return tsErr, tsErrTag
+	case app.LevelWarn:
+		return tsSand, tsTag
+	case app.LevelOK:
+		return tsOK, tsTag
 	}
-	return tsInk
+	u := strings.ToUpper(text)
+	switch {
+	case strings.Contains(u, "PASS") || strings.Contains(u, "ГОТОВО") || strings.Contains(u, "ЗАВЕРШЕН") || strings.Contains(u, "[OK]"):
+		return tsOK, tsTag
+	case strings.Contains(u, "FAIL") || strings.Contains(u, "ERROR") || strings.Contains(u, "ОШИБ") ||
+		strings.Contains(u, "ОТМЕН") || strings.Contains(u, "CANCEL"):
+		return tsErr, tsErrTag
+	case strings.Contains(u, "WARN") || strings.Contains(u, "ВНИМАН"):
+		return tsSand, tsTag
+	case strings.Contains(u, "TFTP") || strings.Contains(u, "XMODEM") || strings.Contains(u, "ОЖИД") || strings.Contains(u, "WAIT"):
+		return tsAmber2, tsTag
+	}
+	return tsInk, tsTag
 }
 
 func (m *tuiModel) addEvent(e app.Event) {
-	st := eventStyle(e.Level)
 	switch e.Kind {
 	case app.KindSectionStart:
-		m.push(tuiLogLine{logEvent, "── " + e.Text + " ──", tsBrand})
+		m.push(tuiLogLine{kind: logEvent, text: "── " + e.Text + " ──", st: tsBrand})
 		return
 	case app.KindSectionEnd:
 		return
 	}
-	prefix := ""
+	ts := ""
 	if e.Level != app.LevelNote {
 		t := e.Time
 		if t.IsZero() {
 			t = time.Now()
 		}
-		prefix = t.Format("15:04:05") + " "
-	}
-	if e.Label != "" {
-		prefix += "[" + e.Label + "] "
+		ts = t.Format("15:04:05")
 	}
 	for i, l := range strings.Split(strings.Trim(e.Text, "\n"), "\n") {
 		l = stripTerminal(l)
+		st, tag := tuiTone(e.Level, e.Label+" "+l)
+		line := tuiLogLine{kind: logEvent, text: l, st: st, lst: tag}
 		if i == 0 {
-			l = prefix + l
-		} else if prefix != "" {
-			l = strings.Repeat(" ", len([]rune(prefix))) + l
+			line.ts, line.label = ts, e.Label
+		} else if e.Label != "" {
+			line.text = strings.Repeat(" ", len([]rune(e.Label))+3) + l
 		}
-		m.push(tuiLogLine{logEvent, l, st})
+		m.push(line)
 		if m.busy && strings.TrimSpace(l) != "" {
-			m.opEvents = append(m.opEvents, l)
+			m.opEvents = append(m.opEvents, line)
 			if len(m.opEvents) > 50 {
 				m.opEvents = m.opEvents[len(m.opEvents)-50:]
 			}
 		}
 	}
+}
+
+// render draws a log line wrapped to w. With withTS the time takes a faint
+// fixed column (blank for lines without a time) so texts stay aligned.
+func (l tuiLogLine) render(w int, withTS bool) []string {
+	col := ""
+	if withTS {
+		ts := l.ts
+		if ts == "" {
+			ts = strings.Repeat(" ", 8)
+		}
+		col = tsTS.Render(ts + " ")
+		w -= 9
+	}
+	head := ""
+	if l.label != "" {
+		head = "[" + l.label + "] "
+	}
+	var out []string
+	for i, t := range wrapLines(head+l.text, w) {
+		if i == 0 && head != "" {
+			t = l.lst.Render(head) + l.st.Render(strings.TrimPrefix(t, head))
+		} else {
+			t = l.st.Render(t)
+		}
+		if i > 0 && withTS {
+			col = tsTS.Render(strings.Repeat(" ", 9))
+		}
+		out = append(out, col+t)
+	}
+	return out
 }
 
 // addOutput appends raw device output; an unfinished line stays pending so
@@ -588,7 +659,7 @@ func (m *tuiModel) addOutput(s string) {
 	parts := strings.Split(s, "\n")
 	m.partial = parts[len(parts)-1]
 	for _, l := range parts[:len(parts)-1] {
-		m.push(tuiLogLine{logUART, uartLine(l), tsUART})
+		m.push(tuiLogLine{kind: logUART, text: uartLine(l), st: tsUART})
 	}
 }
 
@@ -623,7 +694,7 @@ func (m *tuiModel) filtered() []tuiLogLine {
 		}
 	}
 	if m.partial != "" && m.filter != 2 {
-		out = append(out, tuiLogLine{logUART, uartLine(m.partial), tsUART})
+		out = append(out, tuiLogLine{kind: logUART, text: uartLine(m.partial), st: tsUART})
 	}
 	return out
 }
@@ -741,10 +812,7 @@ func (m *tuiModel) viewTop() string {
 	if name, ok := m.a.portOwner().Connected(); ok {
 		port = on(tsOK, "● ") + on(tsInk, name)
 	}
-	op := ""
-	if m.busy && m.cancel.Op != "" {
-		op = on(tsFaint, "  op …"+tail(m.cancel.Op, 4))
-	}
+	op := "" // the operation ID is on the result screen, not here
 	sep := on(tsFaint, "  │  ")
 	brand := on(tsBrand, " UrsidoRescue")
 	right := m.stopLabel()
@@ -908,7 +976,7 @@ func (m *tuiModel) viewOperation(h int) []string {
 		}
 	case m.resultBad:
 		for _, l := range wrapLines(L("ОШИБКА: ", "FAILED: ")+m.result, m.w) {
-			lines = append(lines, tsBad.Render(l))
+			lines = append(lines, tsErr.Render(l))
 		}
 		lines = append(lines, tsMuted.Render(L("Никаких дополнительных write/erase команд после этой ошибки не отправлено.", "No further write/erase commands were sent after this error.")))
 	default:
@@ -933,13 +1001,13 @@ func (m *tuiModel) viewOperation(h int) []string {
 	room := h - len(lines)
 	var ev []string
 	for i := len(m.opEvents) - 1; i >= 0 && len(ev) < room; i-- {
-		w := wrapLines(m.opEvents[i], m.w)
+		w := m.opEvents[i].render(m.w, true)
 		for j := len(w) - 1; j >= 0 && len(ev) < room; j-- {
 			ev = append(ev, w[j])
 		}
 	}
 	for i := len(ev) - 1; i >= 0; i-- {
-		lines = append(lines, tsUART.Render(ev[i]))
+		lines = append(lines, ev[i])
 	}
 	return lines
 }
@@ -1103,9 +1171,9 @@ func (m *tuiModel) viewLog(h int) []string {
 	// Long lines wrap: fill the rows from the newest line upwards.
 	var vis []string
 	for i := end - 1; i >= 0 && len(vis) < rows; i-- {
-		wrapped := wrapLines(lines[i].text, m.w-2)
+		wrapped := lines[i].render(m.w-2, false)
 		for j := len(wrapped) - 1; j >= 0 && len(vis) < rows; j-- {
-			vis = append(vis, tsFaint.Render("│ ")+lines[i].st.Render(wrapped[j]))
+			vis = append(vis, tsFaint.Render("│ ")+wrapped[j])
 		}
 	}
 	out := []string{bar(tsLogBar, m.w, left, right)}
@@ -1125,7 +1193,7 @@ func (m *tuiModel) viewHelp() string {
 	case m.result != "":
 		s = L(" Enter — в меню · PgUp/PgDn лог · f фильтр · m лог крупно", " Enter — menu · PgUp/PgDn log · f filter · m large log")
 	default:
-		s = L(" ↑↓ пункт · ←→ раздел · Enter запуск · p порт · f фильтр лога · m лог крупно · q выход", " ↑↓ item · ←→ section · Enter run · p port · f log filter · m large log · q quit")
+		s = L(" ↑↓ пункт · ←→ раздел · Enter запуск · p порт · f фильтр лога · m лог крупно · l язык · q выход", " ↑↓ item · ←→ section · Enter run · p port · f log filter · m large log · l language · q quit")
 	}
 	if m.w < 80 || m.h < 24 {
 		s = L(" окно меньше 80×24 ·", " window below 80×24 ·") + s

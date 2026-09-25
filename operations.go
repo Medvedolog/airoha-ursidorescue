@@ -195,12 +195,8 @@ func (a *App) openPort() (Serial, error) {
 	owner := a.portOwner()
 	implicit := false
 	if _, ok := owner.Connected(); !ok {
-		name, err := a.choosePort()
-		if err != nil {
+		if err := a.connectChosenPort(owner); err != nil {
 			return nil, err
-		}
-		if err := owner.Connect(name); err != nil {
-			return nil, fmt.Errorf(L("не удалось открыть %s: %w", "open %s: %w"), name, err)
 		}
 		implicit = true
 	}
@@ -215,6 +211,37 @@ func (a *App) openPort() (Serial, error) {
 		return &oneShotPort{Port: p, owner: owner}, nil
 	}
 	return p, nil
+}
+
+// connectChosenPort asks for a port and connects it. A port held by another
+// program is not a failure: the operator is told to close that program and
+// may retry, pick another port or cancel.
+func (a *App) connectChosenPort(owner *app.PortOwner) error {
+	name, err := a.choosePort()
+	for err == nil {
+		err = owner.Connect(name)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, errPortInUse) || a.portOverride != "" {
+			return fmt.Errorf(L("не удалось открыть %s: %w", "open %s: %w"), name, err)
+		}
+		a.status(L("ПОРТ", "PORT"), err.Error(), app.LevelWarn)
+		v := a.askQuick(L("Закройте ту программу. Повторить (r), выбрать другой порт (p) или отменить (n)? [r]: ",
+			"Close that program. Retry (r), pick another port (p) or cancel (n)? [r]: "), "r",
+			app.Choice{Key: "r", Label: L("Повторить", "Retry")},
+			app.Choice{Key: "p", Label: L("Другой порт", "Another port")},
+			app.Choice{Key: "n", Label: L("Отмена", "Cancel")})
+		switch strings.ToLower(v) {
+		case "", "r", "к":
+			err = nil // the same port again
+		case "p", "з":
+			name, err = a.choosePort()
+		default:
+			return cancelledError{L("выбор порта отменён", "port choice cancelled")}
+		}
+	}
+	return err
 }
 
 // oneShotPort is a lease on a port connected just for one operation.

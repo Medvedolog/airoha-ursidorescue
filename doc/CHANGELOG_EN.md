@@ -94,6 +94,15 @@ Releases by CI.
     failed; the console output is unchanged;
   - a long confirmation is never cut: the answer line (phrase and input, or buttons) is pinned at the
     bottom and the text above scrolls with ↑/↓ and a "lines N–M of K" indicator.
+- **The TUI is the default.** Without flags the TUI opens; the old text menu is `--console` and the
+  automatic fallback when the TUI cannot run (not a terminal, `TERM=dumb`, an error). The language follows
+  the Windows display language (the locale on Linux); `l` switches it in the TUI.
+- TUI, after feedback from Windows: log events are coloured like the console and UrsusFlasher (stage tags
+  amber, PASS green, errors bordeaux), router output in dark lime; the running log shows no times (they
+  stay in the log files), the operation panel shows them as a faint column so text does not jump; the top
+  bar no longer shows "op …xxxx", which looked like a stray checksum.
+- A COM port held by another program is not an error: "held by another program, close it" with retry /
+  another port / cancel (console and TUI). On Linux a busy port is detected through `flock`.
 - TUI and menu texts, after the second review:
   - after an incomplete probe the result states what actually happened ("no flash write commands were
     sent", "ubi part was run: UBI may have changed its metadata", "FTP was enabled on the stock firmware",

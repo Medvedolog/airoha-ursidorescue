@@ -120,14 +120,16 @@ func main() { os.Exit(realMain()) }
 
 func realMain() int {
 	args, langSet := langFromArgs(os.Args[1:])
-	mode := "console"
+	// The full-screen TUI is the default; --console keeps the text menu,
+	// which is also the fallback whenever the TUI cannot run.
+	mode := "tui"
 	if len(args) > 0 && (args[0] == "--tui" || args[0] == "--console") {
 		mode = strings.TrimPrefix(args[0], "--")
 		args = args[1:]
 	}
 	interactive := len(args) == 0
-	if !langSet && !interactive {
-		langFromLocale()
+	if !langSet && (!interactive || mode == "tui") {
+		langFromSystem()
 	}
 	root, err := locateRoot()
 	if err != nil {
@@ -162,21 +164,21 @@ func realMain() int {
 		return 1
 	}
 	if mode == "tui" {
-		if !langSet {
-			langFromLocale()
-		}
 		a.lang = uiLang
 		err := a.runTUI()
 		if err == nil {
 			return 0
 		}
+		// Only an error brings the text menu: the TUI could not start or
+		// broke. The language is already chosen.
+		// Not a terminal (a pipe, a script) or TERM=dumb is expected and
+		// silent; anything else is reported.
 		if !errors.Is(err, errTUIUnavailable) {
-			fmt.Fprintln(os.Stderr, "[TUI]", err)
-			return 1
+			fmt.Fprintln(os.Stderr, L("[TUI] ошибка — открываю текстовое меню: ", "[TUI] failed; opening the text menu: ")+err.Error())
 		}
-		fmt.Fprintln(os.Stderr, L("[TUI] полноэкранный режим недоступен (TERM=dumb) — открываю консольное меню", "[TUI] full-screen mode unavailable (TERM=dumb); opening the console menu"))
 		a.front = newConsoleUI(a.reader)
 		a.ui, a.frontEnd = a.front, "console"
+		langSet = true
 	}
 	if !langSet {
 		a.chooseLanguage()

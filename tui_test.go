@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"ursidorescue/app"
 )
@@ -62,8 +63,11 @@ func TestTUIFits80x24(t *testing.T) {
 	m.Update(tuiProgressMsg{Label: "IBU", Current: 9, Total: 30, Detail: "chunk 10/30"})
 	m.Update(tuiCancelMsg{Mode: app.CancelAtCheckpoint, Checkpoint: "after chunk 10/30", Op: "op-x-a121"})
 	v := checkFits(t, m, "operation")
-	if !strings.Contains(v, "after chunk 10/30") || !strings.Contains(v, "…a121") {
-		t.Errorf("operation view lacks the STOP checkpoint or the op ID:\n%s", v)
+	if !strings.Contains(v, "after chunk 10/30") {
+		t.Errorf("operation view lacks the STOP checkpoint:\n%s", v)
+	}
+	if strings.Contains(m.viewTop(), "a121") {
+		t.Errorf("the top bar must not show the op ID (it read like a stray checksum); it belongs on the result screen")
 	}
 	m.Update(tuiConfirmMsg{req: confirmReq(), reply: make(chan string, 1)})
 	v = checkFits(t, m, "confirm dialog")
@@ -370,5 +374,50 @@ func TestTUIResultNamesTheSession(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("the full session path must be in the log")
+	}
+}
+
+func TestTUILogColumnsAndColours(t *testing.T) {
+	m, _, _ := testTUI(t, 80, 24)
+	m.busy = true
+	m.Update(tuiEventMsg{Level: app.LevelInfo, Label: "XMODEM", Text: "preloader sent"})
+	m.Update(tuiEventMsg{Level: app.LevelNote, Text: "a note without a time"})
+	m.Update(tuiEventMsg{Level: app.LevelError, Text: "write failed"})
+	var ev, note, errl tuiLogLine
+	for _, l := range m.log {
+		switch {
+		case strings.Contains(l.text, "preloader sent"):
+			ev = l
+		case strings.Contains(l.text, "a note"):
+			note = l
+		case strings.Contains(l.text, "write failed"):
+			errl = l
+		}
+	}
+	if ev.ts == "" || ev.label != "XMODEM" || note.ts != "" {
+		t.Fatalf("time and label must be kept apart: %+v / %+v", ev, note)
+	}
+	if errl.st.GetForeground() != tsErr.GetForeground() {
+		t.Error("errors must be drawn in bordeaux")
+	}
+	// Running log: no time. Operation panel: a time column, texts aligned.
+	logLine := ansi.Strip(ev.render(76, false)[0])
+	if strings.Contains(logLine, ev.ts) || !strings.HasPrefix(logLine, "[XMODEM] ") {
+		t.Errorf("the running log shows no time: %q", logLine)
+	}
+	a, b := ansi.Strip(ev.render(76, true)[0]), ansi.Strip(note.render(76, true)[0])
+	if !strings.HasPrefix(a, ev.ts+" ") || strings.Index(a, "[XMODEM]") != strings.Index(b, "a note") {
+		t.Errorf("the time column must keep texts aligned:\n%q\n%q", a, b)
+	}
+}
+
+func TestTUILanguageToggle(t *testing.T) {
+	saved := uiLang
+	defer setLang(saved)
+	setLang("ru")
+	m, _, _ := testTUI(t, 80, 24)
+	m.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("д")}) // l in the Russian layout
+	if uiLang != "en" || !strings.Contains(m.View(), "Restore stock Nokia") {
+		t.Fatalf("l must switch the language and rebuild the menu, lang=%s", uiLang)
 	}
 }

@@ -203,21 +203,26 @@ Windows:  double-click UrsidoRescue.exe   (or run it from cmd/PowerShell)
 Linux:    ./UrsidoRescue-linux-amd64
 ```
 
-The language is asked at start. Preset it with `--lang ru|en` (anywhere on the command line) or the
-`URSIDO_LANG=ru|en` environment variable. All menu items are described in [MENU_EN.md](MENU_EN.md).
+The full-screen interface (TUI) opens. The old text menu is `--console`; it also opens by itself when
+the TUI cannot run (input or output is not a terminal, `TERM=dumb`, a TUI error).
+
+The language follows the Windows display language (the locale on Linux); `l` switches it in the TUI.
+The `--console` text menu asks for it at start. Preset it with `--lang ru|en` (anywhere on the command
+line) or the `URSIDO_LANG=ru|en` environment variable. All menu items are described in [MENU_EN.md](MENU_EN.md).
 
 On an interactive terminal the program's messages are coloured (the UrsusBoot/UrsusFlasher
 palette). `NO_COLOR=1`, `TERM=dumb` or redirecting output to a file gives plain text. The router's own
 output and the UART logs are never coloured.
 
-**Full-screen mode (TUI):** `--tui` opens a full-terminal interface: the same menus as the console
+**Full-screen mode (TUI)** is the default: a full-terminal interface: the same menus as the console
 (Main, Porting, Expert), the UART and event log always at the bottom, confirmations in their own
 window. Handy over SSH, on a Raspberry Pi and on other Linux systems without a desktop; the terminal
 must be at least 80×24.
 
 ```
-./UrsidoRescue-linux-arm64 --tui
-UrsidoRescue.exe --tui --lang en
+./UrsidoRescue-linux-arm64
+UrsidoRescue.exe --lang en
+UrsidoRescue.exe --console      # the old text menu
 ```
 
 Next to the menu the TUI explains what the selected item does, what it needs and its risk. Yes/no
@@ -236,11 +241,15 @@ operation the screen shows its result and session ID; the full path to the log d
 | PgUp / PgDn, End | scroll the log, jump to new lines |
 | f, F2 | log filter: all / UART / events |
 | m, F3 | large log |
+| l | language: Russian / English |
 | q, F10 | quit (when no operation runs) |
 
+The running log at the bottom shows no times, only events and UART output (router output in dark
+lime, errors in bordeaux, stage tags such as `[XMODEM]` in amber). Times stay in the session log files
+and show in the operation panel as a faint column.
+
 The UART terminal, UART Shell and "RAM U-Boot and prompt" open full screen as in the console; the TUI
-comes back when you leave them. Without `--tui` the console menu starts as before. With `TERM=dumb`
-the TUI is unavailable: the program says so and opens the console menu. `NO_COLOR` turns colours off.
+comes back when you leave them. `NO_COLOR` turns colours off.
 
 **Command line:**
 

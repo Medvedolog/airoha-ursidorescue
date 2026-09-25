@@ -218,7 +218,7 @@ func probeUsage() string {
                      [--linux-user U] [--linux-password P] [--stock-lan-assist] [--stop-key S] [--redact] [--no-export] [--unsafe]
                      [--wake] [--ubi-attach]
   ursidorescue export [--input КАТАЛОГ] [--output КАТАЛОГ] [--redact]
-  ursidorescue --tui       полноэкранный интерфейс (без флага — консольное меню)
+  ursidorescue [--console] без флагов — полноэкранный интерфейс; --console — текстовое меню
   общий флаг: --lang ru|en (или переменная URSIDO_LANG)
 
 probe строго только читает: erase/write/saveenv/ubi part не отправляются. Неизвестному загрузчику
@@ -231,7 +231,7 @@ probe строго только читает: erase/write/saveenv/ubi part не 
                      [--linux-user U] [--linux-password P] [--stock-lan-assist] [--stop-key S] [--redact] [--no-export] [--unsafe]
                      [--wake] [--ubi-attach]
   ursidorescue export [--input DIR] [--output DIR] [--redact]
-  ursidorescue --tui       full-screen interface (without it: the console menu)
+  ursidorescue [--console] no flags: full-screen interface; --console: text menu
   common flag: --lang ru|en (or the URSIDO_LANG variable)
 
 probe is strictly read-only: no erase/write/saveenv/ubi part is sent. An unknown bootloader gets

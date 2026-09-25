@@ -64,6 +64,11 @@ The program lists the ports it finds:
 Enter a list number, a name (`COM6`, `/dev/ttyUSB0`), or on Windows just `6` → `COM6`. With one port,
 Enter picks it. Settings are always 115200 8N1, no flow control.
 
+A port held by another program (PuTTY, Arduino IDE, another terminal or a second UrsidoRescue) is not
+an error: the program says so, asks you to close that program and offers retry, another port or cancel.
+On Linux a busy port shows up through its exclusive lock (`flock`), which terminals such as picocom
+also take.
+
 ### Getting a RAM U-Boot through the BootROM
 
 The common procedure for main menu items 1–5, expert items 2–5 and the Porting Collector RAM U-Boot

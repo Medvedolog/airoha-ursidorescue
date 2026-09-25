@@ -14,6 +14,16 @@ var pGetConsoleMode = k32.NewProc("GetConsoleMode")
 var pSetConsoleMode = k32.NewProc("SetConsoleMode")
 var pGetConsoleScreenBufferInfo = k32.NewProc("GetConsoleScreenBufferInfo")
 var pReadConsoleInputW = k32.NewProc("ReadConsoleInputW")
+var pGetUserDefaultUILanguage = k32.NewProc("GetUserDefaultUILanguage")
+
+// systemLang is the Windows display language: Russian → "ru", else "en".
+func systemLang() string {
+	r, _, _ := pGetUserDefaultUILanguage.Call()
+	if r&0x3ff == 0x19 { // LANG_RUSSIAN
+		return "ru"
+	}
+	return "en"
+}
 
 func consoleRaw() (*consoleState, error) {
 	h := syscall.Handle(os.Stdin.Fd())

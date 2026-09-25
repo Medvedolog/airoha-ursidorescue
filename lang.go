@@ -53,7 +53,17 @@ func langFromArgs(args []string) ([]string, bool) {
 	return out, set
 }
 
-// langFromLocale is the default for non-interactive commands.
+// langFromSystem uses the system UI language (Windows has no LANG), else the
+// locale variables.
+func langFromSystem() {
+	if l := systemLang(); l != "" {
+		setLang(l)
+		return
+	}
+	langFromLocale()
+}
+
+// langFromLocale reads LC_ALL / LC_MESSAGES / LANG.
 func langFromLocale() {
 	for _, k := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
 		if v := strings.ToLower(os.Getenv(k)); v != "" {
