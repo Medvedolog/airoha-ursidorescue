@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"runtime"
+	"strings"
 	"testing"
 
 	"ursidorescue/app"
@@ -47,12 +48,9 @@ func TestBusyPortOffersRetry(t *testing.T) {
 			t.Fatalf("retry after closing the other program must connect: err=%v opens=%d", err, opens)
 		}
 		s.Close()
-		warned := false
-		for _, e := range rec.Events {
-			warned = warned || (e.Level == app.LevelWarn && errors.Is(portInUse("x"), errPortInUse))
-		}
-		if !warned {
-			t.Fatal("the operator must be told the port is busy")
+		q := rec.Asks[len(rec.Asks)-1]
+		if !strings.Contains(q.Title, "/dev/ttyFAKE0") || !errors.Is(portInUse("x"), errPortInUse) {
+			t.Fatalf("the question must name the busy port and say what to do: %q", q.Title)
 		}
 		if q := rec.Asks[len(rec.Asks)-1]; len(q.Quick) != 3 || q.Default != "r" {
 			t.Fatalf("retry / another port / cancel must be offered as buttons: %+v", q)

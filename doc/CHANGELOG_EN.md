@@ -101,6 +101,9 @@ Releases by CI.
   amber, PASS green, errors bordeaux), router output in dark lime; the running log shows no times (they
   stay in the log files), the operation panel shows them as a faint column so text does not jump; the top
   bar no longer shows "op …xxxx", which looked like a stray checksum.
+- Busy COM port: the dialog says which port is busy, what may hold it and what to do, with Retry / Another
+  port / Cancel buttons (Cancel was wrongly labelled No); the console letters `(r)` and `[1]` are not shown in
+  the TUI, which has buttons and a list instead.
 - A COM port held by another program is not an error: "held by another program, close it" with retry /
   another port / cancel (console and TUI). On Linux a busy port is detected through `flock`.
 - TUI and menu texts, after the second review:

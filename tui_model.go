@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -398,15 +399,21 @@ func (m *tuiModel) start(it tuiItem) tea.Cmd {
 	}
 }
 
+// quickLabel names a button. Only the generic yes/no parsed from "[y/N]"
+// are translated; answers with their own label (Cancel, Retry…) keep it.
 func quickLabel(c app.Choice) string {
-	switch c.Key {
-	case "y":
+	switch {
+	case c.Key == "y" && c.Label == "yes":
 		return L("Да", "Yes")
-	case "n":
+	case c.Key == "n" && c.Label == "no":
 		return L("Нет", "No")
 	}
 	return c.Label
 }
+
+// consoleLetters is the "(r) … [r]:" tail console prompts use; the TUI shows
+// buttons instead.
+var consoleLetters = regexp.MustCompile(`\s*\[[^\]]*\]\s*:?\s*$`)
 
 func (m *tuiModel) dialogKey(k tea.KeyMsg) tea.Cmd {
 	d := m.dlg
@@ -1136,7 +1143,16 @@ func (m *tuiModel) viewDialog(h int) []string {
 		if t := strings.TrimSpace(q.Title); t != "" {
 			add(&head, tsSand, t)
 		}
-		if p := strings.TrimSpace(q.Prompt); p != "" && p != ">" {
+		p := strings.TrimSpace(q.Prompt)
+		if len(q.Quick) > 0 || len(q.Choices) > 0 {
+			// Buttons replace the console's letters; a titled question needs
+			// no console prompt line at all.
+			p = strings.TrimSpace(consoleLetters.ReplaceAllString(p, ""))
+			if strings.TrimSpace(q.Title) != "" && len(q.Choices) == 0 {
+				p = ""
+			}
+		}
+		if p != "" && p != ">" {
 			add(&head, tsInk, p)
 		}
 		switch {

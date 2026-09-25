@@ -226,12 +226,19 @@ func (a *App) connectChosenPort(owner *app.PortOwner) error {
 		if !errors.Is(err, errPortInUse) || a.portOverride != "" {
 			return fmt.Errorf(L("не удалось открыть %s: %w", "open %s: %w"), name, err)
 		}
-		a.status(L("ПОРТ", "PORT"), err.Error(), app.LevelWarn)
-		v := a.askQuick(L("Закройте ту программу. Повторить (r), выбрать другой порт (p) или отменить (n)? [r]: ",
-			"Close that program. Retry (r), pick another port (p) or cancel (n)? [r]: "), "r",
-			app.Choice{Key: "r", Label: L("Повторить", "Retry")},
-			app.Choice{Key: "p", Label: L("Другой порт", "Another port")},
-			app.Choice{Key: "n", Label: L("Отмена", "Cancel")})
+		// The question says which port and what to do; the letters in the
+		// prompt are for the console, the TUI shows buttons instead.
+		v, _ := a.ui.Ask(app.AskRequest{Kind: app.AskText,
+			Title: err.Error() + ".\n" + L("Закройте эту программу и нажмите «Повторить» — или выберите другой порт.",
+				"Close that program and press Retry, or choose another port."),
+			Prompt: L("Повторить (r), другой порт (p) или отмена (n)? [r]: ", "Retry (r), another port (p) or cancel (n)? [r]: "),
+			Quick: []app.Choice{
+				{Key: "r", Label: L("Повторить", "Retry")},
+				{Key: "p", Label: L("Другой порт", "Another port")},
+				{Key: "n", Label: L("Отмена", "Cancel")},
+			},
+			Default: "r"})
+		v = strings.TrimSpace(v)
 		switch strings.ToLower(v) {
 		case "", "r", "к":
 			err = nil // the same port again

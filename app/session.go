@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -242,6 +243,9 @@ func (u *SessionUI) Progress(p Progress) {
 func (u *SessionUI) Ask(q AskRequest) (string, error) {
 	if q.Op == "" {
 		q.Op = u.Op
+	}
+	if q.Title != "" {
+		u.Session.LogEvent(time.Time{}, "ASK", strings.TrimSpace(q.Title))
 	}
 	u.Session.LogEvent(time.Time{}, "ASK", q.Prompt)
 	return u.Inner.Ask(q)

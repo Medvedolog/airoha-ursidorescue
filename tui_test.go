@@ -442,3 +442,19 @@ func TestTUILogPlainTextIsLime(t *testing.T) {
 		t.Error("statuses keep their colours")
 	}
 }
+
+func TestTUIBusyPortDialogReadsWell(t *testing.T) {
+	m, _, _ := testTUI(t, 80, 24)
+	title := portInUse("COM10").Error() + ".\n" + L("Закройте эту программу и нажмите «Повторить» — или выберите другой порт.", "Close that program and press Retry, or choose another port.")
+	m.Update(tuiAskMsg{req: app.AskRequest{Title: title,
+		Prompt:  "Retry (r), another port (p) or cancel (n)? [r]: ",
+		Quick:   []app.Choice{{Key: "r", Label: "Retry"}, {Key: "p", Label: "Another port"}, {Key: "n", Label: "Cancel"}},
+		Default: "r"}, reply: make(chan string, 1)})
+	v := checkFits(t, m, "busy port dialog")
+	if !strings.Contains(v, "COM10") || !strings.Contains(v, "Cancel") {
+		t.Fatalf("the dialog must name the port and keep the Cancel label:\n%s", v)
+	}
+	if strings.Contains(v, "(r)") || strings.Contains(v, "[r]") || strings.Contains(v, L("Нет", "No")+" ") {
+		t.Fatalf("console letters must not show in the TUI, nor a generic No:\n%s", v)
+	}
+}
