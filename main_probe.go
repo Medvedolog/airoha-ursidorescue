@@ -52,9 +52,22 @@ func (a *App) runProbeIn(kind string, risk app.Risk, r probeRequest) (probeResul
 	err := a.runProbeOperation(kind, risk, func() error {
 		var e error
 		res, e = a.runProbe(r)
+		if e == nil && res.code != exitProbeOK {
+			e = probeCodeError{res.code}
+		}
 		return e
 	})
 	return res, err
+}
+
+// probeCodeError is a probe that finished without everything that was asked
+// (no UART, no BootROM/U-Boot/Linux, an incomplete profile). Nothing was
+// written; the session records it as failed and front ends must not show it
+// as success.
+type probeCodeError struct{ code int }
+
+func (e probeCodeError) Error() string {
+	return fmt.Sprintf(L("probe завершён с кодом %d: %s", "probe finished with code %d: %s"), e.code, exitText(e.code))
 }
 
 func (a *App) analyzeProbe(dir string) (*probe.Profile, error) {
@@ -423,8 +436,8 @@ func (a *App) portingMenu() error {
 		if v == "0" {
 			return nil
 		}
-		err := a.portingItem(v)
-		if err != nil {
+		// A finished probe with a non-zero code already printed its result.
+		if err := a.portingItem(v); err != nil && !errors.As(err, new(probeCodeError)) {
 			a.showProbeErr(err)
 		}
 	}
@@ -491,7 +504,7 @@ func (a *App) menuProbe(o probe.Options, export bool) error {
 		risk = app.UBIMetadata
 	}
 	res, err := a.runProbeIn("probe", risk, probeRequest{dir: a.currentProbeDir(), opts: o, export: export, interactive: true})
-	if err != nil {
+	if err != nil && !errors.As(err, new(probeCodeError)) {
 		return err
 	}
 	a.noteProbeSummary(res.profile)
@@ -499,7 +512,7 @@ func (a *App) menuProbe(o probe.Options, export bool) error {
 		a.noteln("Porting bundle:", res.bundle)
 	}
 	a.notef(L("Результат probe: код %d (%s)\n", "Probe result: code %d (%s)\n"), res.code, exitText(res.code))
-	return nil
+	return err
 }
 
 func (a *App) menuBootROM() error {
@@ -525,12 +538,12 @@ func (a *App) menuBootROM() error {
 		}
 		o := probe.Options{Layers: probe.AllLayers(), Ask: a.probeAsk, Timeout: 5 * time.Minute}
 		res, err := a.runProbeIn("probe-ram-uboot", app.NonPersistent, probeRequest{dir: a.currentProbeDir(), opts: o, ramUBoot: pref.ID, interactive: true})
-		if err != nil {
+		if err != nil && !errors.As(err, new(probeCodeError)) {
 			return err
 		}
 		a.noteProbeSummary(res.profile)
 		a.notef(L("Результат probe: код %d (%s)\n", "Probe result: code %d (%s)\n"), res.code, exitText(res.code))
-		return nil
+		return err
 	}
 	return errors.New(L("неверный выбор", "invalid choice"))
 }

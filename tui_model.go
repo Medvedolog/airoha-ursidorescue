@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -69,8 +70,10 @@ const tuiLogCap = 5000
 type tuiDialog struct {
 	ask     *tuiAskMsg
 	confirm *tuiConfirmMsg
-	port    []string // port chooser: detected ports
+	isPort  bool     // the port chooser (p); port may be empty
+	port    []string // detected ports
 	cursor  int
+	scroll  int // first shown line of a dialog taller than the screen
 }
 
 type (
@@ -91,16 +94,17 @@ type tuiModel struct {
 
 	w, h int
 
-	menu      []tuiGroup
-	tab, cur  int
-	busy      bool
-	opTitle   string
-	opEvents  []string
-	result    string
-	resultBad bool
-	progress  *app.Progress
-	cancel    app.CancelState
-	lastCtrlC time.Time
+	menu       []tuiGroup
+	tab, cur   int
+	busy       bool
+	opTitle    string
+	opEvents   []string
+	result     string
+	resultBad  bool
+	resultWarn bool // finished, but not everything asked was obtained
+	progress   *app.Progress
+	cancel     app.CancelState
+	lastCtrlC  time.Time
 
 	log     []tuiLogLine
 	partial string
@@ -192,9 +196,14 @@ func (m *tuiModel) openDialog(d *tuiDialog) {
 func (m *tuiModel) finish(err error) {
 	m.busy = false
 	m.progress = nil
+	m.resultBad, m.resultWarn = false, false
+	var pc probeCodeError
 	switch {
 	case err == nil:
-		m.result, m.resultBad = L("Готово.", "Done."), false
+		m.result = L("Готово.", "Done.")
+	case errors.As(err, &pc):
+		m.result, m.resultWarn = err.Error(), true
+		m.addEvent(app.Event{Level: app.LevelWarn, Label: "PROBE", Text: err.Error()})
 	default:
 		m.result, m.resultBad = err.Error(), true
 		m.addEvent(app.Event{Level: app.LevelError, Label: L("СТОП", "STOP"), Text: err.Error()})
@@ -284,7 +293,7 @@ func (m *tuiModel) key(k tea.KeyMsg) tea.Cmd {
 	case k.Type == tea.KeyDown || hk == "j":
 		m.cur = (m.cur + 1) % len(items)
 	case hk == "p":
-		m.dlg = &tuiDialog{port: listSerialPorts()}
+		m.dlg = &tuiDialog{isPort: true, port: listSerialPorts()}
 		m.input.SetValue("")
 		m.input.Focus()
 	case k.Type == tea.KeyEnter:
@@ -356,15 +365,19 @@ func quickLabel(c app.Choice) string {
 func (m *tuiModel) dialogKey(k tea.KeyMsg) tea.Cmd {
 	d := m.dlg
 	switch {
-	case d.port != nil:
+	case d.isPort:
 		return m.portKey(k)
 	case d.confirm != nil:
 		form := app.FormFor(d.confirm.req.Risk)
 		if d.confirm.req.Phrase == "" && form == app.FormButton {
 			// Two buttons: Cancel (default) and Confirm.
 			switch {
-			case k.Type == tea.KeyLeft || k.Type == tea.KeyRight || k.Type == tea.KeyTab || k.Type == tea.KeyUp || k.Type == tea.KeyDown:
+			case k.Type == tea.KeyLeft || k.Type == tea.KeyRight || k.Type == tea.KeyTab || k.Type == tea.KeyShiftTab:
 				d.cursor = 1 - d.cursor
+			case k.Type == tea.KeyUp:
+				d.scroll--
+			case k.Type == tea.KeyDown:
+				d.scroll++
 			case k.Type == tea.KeyEnter:
 				m.answer(d.confirm.reply, map[int]string{0: "n", 1: "y"}[d.cursor])
 			case k.Type == tea.KeyEsc || hotkey(k) == "n" || hotkey(k) == "т":
@@ -375,6 +388,12 @@ func (m *tuiModel) dialogKey(k tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		switch k.Type {
+		case tea.KeyUp:
+			d.scroll-- // the text above the pinned answer line
+			return nil
+		case tea.KeyDown:
+			d.scroll++
+			return nil
 		case tea.KeyEsc:
 			m.answer(d.confirm.reply, "")
 			return nil
@@ -422,10 +441,14 @@ func (m *tuiModel) quickKey(k tea.KeyMsg) tea.Cmd {
 	d := m.dlg
 	q := d.ask.req.Quick
 	switch k.Type {
-	case tea.KeyLeft, tea.KeyUp, tea.KeyShiftTab:
+	case tea.KeyLeft, tea.KeyShiftTab:
 		d.cursor = (d.cursor + len(q) - 1) % len(q)
-	case tea.KeyRight, tea.KeyDown, tea.KeyTab:
+	case tea.KeyRight, tea.KeyTab:
 		d.cursor = (d.cursor + 1) % len(q)
+	case tea.KeyUp:
+		d.scroll--
+	case tea.KeyDown:
+		d.scroll++
 	case tea.KeyEnter:
 		m.answer(d.ask.reply, q[d.cursor].Key)
 	case tea.KeyEsc:
@@ -858,6 +881,11 @@ func (m *tuiModel) viewOperation(h int) []string {
 	switch {
 	case m.busy:
 		lines = append(lines, tsMuted.Render(L("выполняется… (s — СТОП)", "running… (s — STOP)")))
+	case m.resultWarn:
+		for _, l := range wrapLines(L("НЕ ПОЛНОСТЬЮ: ", "INCOMPLETE: ")+m.result, m.w) {
+			lines = append(lines, tsSand.Render(l))
+		}
+		lines = append(lines, tsMuted.Render(L("Во flash ничего не писалось. Сводка профиля и причина — в логе ниже.", "Nothing was written to flash. The profile summary and the reason are in the log below.")))
 	case m.resultBad:
 		for _, l := range wrapLines(L("ОШИБКА: ", "FAILED: ")+m.result, m.w) {
 			lines = append(lines, tsBad.Render(l))
@@ -904,19 +932,27 @@ func (m *tuiModel) progressLine(p *app.Progress) string {
 	return s + tsInk.Render(p.Detail)
 }
 
+// viewDialog draws the dialog in at most h lines. The answer part (input,
+// buttons, key hints) is pinned at the bottom; the text above it scrolls
+// with ↑/↓ when it does not fit, so the operator can always read every
+// action and the STOP policy and still see where to answer.
 func (m *tuiModel) viewDialog(h int) []string {
 	d := m.dlg
 	width := min(m.w-2, 90)
 	inner := width - 4
-	var body []string
-	add := func(st lipgloss.Style, s string) {
+	var head, foot []string
+	focus := -1 // a head line that must stay visible (the selected item)
+	add := func(dst *[]string, st lipgloss.Style, s string) {
 		for _, l := range wrapLines(s, inner) {
-			body = append(body, st.Render(l))
+			*dst = append(*dst, st.Render(l))
 		}
 	}
 	list := func(items []string, cursor int) {
 		for i, s := range items {
-			body = append(body, choiceLine(i == cursor, s, inner))
+			if i == cursor {
+				focus = len(head)
+			}
+			head = append(head, choiceLine(i == cursor, s, inner))
 		}
 	}
 	buttons := func(labels []string, cursor int) {
@@ -928,77 +964,98 @@ func (m *tuiModel) viewDialog(h int) []string {
 				bs = append(bs, tsBtn.Render(l))
 			}
 		}
-		body = append(body, strings.Split(lipgloss.JoinHorizontal(lipgloss.Top, bs...), "\n")...)
+		foot = append(foot, strings.Split(lipgloss.JoinHorizontal(lipgloss.Top, bs...), "\n")...)
 	}
 	rule := tsFaint.Render(strings.Repeat("─", inner))
 	switch {
-	case d.port != nil:
-		add(tsSand, L("UART-порты", "UART ports"))
-		body = append(body, rule)
+	case d.isPort:
+		add(&head, tsSand, L("UART-порты", "UART ports"))
+		head = append(head, rule)
+		if len(d.port) == 0 {
+			add(&head, tsMuted, L("Порты не найдены. Проверьте кабель и драйвер (CH340, CP210x, FTDI) или введите имя вручную: COM6, /dev/ttyUSB0.", "No ports found. Check the cable and the driver (CH340, CP210x, FTDI) or type a name: COM6, /dev/ttyUSB0."))
+		}
 		list(append(append([]string{}, d.port...), L("Отключить порт", "Disconnect")), d.cursor)
-		body = append(body, rule)
-		add(tsFaint, L("↑ ↓ выбрать · Enter подключить · Esc закрыть · имя можно ввести вручную:", "↑ ↓ pick · Enter connect · Esc close · or type a name:"))
-		body = append(body, m.input.View())
+		foot = append(foot, rule)
+		add(&foot, tsFaint, L("↑ ↓ выбрать · Enter подключить · Esc закрыть · имя можно ввести вручную:", "↑ ↓ pick · Enter connect · Esc close · or type a name:"))
+		foot = append(foot, m.input.View())
 	case d.confirm != nil:
 		r := d.confirm.req
 		title := r.Title
 		if title == "" {
 			title = L("Подтверждение", "Confirmation")
 		}
-		add(tsSand, title)
+		add(&head, tsSand, title)
 		for _, s := range r.Summary {
-			add(tsInk, s)
+			add(&head, tsInk, s)
 		}
-		body = append(body, rule)
-		add(tsBad, L("Риск: ", "Risk: ")+string(r.Risk))
+		head = append(head, rule)
+		add(&head, tsBad, L("Риск: ", "Risk: ")+string(r.Risk))
 		for i, act := range r.Actions {
-			add(tsInk, fmt.Sprintf("%d. %s", i+1, act))
+			add(&head, tsInk, fmt.Sprintf("%d. %s", i+1, act))
 		}
 		if r.CancelNote != "" {
-			add(tsMuted, L("Остановка: ", "Stopping: ")+r.CancelNote)
+			add(&head, tsMuted, L("Остановка: ", "Stopping: ")+r.CancelNote)
 		}
-		body = append(body, rule)
+		foot = append(foot, rule)
 		if r.Phrase != "" {
-			add(tsInk, L("Введите точно ", "Type exactly ")+tsSand.Render(r.Phrase)+L(" и Enter · Esc — отмена", " and Enter · Esc cancels"))
-			body = append(body, m.input.View())
+			add(&foot, tsInk, L("Введите точно ", "Type exactly ")+tsSand.Render(r.Phrase)+L(" и Enter · Esc — отмена", " and Enter · Esc cancels"))
+			foot = append(foot, m.input.View())
 		} else {
 			buttons([]string{L("Отмена", "Cancel"), L("Подтвердить", "Confirm")}, d.cursor)
-			add(tsFaint, L("← → выбрать · Enter", "← → pick · Enter"))
+			add(&foot, tsFaint, L("← → выбрать · Enter", "← → pick · Enter"))
 		}
 	case d.ask != nil:
 		q := d.ask.req
 		if t := strings.TrimSpace(q.Title); t != "" {
-			add(tsSand, t)
+			add(&head, tsSand, t)
 		}
 		if p := strings.TrimSpace(q.Prompt); p != "" && p != ">" {
-			add(tsInk, p)
+			add(&head, tsInk, p)
 		}
 		switch {
 		case len(q.Choices) > 0:
-			body = append(body, rule)
+			head = append(head, rule)
 			var items []string
 			for _, c := range q.Choices {
 				items = append(items, c.Key+". "+c.Label)
 			}
 			list(items, d.cursor)
-			body = append(body, rule)
-			add(tsFaint, L("↑ ↓ выбрать · Enter подтвердить · или введите ответ вручную:", "↑ ↓ pick · Enter confirm · or type an answer:"))
-			body = append(body, m.input.View())
+			foot = append(foot, rule)
+			add(&foot, tsFaint, L("↑ ↓ выбрать · Enter подтвердить · или введите ответ вручную:", "↑ ↓ pick · Enter confirm · or type an answer:"))
+			foot = append(foot, m.input.View())
 		case len(q.Quick) > 0:
 			var labels []string
 			for _, c := range q.Quick {
 				labels = append(labels, quickLabel(c))
 			}
 			buttons(labels, d.cursor)
-			add(tsFaint, L("← → выбрать · Enter", "← → pick · Enter"))
+			add(&foot, tsFaint, L("← → выбрать · Enter", "← → pick · Enter"))
 		default:
-			body = append(body, m.input.View())
-			add(tsFaint, L("Enter — ответить", "Enter — answer"))
+			foot = append(foot, m.input.View())
+			add(&foot, tsFaint, L("Enter — ответить", "Enter — answer"))
 		}
 	}
-	if room := h - 2; room > 0 && len(body) > room {
-		body = append(body[:room-1], tsFaint.Render("…"))
+	room := h - 2 - len(foot) // border
+	if room < len(head) {
+		room-- // the scroll indicator line
+		room = max(1, room)
+		if focus >= 0 {
+			// Keep the selected item in view.
+			if focus < d.scroll {
+				d.scroll = focus
+			} else if focus >= d.scroll+room {
+				d.scroll = focus - room + 1
+			}
+		}
+		d.scroll = max(0, min(d.scroll, len(head)-room))
+		shown := append([]string{}, head[d.scroll:d.scroll+room]...)
+		more := L(fmt.Sprintf("↑ ↓ прокрутка текста · строки %d–%d из %d", d.scroll+1, d.scroll+room, len(head)),
+			fmt.Sprintf("↑ ↓ scroll the text · lines %d–%d of %d", d.scroll+1, d.scroll+room, len(head)))
+		head = append(shown, tsSand.Render(more))
+	} else {
+		d.scroll = 0
 	}
+	body := append(head, foot...)
 	return strings.Split(tsBox.Width(width).Render(strings.Join(body, "\n")), "\n")
 }
 

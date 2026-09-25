@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -71,7 +72,7 @@ func TestTUIFits80x24(t *testing.T) {
 			t.Errorf("confirm dialog at 80x24 lacks %q:\n%s", want, v)
 		}
 	}
-	m.dlg = &tuiDialog{port: []string{"/dev/ttyUSB0", "/dev/ttyUSB1"}}
+	m.dlg = &tuiDialog{isPort: true, port: []string{"/dev/ttyUSB0", "/dev/ttyUSB1"}}
 	checkFits(t, m, "port dialog")
 	m.dlg, m.logMax = nil, true
 	checkFits(t, m, "maximized log")
@@ -246,6 +247,71 @@ func TestTUILogo(t *testing.T) {
 			if last := m.menu[tab].items[len(m.menu[tab].items)-1].label; !strings.Contains(v, last) {
 				t.Errorf("%dx%d tab %d: the logo must not push %q off the menu", sz[0], sz[1], tab, last)
 			}
+		}
+	}
+}
+
+func TestTUIPortDialogWithoutPorts(t *testing.T) {
+	m, _, _ := testTUI(t, 80, 24)
+	m.dlg = &tuiDialog{isPort: true} // detection found nothing (nil)
+	m.input.Focus()
+	v := checkFits(t, m, "empty port dialog")
+	if !strings.Contains(v, L("Порты не найдены", "No ports found")) {
+		t.Fatalf("an empty port list must say so and offer manual entry:\n%s", v)
+	}
+	typeKeys(m, "/dev/ttyUSB9")
+	cmd := m.key(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("Enter with a typed name must try to connect it")
+	}
+	msg, ok := cmd().(tuiPortMsg)
+	if !ok || msg.err == nil || !strings.Contains(msg.err.Error(), "/dev/ttyUSB9") {
+		t.Fatalf("the typed port must be the one connected, got %+v", msg)
+	}
+}
+
+func TestTUIProbeCodeIsNotSuccess(t *testing.T) {
+	m, _, _ := testTUI(t, 80, 24)
+	m.busy, m.opTitle = true, "Full probe"
+	m.finish(probeCodeError{exitNoUBoot})
+	if m.resultBad || !m.resultWarn {
+		t.Fatalf("a probe with a non-zero code is incomplete, not success or a crash: bad=%v warn=%v", m.resultBad, m.resultWarn)
+	}
+	v := m.View()
+	if strings.Contains(v, L("Готово.", "Done.")) || !strings.Contains(v, L("НЕ ПОЛНОСТЬЮ", "INCOMPLETE")) || !strings.Contains(v, exitText(exitNoUBoot)) {
+		t.Fatalf("the result must name the probe code and never say Done:\n%s", v)
+	}
+	var pc probeCodeError
+	if !errors.As(error(probeCodeError{exitIncomplete}), &pc) || pc.code != exitIncomplete {
+		t.Fatal("probeCodeError must be recognisable through errors.As")
+	}
+}
+
+func TestTUIConfirmAnswerAlwaysVisible(t *testing.T) {
+	m, _, _ := testTUI(t, 80, 24)
+	req := confirmReq()
+	req.Actions = nil
+	for i := 1; i <= 14; i++ {
+		req.Actions = append(req.Actions, fmt.Sprintf("step %02d: a long description of what this step writes and how it is verified afterwards", i))
+	}
+	req.CancelNote = strings.Repeat("a long STOP policy sentence; ", 6)
+	m.Update(tuiConfirmMsg{req: req, reply: make(chan string, 1)})
+	v := checkFits(t, m, "long confirm")
+	for _, want := range []string{"RESTORE STOCK BACKUP", "› ", "step 01"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("a long confirmation must still show %q:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, "step 14") {
+		t.Fatal("the test needs a confirmation taller than the screen")
+	}
+	for i := 0; i < 60; i++ {
+		m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	}
+	v = checkFits(t, m, "long confirm scrolled")
+	for _, want := range []string{"step 14", "STOP policy", "RESTORE STOCK BACKUP"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("after scrolling, %q must be visible with the phrase still pinned:\n%s", want, v)
 		}
 	}
 }

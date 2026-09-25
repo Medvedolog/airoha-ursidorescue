@@ -86,6 +86,14 @@ Releases by CI.
   questions and short options (`bl2/ubi`, reset / stay) are buttons, lists use highlighted arrows with the
   `[1]` default preselected; hotkeys work with the Russian layout and through F2/F3/F4/F10; long lines wrap
   at words. `AskRequest` gained `Quick` and `Default` for this; the console does not show them.
+- TUI, after the branch review:
+  - the port chooser (`p`) with no detected ports is no longer empty: it says no ports were found and
+    accepts a typed name, like the console;
+  - a probe with a non-zero code (no UART, no BootROM/U-Boot/Linux, an incomplete profile) is no longer a
+    green "Done": the result says INCOMPLETE with the code and reason, and the session is recorded as
+    failed; the console output is unchanged;
+  - a long confirmation is never cut: the answer line (phrase and input, or buttons) is pinned at the
+    bottom and the text above scrolls with ↑/↓ and a "lines N–M of K" indicator.
 - TUI: the logo is a winking ASCII bear with the UrsidoRescue name and version: big in the top-left
   corner when the height allows, otherwise small in a free corner of the menu; it never pushes the menu or
   the description off the screen.
