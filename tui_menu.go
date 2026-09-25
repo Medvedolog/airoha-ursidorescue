@@ -41,8 +41,8 @@ func tuiMenu() []tuiGroup {
 		}},
 		{L("Портирование", "Porting"), []tuiItem{
 			{label: L("Полный probe нового устройства", "Full probe of a new device"), hint: "+ porting bundle", porting: "1",
-				desc: L("Автоматически: BootROM → U-Boot → Linux. Flash не записывает; включение FTP на stock-прошивке, если понадобится, спросит отдельно. Собирает SoC, NAND, разметку, env, DTB, сеть; создаёт ursus-profile-v1 и porting bundle для UrsusBoot.\n\nНужно: UART; включить устройство после старта, для Linux-части — перезагрузить по просьбе программы.\n\nНезнакомому загрузчику или приглашению probe ничего не отправляет.",
-					"Automatic: BootROM → U-Boot → Linux. Writes no flash; enabling FTP on stock firmware, if needed, is asked separately. Collects SoC, NAND, layout, env, DTB, network; builds ursus-profile-v1 and a porting bundle for UrsusBoot.\n\nNeeds: UART; power the device on after starting, power-cycle it when asked for the Linux part.\n\nThe probe sends nothing to an unknown loader or prompt.")},
+				desc: L("Автоматически: BootROM → U-Boot → Linux. Flash не записывает; включение FTP, если понадобится, спросит отдельно. Собирает SoC, NAND, разметку, env, DTB, сеть → ursus-profile-v1 и porting bundle.\n\nНужно: UART; включить устройство после старта, для Linux — перезагрузить по просьбе.\n\nНезнакомому загрузчику или приглашению ничего не отправляет.",
+					"Automatic: BootROM → U-Boot → Linux. Writes no flash; enabling FTP, if needed, is asked separately. Collects SoC, NAND, layout, env, DTB, network → ursus-profile-v1 and a porting bundle.\n\nNeeds: UART; power the device on after starting, power-cycle it when asked for Linux.\n\nSends nothing to an unknown loader or prompt.")},
 			{label: L("Профиль BootROM", "BootROM profile"), hint: L("наблюдать / Press x / RAM U-Boot", "observe / Press x / RAM U-Boot"), porting: "2",
 				desc: L("Только BootROM: наблюдать, ответить x на «Press x» и проверить XMODEM, или (только Nokia MD/MF) загрузить RAM U-Boot и собрать профиль через него.",
 					"BootROM only: observe, answer 'Press x' and check XMODEM, or (Nokia MD/MF only) load the RAM U-Boot and collect through it.")},

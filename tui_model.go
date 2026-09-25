@@ -58,6 +58,7 @@ var (
 	tsTabOn   = lipgloss.NewStyle().Bold(true).Foreground(tcDark).Background(tcAmber).Padding(0, 1)
 	tsBar     = lipgloss.NewStyle().Foreground(tcInk).Background(tcBarBg)
 	tsLogBar  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#d6e8a8")).Background(lipgloss.Color("#2f4418"))
+	tsHelpBar = lipgloss.NewStyle().Foreground(lipgloss.Color("#a9c27a")).Background(lipgloss.Color("#2f4418")) // continues the log frame
 	tsGutter  = lipgloss.NewStyle().Foreground(lipgloss.Color("#6f8f3a"))
 	tsBtn     = lipgloss.NewStyle().Foreground(tcInk).Border(lipgloss.RoundedBorder()).BorderForeground(tcFaint).Padding(0, 2)
 	tsBtnOn   = lipgloss.NewStyle().Bold(true).Foreground(tcDark).Background(tcSand).Border(lipgloss.RoundedBorder()).BorderForeground(tcSand).Padding(0, 2)
@@ -880,9 +881,11 @@ func (m *tuiModel) viewMenu(h int) []string {
 			tabs = append(tabs, tsTab.Render(g.title))
 		}
 	}
-	head := strings.Join(tabs, " ") + tsFaint.Render("   ← → раздел · ↑ ↓ пункт · Enter запуск")
-	if uiLang == "en" {
-		head = strings.Join(tabs, " ") + tsFaint.Render("   ← → section · ↑ ↓ item · Enter run")
+	head := strings.Join(tabs, " ")
+	// Navigation hints sit under the list, where the eye ends reading it.
+	nav := []string{
+		tsFaint.Render(L("   ↑ ↓  пункт  ·  Enter  запуск", "   ↑ ↓  item  ·  Enter  run")),
+		tsFaint.Render(L("   ← →  раздел", "   ← →  section")),
 	}
 	items := m.menu[m.tab].items
 	listW := 0
@@ -915,7 +918,7 @@ func (m *tuiModel) viewMenu(h int) []string {
 	if m.tab == 1 {
 		desc = append(desc, tsFaint.Render(L("сессия: ", "session: ")+displayDir(m.a.probeDir)))
 	}
-	lines := []string{head}
+	lines := []string{head, ""} // a blank row sets the tabs apart from the list
 	descW := m.w - listW - 3
 	twoCol := descW >= 30
 	var descText []string
@@ -936,9 +939,14 @@ func (m *tuiModel) viewMenu(h int) []string {
 			descLen++
 		}
 		// Spaced only with room left for at least the small bear under it.
-		if sp := buildList(true); 1+max(len(sp)+1+len(bearSmall), descLen) <= h {
+		if sp := buildList(true); 2+max(len(sp)+1+len(nav)+1+len(bearSmall), descLen) <= h {
 			list, spaced = sp, true
 		}
+	}
+	// The hints go under the list when they fit; the help bar at the bottom
+	// always has the same keys.
+	if 2+len(list)+1+len(nav) <= h {
+		list = append(append(list, ""), nav...)
 	}
 	if !spaced && it.hint != "" {
 		desc = append([]string{tsSand.Render(it.hint)}, desc...)
@@ -947,16 +955,16 @@ func (m *tuiModel) viewMenu(h int) []string {
 	// the whole menu and description still fit under it, otherwise small in
 	// the rows the list leaves empty beside a longer description, otherwise
 	// not at all. The description always wins.
-	need := 1 + len(list)
+	need := 2 + len(list)
 	if twoCol {
-		need = 1 + max(len(list), len(desc)+len(descText))
+		need = 2 + max(len(list), len(desc)+len(descText))
 	} else {
 		need += 1 + len(desc) + len(descText)
 	}
 	if logo := tuiLogo(h-need-1, m.w); logo != nil && len(logo) == len(bearBig) {
 		lines = append(append(logo, ""), lines...)
 	} else if small := tuiLogo(len(bearSmall), listW-1); twoCol && small != nil &&
-		len(list)+1+len(small) <= h-1 {
+		2+len(list)+1+len(small) <= h {
 		list = append(append(list, ""), small...)
 	}
 	if twoCol {
@@ -1229,7 +1237,7 @@ func (m *tuiModel) viewHelp() string {
 	if m.w < 80 || m.h < 24 {
 		s = L(" окно меньше 80×24 ·", " window below 80×24 ·") + s
 	}
-	return bar(tsBar.Foreground(tcMuted), m.w, s, "")
+	return bar(tsHelpBar, m.w, s, "")
 }
 
 // sinceOp returns the latest operation if it started after before.

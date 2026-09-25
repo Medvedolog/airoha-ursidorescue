@@ -115,6 +115,8 @@ Releases by CI.
   - the result screen shows the session and operation IDs, the full log path is in the log;
   - at 80×24 the item description always fits: while idle the log shrinks to 3 rows and the bear only
     takes free space.
+- TUI: a blank row sets the tabs apart from the list; the navigation hints moved under the menu list (when
+  they fit; the bottom help bar always has the same keys); the help bar is dark lime like the log frame.
 - TUI: the logo is a teddy-bear head with a wink and a smile (big 8 rows, small 5), captioned "Ursus family ·
   Bearborn utility"; on a big screen menu items are spaced, bold, with their hint below; the log bar and
   plain log text are dark lime, only statuses are coloured.
