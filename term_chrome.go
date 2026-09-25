@@ -105,7 +105,8 @@ func chromeFooter(w int, ci chromeInfo) string {
 	if ci.simple {
 		keys = []string{L("Ctrl+] / Ctrl+Q назад", "Ctrl+] / Ctrl+Q back")}
 	} else {
-		keys = []string{L("Ctrl+] меню", "Ctrl+] menu"), L("Ctrl+Q назад", "Ctrl+Q back")}
+		keys = []string{L("F2 XMODEM →", "F2 XMODEM →"), L("F3 XMODEM ←", "F3 XMODEM ←"), L("F4 строки/RAW", "F4 line/RAW"),
+			L("F10 выход", "F10 quit"), L("Ctrl+] меню", "Ctrl+] menu")}
 	}
 	pager := L("Ctrl+P пейджер", "Ctrl+P pager")
 	if ci.pager {
@@ -145,7 +146,9 @@ func chromePlate(w int, title, port string, simple bool) string {
 	if simple {
 		lines = append(lines, tsInk.Render(L("Ctrl+] или Ctrl+Q — назад в меню · Ctrl+P — пейджер", "Ctrl+] or Ctrl+Q back to the menu · Ctrl+P pager")))
 	} else {
-		lines = append(lines, tsInk.Render(L("Ctrl+] — меню: XMODEM, построчный ввод, лог · Ctrl+Q — назад · Ctrl+P — пейджер", "Ctrl+] menu: XMODEM, line input, log · Ctrl+Q back · Ctrl+P pager")))
+		lines = append(lines, tsInk.Render(L("F2 — XMODEM отправить · F3 — XMODEM принять · F4 — построчный/прозрачный · F10 или Ctrl+Q — назад",
+			"F2 XMODEM send · F3 XMODEM receive · F4 line/raw · F10 or Ctrl+Q back")))
+		lines = append(lines, tsInk.Render(L("Ctrl+] — меню (то же и путь к логу) · Ctrl+P — пейджер", "Ctrl+] menu (the same, and the log path) · Ctrl+P pager")))
 	}
 	lines = append(lines, tsMuted.Render(L("Пустой экран — это нормально: ждём вывод устройства. Нажмите Enter, чтобы увидеть приглашение.",
 		"An empty screen is normal: waiting for the device. Press Enter to see its prompt.")))

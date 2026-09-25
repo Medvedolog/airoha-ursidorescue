@@ -244,12 +244,12 @@ func (a *App) run() error {
 	fmt.Println()
 	for {
 		fmt.Println(L("Главное меню", "Main menu"))
-		fmt.Println(L("  1. Восстановить заводскую Nokia из mtd16/all_flash backup", "  1. Restore stock Nokia firmware from an mtd16/all_flash backup"))
-		fmt.Println(L("  2. Восстановить FIP, если UBI цел", "  2. Restore the FIP if UBI is intact"))
-		fmt.Println(L("  3. Восстановить полный physical NAND image (256 MiB)", "  3. Restore a full physical NAND image (256 MiB)"))
-		fmt.Println(L("  4. Загрузить OpenWrt recovery ITB в RAM", "  4. Boot an OpenWrt recovery ITB from RAM"))
+		fmt.Println(L("  1. Восстановление заводской Nokia из бэкапа mtd16/all_flash", "  1. Restore stock Nokia firmware from an mtd16/all_flash backup"))
+		fmt.Println(L("  2. Восстановление FIP, если UBI цел", "  2. Restore the FIP if UBI is intact"))
+		fmt.Println(L("  3. Восстановление полного образа NAND (256 МиБ)", "  3. Restore a full physical NAND image (256 MiB)"))
+		fmt.Println(L("  4. Загрузка OpenWrt recovery ITB в RAM", "  4. Boot an OpenWrt recovery ITB from RAM"))
 		fmt.Println(L("  5. Диагностика NAND / MTD / U-Boot", "  5. NAND / MTD / U-Boot diagnostics"))
-		fmt.Println(L("  6. Собрать пакет логов для отчёта", "  6. Build a log bundle for a report"))
+		fmt.Println(L("  6. Сборка пакета логов для отчёта", "  6. Build a log bundle for a report"))
 		fmt.Println(L("  7. Портирование / исследование оборудования (read-only probe новых Airoha)", "  7. PORTING / HARDWARE DISCOVERY (read-only probe of new Airoha devices)"))
 		fmt.Println(bold(L("  8. Экспертный режим", "  8. Expert mode")))
 		fmt.Println(L("  0. Выход", "  0. Exit"))
@@ -1920,8 +1920,8 @@ func (a *App) fipRepairWizard() error {
 	}
 	a.noteln(L("\nВсе read-only gates пройдены. Будет перезаписан ТОЛЬКО существующий UBI volume fip.", "\nAll read-only gates passed. ONLY the existing UBI volume fip will be overwritten."))
 	if e = a.confirmOp(app.Write, "WRITE FIP", []string{
-		L("перезаписать существующий UBI-том fip", "overwrite the existing UBI volume fip"),
-		L("прочитать том обратно и сверить CRC32", "read the volume back and compare CRC32"),
+		L("перезапись существующего UBI-тома fip", "overwrite the existing UBI volume fip"),
+		L("чтение тома обратно и сверка CRC32", "read the volume back and compare CRC32"),
 	}); e != nil {
 		return e
 	}
@@ -2289,9 +2289,9 @@ func (a *App) stockRestoreWizard() error {
 	}
 	a.noteln(L("\nВНИМАНИЕ: будет полностью очищен OpenWrt UBI region, затем восстановлен stock mtd16; BL2 пишется ПОСЛЕДНИМ.", "\nWARNING: the OpenWrt UBI region will be erased completely, then stock mtd16 restored; BL2 is written LAST."))
 	if e = a.confirmOp(app.Erase, "RESTORE STOCK BACKUP", []string{
-		L("стереть область ubi (mtd erase ubi)", "erase the ubi region (mtd erase ubi)"),
-		fmt.Sprintf(L("записать %d частей заводской области с проверкой каждой", "write %d stock chunks, each read back"), len(prep.chunks)),
-		L("записать BL2 последним и проверить", "write BL2 last and read it back"),
+		L("стирание области ubi (mtd erase ubi)", "erase the ubi region (mtd erase ubi)"),
+		fmt.Sprintf(L("запись %d частей заводской области с проверкой каждой", "write %d stock chunks, each read back"), len(prep.chunks)),
+		L("запись BL2 последним и его проверка", "write BL2 last and read it back"),
 	}); e != nil {
 		return e
 	}
@@ -2478,9 +2478,9 @@ func (a *App) physicalRestoreWizard() error {
 	}
 	a.noteln(L("Будет восстановлен raw physical image; UBI region erase/write/readback, BL2 LAST.", "The raw physical image will be restored; UBI region erase/write/readback, BL2 LAST."))
 	if e = a.confirmOp(app.Erase, "RESTORE PHYSICAL NAND", []string{
-		L("стереть область ubi (mtd erase ubi)", "erase the ubi region (mtd erase ubi)"),
-		fmt.Sprintf(L("записать %d частей образа с проверкой каждой", "write %d image chunks, each read back"), len(chunks)),
-		L("записать BL2 последним и проверить", "write BL2 last and read it back"),
+		L("стирание области ubi (mtd erase ubi)", "erase the ubi region (mtd erase ubi)"),
+		fmt.Sprintf(L("запись %d частей образа с проверкой каждой", "write %d image chunks, each read back"), len(chunks)),
+		L("запись BL2 последним и его проверка", "write BL2 last and read it back"),
 	}); e != nil {
 		return e
 	}
@@ -2614,13 +2614,13 @@ func (a *App) expertMenu() error {
 	for {
 		fmt.Println(L("\nЭкспертный режим", "\nExpert mode"))
 		fmt.Println(L("  1. UART-терминал + XMODEM (история ↑/↓, построчный ввод, лог)", "  1. UART terminal + XMODEM (↑/↓ history, line input, logging)"))
-		fmt.Println(L("  2. Запустить RAM U-Boot и оставить prompt", "  2. Start RAM U-Boot and leave the prompt"))
-		fmt.Println(L("  3. Записать существующий UBI volume из файла", "  3. Write an existing UBI volume from a file"))
-		fmt.Println(L("  4. Записать raw range в MTD bl2/ubi", "  4. Write a raw range into MTD bl2/ubi"))
+		fmt.Println(L("  2. Запуск RAM U-Boot с prompt", "  2. Start RAM U-Boot and leave the prompt"))
+		fmt.Println(L("  3. Запись существующего UBI-тома из файла", "  3. Write an existing UBI volume from a file"))
+		fmt.Println(L("  4. Raw-запись диапазона в MTD bl2/ubi", "  4. Write a raw range into MTD bl2/ubi"))
 		fmt.Println(L("  5. Диагностика", "  5. Diagnostics"))
 		fmt.Println(L("  6. Прозрачная UART-консоль (ничего не отправляет сама)", "  6. Transparent UART console (sends nothing by itself)"))
-		fmt.Println(L("  7. Установить UrsusBoot (UART, MD/MF)", "  7. Install UrsusBoot (UART, MD/MF)"))
-		fmt.Println(L("  8. Вернуть или обновить vanilla U-Boot (UART, UBI)", "  8. Return or update vanilla U-Boot (UART, UBI)"))
+		fmt.Println(L("  7. Установка UrsusBoot (UART, MD/MF)", "  7. Install UrsusBoot (UART, MD/MF)"))
+		fmt.Println(L("  8. Возврат или обновление vanilla U-Boot (UART, UBI)", "  8. Return or update vanilla U-Boot (UART, UBI)"))
 		fmt.Println(L("  0. Назад", "  0. Back"))
 		v := a.ask(L("Выбор: ", "Choice: "))
 		ops := map[string]string{"1": "terminal", "2": "ram-uboot", "3": "ubi-volume", "4": "raw-mtd", "5": "diagnostics", "6": "shell", "7": "ursusboot-install", "8": "vanilla-uboot"}
@@ -2696,8 +2696,8 @@ func (a *App) expertUBIVolume() error {
 		return e
 	}
 	if e = a.confirmOp(app.Write, "WRITE UBI VOLUME "+name, []string{
-		fmt.Sprintf(L("перезаписать существующий UBI-том %s", "overwrite the existing UBI volume %s"), name),
-		L("прочитать том обратно и сверить CRC32", "read the volume back and compare CRC32"),
+		fmt.Sprintf(L("перезапись существующего UBI-тома %s", "overwrite the existing UBI volume %s"), name),
+		L("чтение тома обратно и сверка CRC32", "read the volume back and compare CRC32"),
 	}); e != nil {
 		return e
 	}
@@ -2767,8 +2767,8 @@ func (a *App) expertRawMTD() error {
 	}
 	exact := fmt.Sprintf("WRITE RAW %s 0x%x", strings.ToUpper(target), off)
 	if e = a.confirmOp(app.Write, exact, []string{
-		fmt.Sprintf(L("записать 0x%x байт в %s со смещения 0x%x (без стирания)", "write 0x%x bytes into %s at offset 0x%x (no erase)"), st.Size(), target, off),
-		L("прочитать обратно и сверить CRC32", "read back and compare CRC32"),
+		fmt.Sprintf(L("запись 0x%x байт в %s со смещения 0x%x (без стирания)", "write 0x%x bytes into %s at offset 0x%x (no erase)"), st.Size(), target, off),
+		L("чтение обратно и сверка CRC32", "read back and compare CRC32"),
 	}); e != nil {
 		return e
 	}

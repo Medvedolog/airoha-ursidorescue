@@ -151,6 +151,10 @@ type tuiModel struct {
 	// steps and commands, the menu gets the room.
 	logHidden bool
 
+	menuNeed int    // rows the menu needs without the bear (menuLayout probe)
+	bearKey  string // window size the big-bear decision was made for
+	bearBig  bool
+
 	dlg   *tuiDialog
 	input textinput.Model
 	toast string
@@ -994,7 +998,36 @@ func wrapLines(text string, w int) []string {
 	return out
 }
 
-func (m *tuiModel) viewMenu(h int) []string {
+func (m *tuiModel) viewMenu(h int) []string { return m.menuLayout(h, false) }
+
+// bigBear says whether the big bear fits above the menu on every tab and
+// with every item's description at this size, so it does not grow and
+// shrink while the operator moves around the menu.
+func (m *tuiModel) bigBear(h int) bool {
+	key := fmt.Sprintf("%dx%d/%d/%s", m.w, m.h, h, uiLang)
+	if key == m.bearKey {
+		return m.bearBig
+	}
+	tab, cur := m.tab, m.cur
+	big := m.w >= 60
+	for t := range m.menu {
+		for c := range m.menu[t].items {
+			if !big {
+				break
+			}
+			m.tab, m.cur = t, c
+			m.menuLayout(h, true)
+			big = h-m.menuNeed-1 >= len(bearBig)
+		}
+	}
+	m.tab, m.cur = tab, cur
+	m.bearKey, m.bearBig = key, big
+	return big
+}
+
+// menuLayout draws the menu; with probe set it only measures the rows the
+// menu needs without the bear (menuNeed).
+func (m *tuiModel) menuLayout(h int, probe bool) []string {
 	var tabs []string
 	for i, g := range m.menu {
 		if i == m.tab {
@@ -1083,7 +1116,11 @@ func (m *tuiModel) viewMenu(h int) []string {
 	} else {
 		need += 1 + len(desc) + len(descText)
 	}
-	if logo := tuiLogo(h-need-1, m.w); logo != nil && len(logo) == len(bearBig) {
+	if probe {
+		m.menuNeed = need
+		return nil
+	}
+	if logo := tuiLogo(len(bearBig), m.w); m.bigBear(h) && logo != nil && len(logo) == len(bearBig) {
 		lines = append(append(logo, ""), lines...)
 	} else if small := tuiLogo(len(bearSmall), listW-1); twoCol && small != nil &&
 		2+len(list)+1+len(small) <= h {

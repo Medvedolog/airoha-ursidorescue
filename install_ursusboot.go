@@ -322,9 +322,9 @@ func (a *App) installStockBootArea(s Serial, p Profile, payload []byte) error {
 	}
 	a.noteln(L("\nВсе проверки чтения пройдены. Будут перезаписаны только изменённые блоки загрузочной области.", "\nAll read-only gates passed. Only the changed blocks of the boot area will be rewritten."))
 	if e = a.confirmOp(app.Write, "INSTALL URSUSBOOT", []string{
-		fmt.Sprintf(L("записать UrsusBoot %s в загрузочную область NAND: блоки %s (по 128 КиБ)", "write UrsusBoot %s into the NAND boot area: blocks %s (128 KiB each)"), p.BootVersion, strings.Join(spans, ", ")),
+		fmt.Sprintf(L("запись UrsusBoot %s в загрузочную область NAND: блоки %s (по 128 КиБ)", "write UrsusBoot %s into the NAND boot area: blocks %s (128 KiB each)"), p.BootVersion, strings.Join(spans, ", ")),
 		L("BootROM-префикс 0x0–0x7FF и stock env 0x7C000 остаются байт-в-байт", "the BootROM prefix 0x0–0x7FF and the stock env 0x7C000 stay byte-exact"),
-		L("сверить каждый блок CRC32; блок BL2 (0x00000) — последним", "check every block's CRC32; the BL2 block (0x00000) last"),
+		L("сверка CRC32 каждого блока; блок BL2 (0x00000) — последним", "check every block's CRC32; the BL2 block (0x00000) last"),
 		L("бэкап: ", "backup: ") + before,
 	}); e != nil {
 		return e
@@ -446,8 +446,8 @@ func (a *App) installUBIFIP(s Serial, p Profile, img fipImage) error {
 	}
 	a.noteln(L("\nВсе проверки чтения пройдены. Будет перезаписан ТОЛЬКО UBI-том fip.", "\nAll read-only gates passed. ONLY the UBI volume fip will be overwritten."))
 	if e = a.confirmOp(app.Write, img.phrase, []string{
-		fmt.Sprintf(L("перезаписать UBI-том fip: %s, %d байт", "overwrite the UBI volume fip: %s, %d bytes"), img.name, len(cand)),
-		L("прочитать том обратно и сверить CRC32; BL2 не трогается", "read the volume back and compare CRC32; BL2 is not touched"),
+		fmt.Sprintf(L("перезапись UBI-тома fip: %s, %d байт", "overwrite the UBI volume fip: %s, %d bytes"), img.name, len(cand)),
+		L("чтение тома обратно и сверка CRC32; BL2 не трогается", "read the volume back and compare CRC32; BL2 is not touched"),
 		L("бэкап: ", "backup: ") + before,
 	}); e != nil {
 		return e

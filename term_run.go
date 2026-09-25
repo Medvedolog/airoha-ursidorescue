@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // uartTerm is one interactive terminal session on a serial port.
@@ -22,6 +23,10 @@ type uartTerm struct {
 	quit      bool
 	shownW    int  // rune width of the input line currently on screen (line mode)
 	lineShown bool // an input line is drawn and needs erasing before device output
+	// devLine is the device's unfinished screen line (its prompt, as
+	// plain text). Line mode draws the input after it instead of over it.
+	devLine   string
+	drawnPref string // the prefix the input line was drawn with
 
 	pagerEnabled    bool
 	pagerWaiting    bool
@@ -72,6 +77,8 @@ func (a *App) runTerminalOnMode(s Serial, simple bool) error {
 			"\nUART terminal + XMODEM, 115200 8N1 — raw passthrough (verbatim output, copyable)."))
 		fmt.Println(L("Ctrl+] — меню: l — построчный ввод с историей ↑/↓, s/r — XMODEM отправка/приём, g — лог, q — выход.",
 			"Ctrl+] — menu: l line-input with ↑/↓ history, s/r XMODEM send/receive, g log, q quit."))
+		fmt.Println(L("Без меню: F2/F3 — XMODEM отправка/приём, F4 — построчный/прозрачный, F10 — выход.",
+			"Without the menu: F2/F3 XMODEM send/receive, F4 line/raw, F10 quit."))
 		fmt.Println(L("Ctrl+Q — быстрый выход, Ctrl+P — pager для обычного текстового вывода. top/vi и другие TUI отключают pager автоматически.",
 			"Ctrl+Q — quick exit, Ctrl+P — pager for normal text output. top/vi and other TUIs disable it automatically."))
 	}
@@ -111,40 +118,64 @@ func (a *App) runTerminalOnMode(s Serial, simple bool) error {
 		if err != nil {
 			return err
 		}
-		if t.raw {
-			// Forward whole console chunks, not one UART write per byte. This keeps
-			// ANSI arrow/history sequences together and makes pasted text fast.
-			if err := t.writeRawInput(ib[:n]); err != nil {
+		// F2/F3/F4/F10 are the terminal's own keys (XMODEM, mode, exit),
+		// unless a fullscreen program on the device owns the screen.
+		chunk := ib[:n]
+		for len(chunk) > 0 && !t.quit {
+			i, size, act := -1, 0, byte(0)
+			if t.fkeysLocal() {
+				i, size, act = findFKey(chunk)
+			}
+			part := chunk
+			if i >= 0 {
+				part = chunk[:i]
+			}
+			if err := t.handleInput(part); err != nil {
 				return err
 			}
-			if t.quit {
-				return nil
+			if i < 0 || t.quit {
+				break
 			}
+			t.menuAction(act)
+			chunk = chunk[i+size:]
+		}
+	}
+	return nil
+}
+
+// handleInput passes keyboard bytes on: whole chunks in raw mode, through
+// the line editor in line mode.
+func (t *uartTerm) handleInput(in []byte) error {
+	if len(in) == 0 {
+		return nil
+	}
+	if t.raw {
+		// Forward whole console chunks, not one UART write per byte. This keeps
+		// ANSI arrow/history sequences together and makes pasted text fast.
+		return t.writeRawInput(in)
+	}
+	for _, b := range in {
+		if b >= 0x80 {
+			t.warnNonASCII()
 			continue
 		}
-		for _, b := range ib[:n] {
-			if b >= 0x80 {
-				t.warnNonASCII()
-				continue
-			}
-			if b == 0x11 { // Ctrl+Q is always local; never send it to the router.
-				t.quit = true
-				fmt.Print(L("\r\n[выход из UART-терминала: Ctrl+Q]\r\n", "\r\n[UART terminal exit: Ctrl+Q]\r\n"))
+		if b == 0x11 { // Ctrl+Q is always local; never send it to the router.
+			t.quit = true
+			fmt.Print(L("\r\n[выход из UART-терминала: Ctrl+Q]\r\n", "\r\n[UART terminal exit: Ctrl+Q]\r\n"))
+			return nil
+		}
+		if b == 0x10 {
+			t.togglePager()
+			continue
+		}
+		if t.pagerIsWaiting() && (b == '\r' || b == '\n') {
+			t.pagerContinue()
+			continue
+		}
+		for _, ev := range t.dec.push(b) {
+			t.onKey(ev)
+			if t.quit {
 				return nil
-			}
-			if b == 0x10 {
-				t.togglePager()
-				continue
-			}
-			if t.pagerIsWaiting() && (b == '\r' || b == '\n') {
-				t.pagerContinue()
-				continue
-			}
-			for _, ev := range t.dec.push(b) {
-				t.onKey(ev)
-				if t.quit {
-					return nil
-				}
 			}
 		}
 	}
@@ -437,12 +468,14 @@ func (t *uartTerm) outputLocked(d []byte) {
 		if !t.raw && t.lineShown {
 			t.eraseLineLocked()
 		}
+		t.trackDeviceLine(d)
 		os.Stdout.Write(d)
 		if !t.raw {
 			t.drawLineLocked(0)
 		}
 		return
 	}
+	t.trackDeviceLine(d)
 	t.pagerPending = append(t.pagerPending, d...)
 	if len(t.pagerPending) > 4<<20 {
 		fmt.Print(L("\r\n[pager: буфер >4 MiB, пауза отключена]\r\n", "\r\n[pager: buffer >4 MiB, disabling pause]\r\n"))
@@ -458,10 +491,45 @@ func (t *uartTerm) outputLocked(d []byte) {
 // eraseLineLocked clears the current input line using only CR and spaces.
 func (t *uartTerm) eraseLineLocked() {
 	if t.shownW > 0 {
+		// Blank the drawn line, then put the device's own prompt back, so
+		// what the device prints next continues right after it.
+		pw := 0
+		if t.drawnPref == t.devLine {
+			pw = len([]rune(t.devLine))
+		}
 		fmt.Print("\r" + strings.Repeat(" ", t.shownW) + "\r")
+		if pw > 0 {
+			fmt.Print(t.devLine)
+		}
 	}
 	t.shownW = 0
 	t.lineShown = false
+}
+
+// trackDeviceLine follows the text after the device's last line break.
+func (t *uartTerm) trackDeviceLine(d []byte) {
+	line := []rune(t.devLine)
+	for i := 0; i < len(d); i++ {
+		switch c := d[i]; {
+		case c == '\n', c == '\r':
+			line = line[:0]
+		case c == 0x08:
+			if len(line) > 0 {
+				line = line[:len(line)-1]
+			}
+		case c == 0x1b:
+			i = skipEscape(string(d), i)
+		case c < 0x20 || c == 0x7f:
+		default:
+			r, n := utf8.DecodeRune(d[i:])
+			line = append(line, r)
+			i += n - 1
+		}
+	}
+	if len(line) > 200 {
+		line = line[len(line)-200:]
+	}
+	t.devLine = string(line)
 }
 
 // drawLineLocked (re)draws the prompt and buffer; prevW is the width already on
@@ -470,7 +538,14 @@ func (t *uartTerm) drawLineLocked(prevW int) {
 	if t.raw {
 		return
 	}
-	seq, w := t.ed.render(t.prompt, prevW)
+	// After the device's prompt when there is one; our "] " only on an
+	// empty line.
+	pref := t.prompt
+	if t.devLine != "" {
+		pref = t.devLine
+	}
+	t.drawnPref = pref
+	seq, w := t.ed.render(pref, prevW)
 	fmt.Print(seq)
 	t.shownW = w
 	t.lineShown = true
@@ -503,8 +578,13 @@ func (t *uartTerm) onKey(ev keyEvent) {
 	t.mu.Lock()
 	prev := t.shownW
 	if send {
+		// The device echoes the line after its prompt; a local copy would
+		// show it twice. Without a device prompt the line is shown as sent.
+		hadPrompt := t.devLine != ""
 		t.eraseLineLocked()
-		fmt.Print(t.prompt + line + "\r\n")
+		if !hadPrompt {
+			fmt.Print(t.prompt + line + "\r\n")
+		}
 	} else {
 		t.drawLineLocked(prev)
 	}
@@ -546,6 +626,16 @@ func (t *uartTerm) menuChoice(prefetched byte) {
 		c = t.readByte()
 	}
 	fmt.Print("\r\n")
+	t.menuAction(c)
+}
+
+// menuAction runs one terminal command: from the Ctrl+] menu or its F-key.
+func (t *uartTerm) menuAction(c byte) {
+	t.mu.Lock()
+	if !t.raw && t.lineShown {
+		t.eraseLineLocked()
+	}
+	t.mu.Unlock()
 	switch c {
 	case 's', 'S':
 		t.xmodemSendInteractive()
@@ -685,4 +775,40 @@ func (t *uartTerm) xmodemRecvInteractive() {
 	}
 	sha, _ := shaFile(abs)
 	fmt.Printf(L("\r\nXMODEM приём завершён: %d байт, SHA256=%s\r\n", "\r\nXMODEM receive complete: %d bytes, SHA256=%s\r\n"), len(data), sha)
+}
+
+// fkeysLocal says whether F2/F3/F4/F10 are the terminal's own keys: in the
+// terminal (the transparent console has no commands) while no fullscreen
+// device program owns the screen.
+func (t *uartTerm) fkeysLocal() bool {
+	if t.simple {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.chrome == nil || !t.chrome.suspended
+}
+
+// fkeySeqs are the F-key sequences of xterm, the Linux console and rxvt
+// (Windows keys are translated to the xterm ones) and the command each runs.
+var fkeySeqs = []struct {
+	seq string
+	act byte
+}{
+	{"\x1bOQ", 's'}, {"\x1b[12~", 's'}, {"\x1b[[B", 's'}, // F2 XMODEM send
+	{"\x1bOR", 'r'}, {"\x1b[13~", 'r'}, {"\x1b[[C", 'r'}, // F3 XMODEM receive
+	{"\x1bOS", 'l'}, {"\x1b[14~", 'l'}, {"\x1b[[D", 'l'}, // F4 raw / line mode
+	{"\x1b[21~", 'q'}, // F10 leave
+}
+
+// findFKey returns the first terminal F-key in p: its index, length and
+// command, or -1.
+func findFKey(p []byte) (int, int, byte) {
+	best, size, act := -1, 0, byte(0)
+	for _, f := range fkeySeqs {
+		if i := strings.Index(string(p), f.seq); i >= 0 && (best < 0 || i < best) {
+			best, size, act = i, len(f.seq), f.act
+		}
+	}
+	return best, size, act
 }

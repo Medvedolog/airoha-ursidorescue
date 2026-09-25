@@ -525,3 +525,24 @@ func TestTUIResultBanner(t *testing.T) {
 		t.Fatalf("no failure banner:\n%s", v)
 	}
 }
+
+// The bear keeps its size while the operator moves between tabs and items:
+// it depends on the window, not on the tab (seen on hardware: small on
+// Main, suddenly big on Expert).
+func TestBearSizeStableAcrossTabs(t *testing.T) {
+	for w := 80; w <= 160; w += 20 {
+		for h := 24; h <= 56; h += 4 {
+			m, _, _ := testTUI(t, w, h)
+			seen := map[bool]bool{}
+			for tab := range m.menu {
+				for cur := range m.menu[tab].items {
+					m.tab, m.cur = tab, cur
+					seen[strings.Contains(m.View(), bearBig[0])] = true
+				}
+			}
+			if len(seen) > 1 {
+				t.Fatalf("%dx%d: the big bear comes and goes between tabs", w, h)
+			}
+		}
+	}
+}

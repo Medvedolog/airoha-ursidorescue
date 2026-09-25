@@ -25,7 +25,7 @@ func TestChromeBarsFit(t *testing.T) {
 			if h := chromeHeader(120, ci); !strings.Contains(h, "COM6") || !strings.Contains(h, "RAW") {
 				t.Fatalf("header lacks the port or the mode: %q", h)
 			}
-			if f := chromeFooter(120, ci); !strings.Contains(f, "Ctrl+Q") {
+			if f := chromeFooter(120, ci); !strings.Contains(f, "Ctrl+Q") && !strings.Contains(f, "F10") {
 				t.Fatalf("footer lacks the exit key: %q", f)
 			}
 			if p := chromePlate(80, "UART", "COM6", simple); !strings.Contains(p, "COM6") || strings.Contains(strings.ReplaceAll(p, "\r\n", ""), "\n") {
@@ -162,5 +162,33 @@ func TestStartClearsProgress(t *testing.T) {
 	_ = m.start(tuiItem{label: "x", kind: "support-bundle"})
 	if m.overall != nil || m.progress != nil {
 		t.Fatal("progress survived into the next operation")
+	}
+}
+
+// F2/F3/F4/F10 are found in any chunk, in the xterm, Linux console and rxvt
+// forms, and Windows keys arrive as the xterm ones.
+func TestFKeys(t *testing.T) {
+	for in, want := range map[string]byte{"ab\x1bOQcd": 's', "\x1b[13~": 'r', "\x1b[[D": 'l', "x\x1b[21~": 'q'} {
+		if i, n, act := findFKey([]byte(in)); i < 0 || act != want || in[i:i+n][0] != 0x1b {
+			t.Fatalf("%q: %d %d %c", in, i, n, act)
+		}
+	}
+	if i, _, _ := findFKey([]byte("\x1b[A\x1b[3~ls")); i >= 0 {
+		t.Fatal("arrows and Delete are not terminal commands")
+	}
+	if got := string(translateWindowsConsoleKey(winVKF2, 0, 0, 1)); got != "\x1bOQ" {
+		t.Fatalf("Windows F2 = %q", got)
+	}
+	// Local only in the terminal and while no fullscreen program runs.
+	tt := &uartTerm{chrome: &termChrome{on: true}}
+	if !tt.fkeysLocal() {
+		t.Fatal("terminal: F-keys are local")
+	}
+	tt.chrome.suspended = true
+	if tt.fkeysLocal() {
+		t.Fatal("a fullscreen device program gets the F-keys")
+	}
+	if (&uartTerm{simple: true}).fkeysLocal() {
+		t.Fatal("the transparent console has no local F-keys")
 	}
 }

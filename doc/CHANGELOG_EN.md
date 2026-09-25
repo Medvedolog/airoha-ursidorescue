@@ -218,6 +218,17 @@ Releases by CI.
   path as the UrsusBoot install on UBI: the volume read over the UART into a backup, static volume,
   room check, TFTP, `INSTALL VANILLA UBOOT`, write and CRC. The stock layout is refused with nothing
   written. The vanilla files are checked by `validatePinned` and `--selftest`.
+- **The UART terminal's line mode no longer draws `] ` over the router's prompt** (on hardware:
+  "] ot@OpenWrt:~#"). The terminal keeps the device's unfinished line and draws the input after it;
+  after Enter the device's echo shows the line, with no duplicate. A screen-emulator test reproduces the
+  old bug.
+- UART terminal commands without the menu: F2/F3 XMODEM send/receive, F4 line/raw, F10 quit, shown in
+  the key bar and on the entry plate. While a fullscreen program runs on the router the F-keys go to
+  it. Ctrl+S / Ctrl+R stay free (XOFF and shell search). On Windows the F-keys become xterm sequences.
+- Russian item names are nouns now ("Восстановление…", "Установка UrsusBoot", "Возврат/обновление
+  vanilla U-Boot", …) in the TUI, the console and MENU, and so are the steps in confirmations.
+- The bear's size depends on the window only: big when it fits on every tab and with every
+  description, otherwise small; it no longer grows when the Expert tab opens.
 ---
 
 ## 0.2.0-test17 (2026-09-24 12:39–12:49)

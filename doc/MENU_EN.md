@@ -551,9 +551,16 @@ U-Boot). 115200 8N1. Everything received and sent is logged.
 |---|---|
 | **Ctrl+]** | local menu (not sent to the router) |
 | **Ctrl+Q** | quick exit (not sent to the router) |
+| **F2 / F3** | XMODEM send / receive without the menu (the same as `s` / `r` in the Ctrl+] menu) |
+| **F4** | raw / line mode (the same as `l`) |
+| **F10** | quit (the same as `q`) |
 | **Ctrl+P** | toggle the local pager: output pauses per window height, Enter shows the next page. The UART keeps being read and logged meanwhile (up to 4 MiB queued). Fullscreen programs (`top`, `vi`, `less`) are detected from ANSI sequences; the pager switches itself off and hands them the screen |
 | **Ctrl+C / Ctrl+Z** | forwarded to the router as `0x03` / `0x1A` (interrupt / suspend) |
 | characters ≥ 0x80 | blocked locally with a keyboard-layout warning (Cyrillic in a command is almost always a mistake). XMODEM is unaffected |
+
+The F-keys are the terminal's own commands while no fullscreen program runs on the router; while one
+does (`mc`, `vi`, `top` in the alternate screen), the F-keys go to it. Ctrl+S and Ctrl+R are left free on
+purpose: they are XOFF and history search in the router's shell.
 
 **Ctrl+] menu:**
 

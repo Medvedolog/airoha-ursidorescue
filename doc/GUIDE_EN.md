@@ -256,7 +256,8 @@ wizard step (`2/6`). The hints at the bottom show the F-keys; the letters still 
 The transparent UART console, the UART terminal + XMODEM and "RAM U-Boot and prompt" drive the real
 terminal (raw mode, ANSI, paste, XMODEM, as in the console) inside an UrsidoRescue frame: a header on
 top (port, 115200 8N1, RAW/LINE, log), keys and session at the bottom, the device output scrolling in
-between. On entry a plate says the port, that nothing is sent by itself and how to leave; an empty
+between. In the UART terminal the commands also work without the menu: F2/F3 XMODEM send/receive, F4
+line/raw, F10 quit. On entry a plate says the port, that nothing is sent by itself and how to leave; an empty
 screen is normal while the device is silent. Without a port chosen yet, the TUI asks for it in its
 dialog first. When a fullscreen program runs on the router (`top`, `vi`, a bootmenu) the frame gives
 it the whole screen: `top`/`vi` (alternate screen) until they leave it, a bootmenu (hidden cursor + clear)
