@@ -122,7 +122,7 @@ with its own COM port, TFTP, XMODEM and AES/RSA implementations.
 
 ### UrsidoRescue: `airoha-ursidorescue`
 
-https://github.com/Medvedolog/airoha-ursidorescue · this repository · version `0.2.0-test18`
+https://github.com/Medvedolog/airoha-ursidorescue · this repository · version `0.2.1-test.18`
 
 The native UART rescuer and porting data collector. Its place in the family is the "last line":
 when nothing in the router works except the BootROM.

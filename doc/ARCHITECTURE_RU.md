@@ -1,6 +1,6 @@
 # Архитектура UrsidoRescue
 
-[English version](ARCHITECTURE_EN.md) · [Оглавление](README.md) · версия 0.2.0-test18
+[English version](ARCHITECTURE_EN.md) · [Оглавление](README.md) · версия 0.2.1-test.18
 
 ## Общая схема
 

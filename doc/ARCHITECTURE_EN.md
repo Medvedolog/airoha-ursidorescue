@@ -1,6 +1,6 @@
 # UrsidoRescue architecture
 
-[Русская версия](ARCHITECTURE_RU.md) · [Contents](README.md) · version 0.2.0-test18
+[Русская версия](ARCHITECTURE_RU.md) · [Contents](README.md) · version 0.2.1-test.18
 
 ## Overview
 

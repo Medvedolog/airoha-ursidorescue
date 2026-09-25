@@ -45,11 +45,11 @@ Releases by CI.
 | 0.2.0-test15 | `115c87c` | yes | network once per session, LAN prerequisites, colour, EOT |
 | 0.2.0-test16 | `8f72817` | yes | stock LAN assist: UART login and UID 0 |
 | 0.2.0-test17 | `6008769` | yes | Telnet-only passive plan, late credential refresh, auth hardening |
-| 0.2.0-test18 | branch | not yet | application layer and STOP, TUI by default, UrsusBoot install over UART, UART frame, false CRC error fixed |
+| 0.2.1-test.18 | branch | not yet | application layer and STOP, TUI by default, UrsusBoot install over UART, UART frame, false CRC error fixed |
 
 ---
 
-## 0.2.0-test18 (2026-09-25, branch `claude/gracious-hypatia-ditksb`, no pre-release yet)
+## 0.2.1-test.18 (2026-09-25, branch `claude/gracious-hypatia-ditksb`, no pre-release yet)
 
 - Added `doc/` with Russian and English documentation: about the project and the Ursus family,
   operator guide, every menu in detail, architecture, and this complete changelog.
@@ -229,6 +229,9 @@ Releases by CI.
   vanilla U-Boot", …) in the TUI, the console and MENU, and so are the steps in confirmations.
 - The bear's size depends on the window only: big when it fits on every tab and with every
   description, otherwise small; it no longer grows when the Expert tab opens.
+- Numbering: `0.2.0-test18` → **`0.2.1-test.18`**. The releases page sorts by semver, where `test9` is
+  "newer" than `test17` (text compares character by character), so test9 sat on top. `0.2.1-…` is newer
+  than any `0.2.0-…`, and the number after the dot is numeric: `test.19` … `test.100` sort in order.
 ---
 
 ## 0.2.0-test17 (2026-09-24 12:39–12:49)

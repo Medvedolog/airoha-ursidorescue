@@ -1,6 +1,6 @@
 # UrsidoRescue operator guide
 
-[Русская версия](GUIDE_RU.md) · [Contents](README.md) · version 0.2.0-test18
+[Русская версия](GUIDE_RU.md) · [Contents](README.md) · version 0.2.1-test.18
 
 ## 0. Before you start
 
@@ -31,7 +31,7 @@ Port settings (the program sets them): 115200, 8N1, no flow control.
 3. Contents:
 
 ```
-UrsidoRescue-0.2.0-test18/
+UrsidoRescue-0.2.1-test.18/
   UrsidoRescue.exe            Windows x64
   UrsidoRescue-linux-amd64    Linux x86_64
   UrsidoRescue-linux-arm64    Linux aarch64 (Raspberry Pi 4/5, ARM laptops)

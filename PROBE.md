@@ -1,4 +1,4 @@
-# Porting Collector (probe mode) — UrsidoRescue 0.2.0 (current: test18)
+# Porting Collector (probe mode) — UrsidoRescue 0.2.1 (current: 0.2.1-test.18)
 
 Flash/MTD discovery of an Airoha device over UART is read-only by default. The one explicit
 stock-side exception is enabling the stock FTP service after a separate operator y/N; it changes

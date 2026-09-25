@@ -1,11 +1,11 @@
-# UrsidoRescue 0.2.0-test18
+# UrsidoRescue 0.2.1-test.18
 
 Status: **CI PASS / HW PARTIAL.** A stock restore on MD (AN7581) through the new TUI on Windows
 passed on hardware (30/30 IBU chunks and BL2 written and verified, stock booted). The UrsusBoot UART
 install, the UART console frame and the file/folder dialogs are not hardware-tested yet; see
 `doc/HW_SMOKE_STAGE2_RU.md`.
 
-## 0.2.0-test18
+## 0.2.1-test.18
 
 - Application layer (UI spec stage 1): one UI contract for every front end, sessions under
   `work/sessions/<id>/` with operation IDs and `operations.jsonl`, the port leased by `PortOwner`,
