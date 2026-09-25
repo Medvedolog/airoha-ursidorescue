@@ -163,7 +163,7 @@ func (a *App) ramUBootShell() error {
 	if e != nil {
 		return e
 	}
-	a.note(L("RAM U-Boot готов. Открываю UART Shell; Ctrl+] вернёт в меню.", "RAM U-Boot is ready. Opening the UART Shell; Ctrl+] returns to the menu."))
+	a.note(L("RAM U-Boot готов. Открываю прозрачную UART-консоль; Ctrl+] вернёт в меню.", "RAM U-Boot is ready. Opening the transparent UART console; Ctrl+] returns to the menu."))
 	e = a.uartShellOn(s)
 	s.Close()
 	a.closeLog()

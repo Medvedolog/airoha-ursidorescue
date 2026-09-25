@@ -236,21 +236,30 @@ operation the screen shows its result and session ID; the full path to the log d
 |---|---|
 | ↑ ↓, ← → / Tab | pick an item and a section; in a dialog, pick an option |
 | Enter | run the item; answer a dialog |
-| p, F4 | choose and connect the UART port (or disconnect) |
+| F4, p | choose and connect the UART port (or disconnect) |
 | s, Ctrl+C | STOP during an operation; the core decides (a second Ctrl+C within 3 s forces exit) |
 | PgUp / PgDn, End | scroll the log, jump to new lines |
-| f, F2 | log filter: all / UART / events |
-| m, F3 | large log |
+| F2, f | log filter: all / UART / events |
+| F3, m | large log |
 | l | language: Russian / English |
-| q, F10 | quit (when no operation runs) |
+| F10, q | quit (when no operation runs) |
 
 The running log at the bottom shows no times, only events and UART output (the log bar and plain log
 text are dark lime; only statuses are coloured: errors bordeaux, PASS green, stage tags such as `[XMODEM]`
 amber). Times stay in the session log files
 and show in the operation panel as a faint column.
 
-The UART terminal, UART Shell and "RAM U-Boot and prompt" open full screen as in the console; the TUI
-comes back when you leave them. `NO_COLOR` turns colours off.
+During an operation the top bar shows its name and phase: `… · READ 37%` during a transfer or the
+wizard step (`2/6`). The hints at the bottom show the F-keys; the letters still work.
+
+The transparent UART console, the UART terminal + XMODEM and "RAM U-Boot and prompt" drive the real
+terminal (raw mode, ANSI, paste, XMODEM, as in the console) inside an UrsidoRescue frame: a header on
+top (port, 115200 8N1, RAW/LINE, log), keys and session at the bottom, the device output scrolling in
+between. On entry a plate says the port, that nothing is sent by itself and how to leave; an empty
+screen is normal while the device is silent. Without a port chosen yet, the TUI asks for it in its
+dialog first. When a fullscreen program runs on the router (`top`, `vi`, a bootmenu) the frame gives
+it the whole screen and comes back when it exits (or on Ctrl+]). The TUI returns when you leave the
+console. `NO_COLOR` turns colours off.
 
 **Command line:**
 

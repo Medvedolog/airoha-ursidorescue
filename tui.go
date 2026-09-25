@@ -40,7 +40,7 @@ var errTUIUnavailable = errors.New("full-screen TUI unavailable")
 // are turned into messages for the Bubble Tea loop, and Ask/Confirm wait for
 // the operator's answer on a channel.
 //
-// A console-owning operation (UART terminal, UART Shell) gets the real
+// A console-owning operation (UART terminal, transparent UART console) gets the real
 // terminal while the TUI is suspended; during it the calls go to a plain
 // console UI and events are kept to be shown when the TUI comes back.
 type tuiUI struct {

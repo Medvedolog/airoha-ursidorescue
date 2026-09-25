@@ -96,6 +96,7 @@ type tuiDialog struct {
 	confirm *tuiConfirmMsg
 	isPort  bool     // the port chooser (p); port may be empty
 	port    []string // detected ports
+	then    *tuiItem // a full-screen item waiting for this port
 	cursor  int
 	scroll  int // first shown line of a dialog taller than the screen
 }
@@ -112,6 +113,7 @@ type (
 	tuiPortMsg struct {
 		name string
 		err  error
+		then *tuiItem // started once the port is connected
 	}
 )
 
@@ -199,6 +201,9 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toast = msg.err.Error()
 		} else if msg.name != "" {
 			m.toast = L("Подключено: ", "Connected: ") + msg.name
+			if it := msg.then; it != nil {
+				return m, m.start(*it)
+			}
 		} else {
 			m.toast = L("Порт отключён", "Port disconnected")
 		}
@@ -386,8 +391,16 @@ func (m *tuiModel) stop() tea.Cmd {
 }
 
 func (m *tuiModel) start(it tuiItem) tea.Cmd {
-	m.busy, m.opTitle, m.opEvents, m.result, m.toast = true, it.label, nil, "", ""
 	a := m.a
+	// A full-screen item picks its port here, in the TUI, rather than in
+	// the plain console after the screen was handed over.
+	if _, ok := a.portOwner().Connected(); consoleOwning[it.kind] && !ok && a.portOverride == "" {
+		m.dlg = &tuiDialog{isPort: true, port: listSerialPorts(), then: &it}
+		m.input.SetValue("")
+		m.input.Focus()
+		return nil
+	}
+	m.busy, m.opTitle, m.opEvents, m.result, m.toast = true, it.label, nil, "", ""
 	if consoleOwning[it.kind] {
 		c := &consoleOp{a: a, ui: m.ui, kind: it.kind}
 		_, before := a.LastOperation()
@@ -570,7 +583,7 @@ func (m *tuiModel) portKey(k tea.KeyMsg) tea.Cmd {
 			} else if err != nil {
 				return tuiPortMsg{err: fmt.Errorf("%s: %w", name, err)}
 			}
-			return tuiPortMsg{name: name}
+			return tuiPortMsg{name: name, then: d.then}
 		}
 	}
 	var cmd tea.Cmd
@@ -835,14 +848,20 @@ func (m *tuiModel) viewTop() string {
 	if name, ok := m.a.portOwner().Connected(); ok {
 		port = on(tsOK, "● ") + on(tsInk, name)
 	}
-	op := "" // the operation ID is on the result screen, not here
 	sep := on(tsFaint, "  │  ")
+	// While an operation runs: its name and phase (the operation ID is on the
+	// result screen, not here).
+	op := ""
+	if ph := m.phase(); ph != "" {
+		op = sep + on(tsSand, ph)
+	}
 	brand := on(tsBrand, " UrsidoRescue")
 	right := m.stopLabel()
 	var left string
 	for _, l := range []string{
 		brand + on(tsFaint, " "+appVersion) + sep + port + op,
 		brand + sep + port + op,
+		brand + op,
 		brand + sep + port,
 		brand,
 	} {
@@ -855,6 +874,25 @@ func (m *tuiModel) viewTop() string {
 		right = ansi.Truncate(right, max(0, room), "…")
 	}
 	return bar(tsBar, m.w, left, right)
+}
+
+// phase is the running operation and where it is: "UrsusBoot · READ 37%",
+// or the overall step when no transfer runs.
+func (m *tuiModel) phase() string {
+	if !m.busy {
+		return ""
+	}
+	name := m.opTitle
+	if r := []rune(name); len(r) > 22 {
+		name = string(r[:21]) + "…"
+	}
+	switch p := m.progress; {
+	case p != nil && p.Total > 0:
+		return fmt.Sprintf("%s · %s %d%%", name, p.Label, p.Current*100/p.Total)
+	case m.overall != nil && m.overall.Total > 0:
+		return fmt.Sprintf("%s · %d/%d", name, min(m.overall.Current+1, m.overall.Total), m.overall.Total)
+	}
+	return name
 }
 
 func tail(s string, n int) string {
@@ -1244,7 +1282,7 @@ func choiceLine(sel bool, s string, w int) string {
 func (m *tuiModel) viewLog(h int) []string {
 	names := []string{L("всё", "all"), "UART", L("события", "events")}
 	left := " ▌ " + L("ЛОГ UART И СОБЫТИЙ", "UART AND EVENT LOG")
-	right := L("фильтр: ", "filter: ") + names[m.filter] + " (f) · " + L("крупно (m)", "large (m)") + " · PgUp/PgDn "
+	right := L("фильтр: ", "filter: ") + names[m.filter] + " (F2) · " + L("крупно (F3)", "large (F3)") + " · PgUp/PgDn "
 	if m.scroll > 0 {
 		right = L("прокрутка — End к новым · ", "scrolled — End for new · ") + right
 	}
@@ -1276,11 +1314,11 @@ func (m *tuiModel) viewHelp() string {
 	case m.dlg != nil:
 		s = L(" ↑↓←→ выбор · Enter ответ · PgUp/PgDn лог · Ctrl+C СТОП", " ↑↓←→ pick · Enter answer · PgUp/PgDn log · Ctrl+C STOP")
 	case m.busy:
-		s = L(" s / Ctrl+C СТОП · PgUp/PgDn лог · f фильтр · m лог крупно", " s / Ctrl+C STOP · PgUp/PgDn log · f filter · m large log")
+		s = L(" s / Ctrl+C СТОП · PgUp/PgDn лог · F2 фильтр · F3 лог крупно", " s / Ctrl+C STOP · PgUp/PgDn log · F2 filter · F3 large log")
 	case m.result != "":
-		s = L(" Enter — в меню · PgUp/PgDn лог · f фильтр · m лог крупно", " Enter — menu · PgUp/PgDn log · f filter · m large log")
+		s = L(" Enter — в меню · PgUp/PgDn лог · F2 фильтр · F3 лог крупно", " Enter — menu · PgUp/PgDn log · F2 filter · F3 large log")
 	default:
-		s = L(" ↑↓ пункт · ←→ раздел · Enter запуск · p порт · f фильтр лога · m лог крупно · l язык · q выход", " ↑↓ item · ←→ section · Enter run · p port · f log filter · m large log · l language · q quit")
+		s = L(" ↑↓←→ выбор · Enter запуск · F4 порт · F2 фильтр · F3 лог · l язык · F10 выход", " ↑↓←→ pick · Enter run · F4 port · F2 filter · F3 log · l language · F10 quit")
 	}
 	if m.w < 80 || m.h < 24 {
 		s = L(" окно меньше 80×24 ·", " window below 80×24 ·") + s

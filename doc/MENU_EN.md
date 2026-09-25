@@ -185,7 +185,7 @@ While an operation runs, **Ctrl+C is the STOP button**, and the core decides:
 
 A second Ctrl+C within 3 seconds forces the program to exit (in an unavailable phase the device may
 be left unbootable). Outside an operation Ctrl+C ends the program as before. In the UART terminal
-and UART Shell Ctrl+C still goes to the router. Every press is recorded in the session's
+and the transparent UART console Ctrl+C still goes to the router. Every press is recorded in the session's
 `operations.jsonl` (`stop_requested` / `stop_refused`).
 
 ---
@@ -414,26 +414,31 @@ A probe ends with a result code (also the command-line exit code):
 
 ```
 Expert mode
-  1. UART terminal (↑/↓ history, manual XMODEM, logging)
+  1. UART terminal + XMODEM (↑/↓ history, line input, logging)
   2. Start RAM U-Boot and leave the prompt
   3. Write an existing UBI volume from a file
   4. Write a raw range into MTD bl2/ubi
   5. Diagnostics
-  6. UART Shell (transparent passthrough, sends nothing by itself)
+  6. Transparent UART console (sends nothing by itself)
   7. Install UrsusBoot (UART, MD/MF)
   0. Back
 ```
 
 An error in any expert item returns to the **main** menu.
 
-#### Expert 1. UART terminal
+In the TUI the same items are ordered by risk: the transparent UART console, the UART terminal +
+XMODEM, the RAM U-Boot, then the UrsusBoot install, the UBI volume write and, last, the raw MTD write.
+The risk shows right under each item: `MANUAL`, `RAM only`, `WRITE`, `RAW WRITE` (`ERASE` in Main).
+The text console keeps its numbers.
+
+#### Expert 1. UART terminal + XMODEM
 
 Port choice → the session's `uart.log` → the full terminal (see
 [below](#uart-terminal-keys-and-menu)). It sends nothing by itself and holds no passwords.
 
 #### Expert 2. Start RAM U-Boot and leave the prompt
 
-Profile → the standard RAM U-Boot procedure (including the geometry check) → a UART Shell opens on
+Profile → the standard RAM U-Boot procedure (including the geometry check) → the transparent UART console opens on
 the same port. From there you work in U-Boot by hand; Ctrl+] or Ctrl+Q returns to the menu. Useful
 when you need a command no wizard offers.
 
@@ -465,7 +470,7 @@ item does not check the bad-block map.
 
 Same as [main menu item 5](#5-nand--mtd--u-boot-diagnostics).
 
-#### Expert 6. UART Shell
+#### Expert 6. Transparent UART console
 
 Port choice → the session's `uart.log` → a simplified terminal: the same low-latency raw
 mode but without the Ctrl+] menu (Ctrl+] and Ctrl+Q exit). No automatic `x`/Enter/Ctrl-C is sent,
@@ -496,10 +501,15 @@ static image (install-mtd0) is written.
    candidate equals what was read, it reports "already installed" and writes nothing.
 5. **Stock:** no bad blocks in `bl2` or the first `0x60000` of `ubi`. The candidate over TFTP →
    RAM check → typed `INSTALL URSUSBOOT` → **only the changed** 128 KiB blocks are erased and
-   written, each checked by CRC32, the BL2 block (`0x00000`) last.
+   written, each checked by CRC32, the BL2 block (`0x00000`) last; then the whole `0x80000` area is
+   read back and CRC32-checked as one.
    **UBI:** `ubi part ubi` → exactly one **static** `fip` volume → the candidate over TFTP →
    `INSTALL URSUSBOOT` → `ubi write` + `ubi read` + CRC32. BL2 is not touched.
 6. Reset or stay in the RAM U-Boot.
+
+In the TUI the overall progress runs through 6 steps: RAM U-Boot and layout → read → checks and
+build → TFTP → write → final readback; before the read it says what is read and that nothing was
+written yet.
 
 STOP before the write (the UART read included) acts at once; the write and its readback are not
 interrupted.

@@ -69,7 +69,9 @@ func tuiLogo(rows, width int) []string {
 		}
 		out[i] = " " + drawn // a margin from the screen edge
 		if t := i - first; t >= 0 && t < len(text) {
-			out[i] += strings.Repeat(" ", artW-lipgloss.Width(l)+3) + text[t]
+			if line := out[i] + strings.Repeat(" ", artW-lipgloss.Width(l)+3) + text[t]; lipgloss.Width(line) <= width {
+				out[i] = line // a caption that does not fit is left out
+			}
 		}
 	}
 	return out

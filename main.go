@@ -2568,12 +2568,12 @@ func (a *App) diagnosticsWizard() error {
 func (a *App) expertMenu() error {
 	for {
 		fmt.Println(L("\nЭкспертный режим", "\nExpert mode"))
-		fmt.Println(L("  1. UART-терминал (история ↑/↓, ручной XMODEM, лог)", "  1. UART terminal (↑/↓ history, manual XMODEM, logging)"))
+		fmt.Println(L("  1. UART-терминал + XMODEM (история ↑/↓, построчный ввод, лог)", "  1. UART terminal + XMODEM (↑/↓ history, line input, logging)"))
 		fmt.Println(L("  2. Запустить RAM U-Boot и оставить prompt", "  2. Start RAM U-Boot and leave the prompt"))
 		fmt.Println(L("  3. Записать существующий UBI volume из файла", "  3. Write an existing UBI volume from a file"))
 		fmt.Println(L("  4. Записать raw range в MTD bl2/ubi", "  4. Write a raw range into MTD bl2/ubi"))
 		fmt.Println(L("  5. Диагностика", "  5. Diagnostics"))
-		fmt.Println(L("  6. UART Shell (прозрачный терминал, ничего не отправляет сам)", "  6. UART Shell (transparent passthrough, sends nothing by itself)"))
+		fmt.Println(L("  6. Прозрачная UART-консоль (ничего не отправляет сама)", "  6. Transparent UART console (sends nothing by itself)"))
 		fmt.Println(L("  7. Установить UrsusBoot (UART, MD/MF)", "  7. Install UrsusBoot (UART, MD/MF)"))
 		fmt.Println(L("  0. Назад", "  0. Back"))
 		v := a.ask(L("Выбор: ", "Choice: "))

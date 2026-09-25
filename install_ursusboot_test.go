@@ -87,6 +87,12 @@ func (u *ubootSim) run(cmd string) string {
 			u.corrupt--
 		}
 		return b.String()
+	case f[0] == "mw.b":
+		addr, v, n := hexArg(f[1]), hexArg(f[2]), hexArg(f[3])
+		for i := uint64(0); i < n; i++ {
+			u.ram[addr+i] = byte(v)
+		}
+		return ""
 	case f[0] == "crc32":
 		addr, n := hexArg(f[1]), hexArg(f[2])
 		buf := make([]byte, n)
@@ -150,5 +156,21 @@ func TestUARTDumpRetriesAndLayout(t *testing.T) {
 	}
 	if a.quietUART {
 		t.Fatal("quiet UART left on")
+	}
+}
+
+func TestBootAreaReadback(t *testing.T) {
+	a := &App{ui: (&app.Recorder{}).UI()}
+	area := make([]byte, bootAreaSize)
+	for i := range area {
+		area[i] = byte(i * 13)
+	}
+	sim := newSim(area[:bl2Size], area[bl2Size:])
+	if err := a.bootAreaReadback(sim, crc32.ChecksumIEEE(area)); err != nil {
+		t.Fatal(err)
+	}
+	sim = newSim(area[:bl2Size], area[bl2Size:])
+	if err := a.bootAreaReadback(sim, crc32.ChecksumIEEE(area)^1); err == nil {
+		t.Fatal("a wrong CRC passed")
 	}
 }

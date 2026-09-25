@@ -171,8 +171,26 @@ func (a *App) bootLayout(s Serial) (string, error) {
 		"layout not recognised: neither UBI at 0x20000 nor a FIP at 0x800; the install does not apply"))
 }
 
+// installSteps is the wizard's overall progress (TUI top bar and panel).
+const installSteps = 6
+
+func (a *App) installPhase(n int, text string) {
+	a.ui.Progress(app.Progress{Label: L("ВСЕГО", "TOTAL"), Current: int64(n - 1), Total: installSteps, Unit: "steps", Overall: true,
+		Detail: fmt.Sprintf("%d/%d · %s", n, installSteps, text)})
+}
+
+// readPlan says what the long UART read is about to do, so minutes of md.l do
+// not look like a hang.
+func (a *App) readPlan(p Profile, layout string, size uint64) {
+	pieces := (size + uartDumpChunk - 1) / uartDumpChunk
+	a.status(L("ЧТЕНИЕ", "READ"), fmt.Sprintf(L("%s · %s · читаю %d КиБ по UART · %d × 64 КиБ со сверкой crc32 · запись ещё НЕ началась",
+		"%s · %s · reading %d KiB over the UART · %d × 64 KiB with crc32 checks · nothing written yet"),
+		strings.ToUpper(p.ID), layout, (size+1023)/1024, pieces), app.LevelInfo)
+}
+
 func (a *App) ursusBootInstallWizard() error {
 	a.showNetworkPrerequisites()
+	a.installPhase(1, L("RAM U-Boot и разметка", "RAM U-Boot and layout"))
 	pref, e := chooseProfileInteractive(a)
 	if e != nil {
 		return e
@@ -208,6 +226,8 @@ func (a *App) ursusBootInstallWizard() error {
 	if e != nil && !errors.Is(e, errAlreadyInstalled) {
 		return e
 	}
+	a.ui.Progress(app.Progress{Label: L("ВСЕГО", "TOTAL"), Current: installSteps, Total: installSteps, Unit: "steps", Overall: true,
+		Detail: L("готово", "done")})
 	a.noteln(L("Можно выполнить reset. Нажмите Enter для reset или введите N чтобы оставить RAM U-Boot.", "Ready to reset. Press Enter to reset or type N to stay in RAM U-Boot."))
 	if a.askResetOrStay() {
 		_ = sendLine(s, "reset")
@@ -255,6 +275,8 @@ func (a *App) installStockBootArea(s Serial, p Profile, payload []byte) error {
 	if _, e = a.ubootCommand(s, fmt.Sprintf("mtd read ubi 0x%x 0x0 0x%x", loadAddr+bl2Size, bootAreaSize-bl2Size), 2*time.Minute); e != nil {
 		return e
 	}
+	a.installPhase(2, L("чтение загрузочной области", "reading the boot area"))
+	a.readPlan(p, L("сток", "stock"), bootAreaSize)
 	a.note(L("Читаю загрузочную область 512 КиБ по UART (около 3–4 минут)…", "Reading the 512 KiB boot area over the UART (about 3–4 minutes)…"))
 	live, e := a.uartDump(s, loadAddr, bootAreaSize, "boot area")
 	if e != nil {
@@ -264,6 +286,7 @@ func (a *App) installStockBootArea(s Serial, p Profile, payload []byte) error {
 	if e != nil {
 		return e
 	}
+	a.installPhase(3, L("проверка и сборка", "checks and build"))
 	var cand []byte
 	var rep installReport
 	if p.ID == "md" {
@@ -289,6 +312,7 @@ func (a *App) installStockBootArea(s Serial, p Profile, payload []byte) error {
 	if e != nil {
 		return e
 	}
+	a.installPhase(4, L("TFTP в RAM", "TFTP into RAM"))
 	if _, e = a.tftpLoad(s, target, "ursido-bootarea.bin", loadAddr); e != nil {
 		return e
 	}
@@ -306,6 +330,7 @@ func (a *App) installStockBootArea(s Serial, p Profile, payload []byte) error {
 		return e
 	}
 	a.cancelBlocked(L("запись загрузочной области и её проверка", "writing the boot area and its readback"))
+	a.installPhase(5, fmt.Sprintf(L("запись: %d блок(а), CRC после каждого", "writing: %d block(s), CRC after each"), len(blocks)))
 	// ubi blocks first, the bl2 block (the first stage) last.
 	order := append([]int(nil), blocks...)
 	if len(order) > 0 && order[0] == 0 {
@@ -327,6 +352,10 @@ func (a *App) installStockBootArea(s Serial, p Profile, payload []byte) error {
 			return e
 		}
 		a.status("OK", fmt.Sprintf(L("блок 0x%05x записан и сверен", "block 0x%05x written and verified"), i*eraseSize), app.LevelOK)
+	}
+	a.installPhase(6, L("итоговая сверка всей области", "final readback of the whole area"))
+	if e = a.bootAreaReadback(s, crc32.ChecksumIEEE(cand)); e != nil {
+		return e
 	}
 	a.cancelNow()
 	a.event(L("UrsusBoot записан, проверка PASS; SHA256 области=", "UrsusBoot written, readback PASS; boot area SHA256=") + rep.TargetSHA)
@@ -360,6 +389,8 @@ func (a *App) installUBIFIP(s Serial, p Profile, payload []byte) error {
 	if _, e = a.ubootCommand(s, fmt.Sprintf("ubi read 0x%x fip 0x%x", loadAddr, vol.UsedBytes), 5*time.Minute); e != nil {
 		return e
 	}
+	a.installPhase(2, L("чтение текущего FIP", "reading the current FIP"))
+	a.readPlan(p, "UBI fip", (vol.UsedBytes+3)&^3)
 	a.note(L("Читаю текущий том fip по UART (несколько минут)…", "Reading the current fip volume over the UART (a few minutes)…"))
 	cur, e := a.uartDump(s, loadAddr, (vol.UsedBytes+3)&^3, "fip")
 	if e != nil {
@@ -370,6 +401,7 @@ func (a *App) installUBIFIP(s Serial, p Profile, payload []byte) error {
 	if e != nil {
 		return e
 	}
+	a.installPhase(3, L("проверка и сборка", "checks and build"))
 	var cand []byte
 	var rep installReport
 	if p.ID == "md" {
@@ -392,6 +424,7 @@ func (a *App) installUBIFIP(s Serial, p Profile, payload []byte) error {
 	if e != nil {
 		return e
 	}
+	a.installPhase(4, L("TFTP в RAM", "TFTP into RAM"))
 	if _, e = a.tftpLoad(s, target, "ursido-fip.bin", loadAddr); e != nil {
 		return e
 	}
@@ -404,7 +437,12 @@ func (a *App) installUBIFIP(s Serial, p Profile, payload []byte) error {
 		return e
 	}
 	a.cancelBlocked(L("запись тома fip и её проверка", "writing the fip volume and its readback"))
-	if e = a.ubiWriteVerified(s, "fip", uint64(len(cand)), crc32.ChecksumIEEE(cand)); e != nil {
+	a.installPhase(5, L("запись тома fip", "writing the fip volume"))
+	if e = a.ubiWrite(s, "fip", uint64(len(cand))); e != nil {
+		return e
+	}
+	a.installPhase(6, L("чтение тома обратно и CRC32", "volume readback and CRC32"))
+	if e = a.ubiVerify(s, "fip", uint64(len(cand)), crc32.ChecksumIEEE(cand)); e != nil {
 		return e
 	}
 	a.cancelNow()
@@ -415,9 +453,18 @@ func (a *App) installUBIFIP(s Serial, p Profile, payload []byte) error {
 // ubiWriteVerified writes size bytes at loadAddr into a UBI volume, reads it
 // back to verifyAddr and requires the CRC32.
 func (a *App) ubiWriteVerified(s Serial, vol string, size uint64, crc uint32) error {
-	if _, e := a.ubootCommand(s, fmt.Sprintf("ubi write 0x%x %s 0x%x", loadAddr, vol, size), 5*time.Minute); e != nil {
+	if e := a.ubiWrite(s, vol, size); e != nil {
 		return e
 	}
+	return a.ubiVerify(s, vol, size, crc)
+}
+
+func (a *App) ubiWrite(s Serial, vol string, size uint64) error {
+	_, e := a.ubootCommand(s, fmt.Sprintf("ubi write 0x%x %s 0x%x", loadAddr, vol, size), 5*time.Minute)
+	return e
+}
+
+func (a *App) ubiVerify(s Serial, vol string, size uint64, crc uint32) error {
 	if _, e := a.ubootCommand(s, fmt.Sprintf("ubi read 0x%x %s 0x%x", verifyAddr, vol, size), 5*time.Minute); e != nil {
 		return e
 	}
@@ -429,4 +476,20 @@ func (a *App) ubiWriteVerified(s Serial, vol string, size uint64, crc uint32) er
 		return errors.New(L("CRC32 FIP после записи не совпал", "FIP readback CRC32 mismatch"))
 	}
 	return nil
+}
+
+// bootAreaReadback reads the whole 0x80000 boot area back from the NAND and
+// requires the candidate's CRC32: the blocks were checked one by one, this
+// proves the area as the BootROM will see it.
+func (a *App) bootAreaReadback(s Serial, crc uint32) error {
+	if _, e := a.ubootCommand(s, fmt.Sprintf("mw.b 0x%x 0x00 0x%x", verifyAddr, bootAreaSize), 2*time.Minute); e != nil {
+		return e
+	}
+	if _, e := a.ubootCommand(s, fmt.Sprintf("mtd read bl2 0x%x 0x0 0x%x", verifyAddr, bl2Size), 2*time.Minute); e != nil {
+		return e
+	}
+	if _, e := a.ubootCommand(s, fmt.Sprintf("mtd read ubi 0x%x 0x0 0x%x", verifyAddr+bl2Size, bootAreaSize-bl2Size), 2*time.Minute); e != nil {
+		return e
+	}
+	return a.deviceCRC(s, verifyAddr, bootAreaSize, crc)
 }

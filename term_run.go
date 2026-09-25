@@ -29,6 +29,8 @@ type uartTerm struct {
 	pagerPending    []byte
 	pagerANSIProbe  []byte
 	lastASCIINotice time.Time
+
+	chrome *termChrome // UrsidoRescue bars around the stream (TUI only); nil in the text console
 }
 
 // runTerminal opens the port and runs the interactive terminal.
@@ -54,26 +56,45 @@ func (a *App) runTerminalOnMode(s Serial, simple bool) error {
 	// is clean and copyable, and the device's own line editing/history works.
 	t := &uartTerm{a: a, s: s, prompt: "] ", raw: true, simple: simple}
 	t.ed.hidx = 0
+	title := L("UART-терминал + XMODEM", "UART terminal + XMODEM")
 	if simple {
-		fmt.Printf(L("\nUART Shell %s — 115200 8N1, no flow\n", "\nUART Shell %s — 115200 8N1, no flow\n"), s.Name())
+		title = L("Прозрачная UART-консоль", "Transparent UART console")
+	}
+	if a.frontEnd == "tui" {
+		t.chrome = &termChrome{title: strings.ToUpper(title)}
+	} else if simple {
+		fmt.Printf(L("\nПрозрачная UART-консоль %s — 115200 8N1, без flow control\n", "\nTransparent UART console %s — 115200 8N1, no flow\n"), s.Name())
 		fmt.Println(L("Ctrl+] / Ctrl+Q — выход, Ctrl+P — pager для обычного текста; полноэкранные TUI обходят его автоматически.",
 			"Ctrl+] / Ctrl+Q — exit, Ctrl+P — text pager; fullscreen TUIs bypass it automatically."))
 		fmt.Println(L("Никаких автоматических x/Enter/Ctrl-C не отправляется.", "No automatic x/Enter/Ctrl-C is sent."))
 	} else {
-		fmt.Println(L("\nUART-терминал 115200 8N1 — прозрачный режим (вывод как есть, копируется).",
-			"\nUART terminal 115200 8N1 — raw passthrough (verbatim output, copyable)."))
+		fmt.Println(L("\nUART-терминал + XMODEM, 115200 8N1 — прозрачный режим (вывод как есть, копируется).",
+			"\nUART terminal + XMODEM, 115200 8N1 — raw passthrough (verbatim output, copyable)."))
 		fmt.Println(L("Ctrl+] — меню: l — построчный ввод с историей ↑/↓, s/r — XMODEM отправка/приём, g — лог, q — выход.",
 			"Ctrl+] — menu: l line-input with ↑/↓ history, s/r XMODEM send/receive, g log, q quit."))
 		fmt.Println(L("Ctrl+Q — быстрый выход, Ctrl+P — pager для обычного текстового вывода. top/vi и другие TUI отключают pager автоматически.",
 			"Ctrl+Q — quick exit, Ctrl+P — pager for normal text output. top/vi and other TUIs disable it automatically."))
 	}
-	fmt.Println(L("В Windows QuickEdit/clipboard остаётся включён. Всё пишется в лог.",
-		"On Windows QuickEdit/clipboard stays enabled. Everything is logged."))
+	if t.chrome == nil {
+		fmt.Println(L("В Windows QuickEdit/clipboard остаётся включён. Всё пишется в лог.",
+			"On Windows QuickEdit/clipboard stays enabled. Everything is logged."))
+	}
 	state, e := consoleRaw()
 	if e != nil {
 		return fmt.Errorf(L("raw-консоль: %w", "raw console: %w"), e)
 	}
 	defer consoleRestore(state)
+	if t.chrome != nil {
+		t.mu.Lock()
+		t.chromeStartLocked(false)
+		os.Stdout.WriteString(chromePlate(max(40, t.chrome.cols), title, s.Name(), simple))
+		t.mu.Unlock()
+		defer func() {
+			t.mu.Lock()
+			t.chromeStopLocked()
+			t.mu.Unlock()
+		}()
+	}
 
 	rxErr := make(chan error, 1)
 	go t.readLoop(rxErr)
@@ -252,7 +273,7 @@ func (t *uartTerm) writeRawInput(p []byte) error {
 		}
 		if t.simple {
 			t.quit = true
-			fmt.Print(L("\r\n[выход из UART Shell]\r\n", "\r\n[UART Shell exit]\r\n"))
+			fmt.Print(L("\r\n[выход из прозрачной UART-консоли]\r\n", "\r\n[transparent UART console exit]\r\n"))
 			return nil
 		}
 		var choice byte
@@ -307,6 +328,9 @@ func (t *uartTerm) pagerIsWaiting() bool {
 }
 
 func (t *uartTerm) pageSizeLocked() int {
+	if r := t.chromeRowsLocked(); r > 2 {
+		return r - 1
+	}
 	r := consoleRows()
 	if r < 8 {
 		return 20
@@ -320,6 +344,7 @@ func (t *uartTerm) togglePager() {
 	t.pagerEnabled = !t.pagerEnabled
 	t.pagerWaiting = false
 	t.pagerLines = 0
+	t.chromeRefreshLocked()
 	if !t.pagerEnabled {
 		if len(t.pagerPending) > 0 {
 			os.Stdout.Write(t.pagerPending)
@@ -374,6 +399,21 @@ func (t *uartTerm) deviceOutput(d []byte) {
 		t.pagerANSIProbe = append(t.pagerANSIProbe[:0], probe[len(probe)-64:]...)
 	} else {
 		t.pagerANSIProbe = append(t.pagerANSIProbe[:0], probe...)
+	}
+	if t.chromeDeviceLocked(probe) {
+		// Bring the chrome back right after the program leaves the alternate
+		// screen, so what the device prints next (its prompt) stays visible.
+		if i := altScreenExit(d); i >= 0 {
+			os.Stdout.Write(d[:i])
+			d = d[i:]
+			t.chromeResumeLocked()
+			t.pagerANSIProbe = t.pagerANSIProbe[:0]
+		} else {
+			defer func() {
+				t.chromeResumeLocked()
+				t.pagerANSIProbe = t.pagerANSIProbe[:0]
+			}()
+		}
 	}
 
 	if t.pagerEnabled && hasFullscreenANSI(probe) {
@@ -492,6 +532,10 @@ func (t *uartTerm) menuChoice(prefetched byte) {
 	if !t.raw && t.lineShown {
 		t.eraseLineLocked()
 	}
+	if t.chrome != nil && t.chrome.suspended {
+		t.chromeResumeLocked()
+		t.pagerANSIProbe = t.pagerANSIProbe[:0]
+	}
 	t.mu.Unlock()
 	mode := L("сейчас: прозрачный", "now: raw")
 	if !t.raw {
@@ -511,6 +555,9 @@ func (t *uartTerm) menuChoice(prefetched byte) {
 		t.xmodemRecvInteractive()
 	case 'l', 'L':
 		t.raw = !t.raw
+		t.mu.Lock()
+		t.chromeRefreshLocked()
+		t.mu.Unlock()
 		if t.raw {
 			fmt.Print(L("[прозрачный режим: вывод как есть, копируется; история — стрелками устройства]\r\n",
 				"[raw mode: verbatim output, copyable; history via the device's own arrows]\r\n"))

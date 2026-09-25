@@ -166,6 +166,19 @@ Releases by CI.
   provenance are in `payloads/`; `--selftest` checks them too. The fip-volume write of Restore FIP
   moved into a shared helper (same commands).
 
+- TUI, after a reviewer's analysis: the UART consoles no longer drop into a black screen. The raw
+  backend (`tea.Exec`, `consoleRaw`, XMODEM, the fullscreen-ANSI detector) is unchanged; the new
+  `term_chrome.go` draws an UrsidoRescue header and key bar around it through an ANSI scroll region,
+  shows an entry plate, gives the screen to `top`/`vi`/a bootmenu and comes back after them. The
+  consoles' port is chosen in the TUI dialog first. `--console` prints as before.
+- Names: "UART Shell" → "Transparent UART console", "UART terminal" → "UART terminal + XMODEM" (both
+  front ends). The TUI Expert tab is ordered by risk, and the risk (`MANUAL` / `RAM only` / `WRITE` /
+  `RAW WRITE` / `ERASE`) shows under each item. The help bar shows the F-keys; during an operation
+  the top bar shows its name and phase (`READ 37%`, `2/6`).
+- UrsusBoot install: overall progress in 6 steps (RAM U-Boot and layout → read → checks and build →
+  TFTP → write → final readback); before the read it says what is read and that nothing was written
+  yet; on stock, after the block writes the whole 0x80000 area is read back and CRC32-checked.
+- The small bear's caption no longer shifts the divider at 80 columns.
 ---
 
 ## 0.2.0-test17 (2026-09-24 12:39–12:49)
