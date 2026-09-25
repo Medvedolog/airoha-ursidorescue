@@ -140,6 +140,7 @@ a profile update means the program refuses to work. File provenance:
 | `payloads/mf/an7583-preloader.bin` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/ursusboot-uart-preloader.bin` |
 | `payloads/mf/an7583-recovery-ram.fip` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/recovery-safe-u-boot.fip` |
 | `payloads/md/ursusboot-md-0.1.0-alpha5-t67-update.fip` | airoha-ursusboot `8c2567ab` (t67) `xg040-md/ursusboot-update.fip`, from UrsusFlasher 0.2.67; for Expert → Install UrsusBoot |
+| `payloads/md/vanilla-u-boot-md-0.1.0-alpha5-t67.fip`, `payloads/mf/vanilla-u-boot-mf-0.1.0-alpha5-t67.fip` | UrsusFlasher 0.2.67 `data/payloads/{md,mf}/vanilla/`; = UrsusBoot `8c2567ab` (t67) `vanilla-u-boot.fip`, SHA256 from the provenance; for Expert → Return/update vanilla U-Boot |
 | `payloads/mf/ursusboot-mf-0.1.0-alpha5-t67-u-boot.runtime.lzma` | airoha-ursusboot `8c2567ab` (t67) `xg040-mf/u-boot.runtime.lzma`, from UrsusFlasher 0.2.67; for Expert → Install UrsusBoot |
 
 The UrsusBoot t67 provenance (commit, hashes of every build file) is in `payloads/provenance/`.

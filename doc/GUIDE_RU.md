@@ -37,8 +37,8 @@ UrsidoRescue-0.2.0-test18/
   UrsidoRescue-linux-amd64    Linux x86_64
   UrsidoRescue-linux-arm64    Linux aarch64 (Raspberry Pi 4/5, ARM-ноутбуки)
   VERSION
-  payloads/md/…               preloader, RAM FIP и UrsusBoot t67 для XG-040G-MD
-  payloads/mf/…               preloader, RAM FIP и UrsusBoot t67 для XG-040G-MF
+  payloads/md/…               preloader, RAM FIP, UrsusBoot и vanilla t67 для MD
+  payloads/mf/…               preloader, RAM FIP, UrsusBoot и vanilla t67 для MF
   STATUS.md  PROBE.md  SHA256SUMS
 ```
 

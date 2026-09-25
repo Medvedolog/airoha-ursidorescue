@@ -217,7 +217,7 @@ func (a *App) ursusBootInstallWizard() error {
 	if layout == "ubi" {
 		a.event(L("Разметка: UBI (OpenWrt/UrsusBoot) — обновляется только UBI-том fip, BL2 не трогается",
 			"Layout: UBI (OpenWrt/UrsusBoot); only the UBI volume fip is updated, BL2 is not touched"))
-		e = a.installUBIFIP(s, p, payload)
+		e = a.installUBIFIP(s, p, ursusBootImage(p, payload))
 	} else {
 		a.event(L("Разметка: стоковая Nokia — FIP на 0x800 загрузочной области",
 			"Layout: stock Nokia; FIP at 0x800 of the boot area"))
@@ -362,7 +362,27 @@ func (a *App) installStockBootArea(s Serial, p Profile, payload []byte) error {
 	return nil
 }
 
-func (a *App) installUBIFIP(s Serial, p Profile, payload []byte) error {
+// fipImage is what goes into the UBI volume fip: its name for the operator,
+// the typed confirmation, and how the candidate is built from the volume's
+// current content.
+type fipImage struct {
+	name   string // "UrsusBoot 0.1.0-alpha5-t67", "vanilla U-Boot …"
+	phrase string
+	build  func(cur []byte) ([]byte, installReport, error)
+}
+
+func ursusBootImage(p Profile, payload []byte) fipImage {
+	img := fipImage{name: "UrsusBoot " + p.BootVersion, phrase: "INSTALL URSUSBOOT"}
+	img.build = func(cur []byte) ([]byte, installReport, error) {
+		if p.ID == "md" {
+			return mdUBIFIP(cur, payload)
+		}
+		return mfDeriveFIP(cur, payload)
+	}
+	return img
+}
+
+func (a *App) installUBIFIP(s Serial, p Profile, img fipImage) error {
 	if _, e := a.ubootCommand(s, "ubi part ubi", 3*time.Minute); e != nil {
 		return fmt.Errorf(L("не удалось подключить UBI: %w", "UBI attach failed: %w"), e)
 	}
@@ -404,17 +424,13 @@ func (a *App) installUBIFIP(s Serial, p Profile, payload []byte) error {
 	a.installPhase(3, L("проверка и сборка", "checks and build"))
 	var cand []byte
 	var rep installReport
-	if p.ID == "md" {
-		cand, rep, e = mdUBIFIP(cur, payload)
-	} else {
-		cand, rep, e = mfDeriveFIP(cur, payload)
-	}
+	cand, rep, e = img.build(cur)
 	if e != nil {
 		return fmt.Errorf(L("кандидат не собран: %w", "candidate not built: %w"), e)
 	}
 	a.reportInstall(rep)
 	if bytes.Equal(cand, cur) {
-		a.status("OK", fmt.Sprintf(L("UrsusBoot %s уже установлен — запись не нужна", "UrsusBoot %s is already installed; nothing to write"), p.BootVersion), app.LevelOK)
+		a.status("OK", fmt.Sprintf(L("%s уже установлен — запись не нужна", "%s is already installed; nothing to write"), img.name), app.LevelOK)
 		return errAlreadyInstalled
 	}
 	if c := vol.capacity(); c != 0 && uint64(len(cand)) > c {
@@ -429,8 +445,8 @@ func (a *App) installUBIFIP(s Serial, p Profile, payload []byte) error {
 		return e
 	}
 	a.noteln(L("\nВсе проверки чтения пройдены. Будет перезаписан ТОЛЬКО UBI-том fip.", "\nAll read-only gates passed. ONLY the UBI volume fip will be overwritten."))
-	if e = a.confirmOp(app.Write, "INSTALL URSUSBOOT", []string{
-		fmt.Sprintf(L("перезаписать UBI-том fip: UrsusBoot %s, %d байт", "overwrite the UBI volume fip: UrsusBoot %s, %d bytes"), p.BootVersion, len(cand)),
+	if e = a.confirmOp(app.Write, img.phrase, []string{
+		fmt.Sprintf(L("перезаписать UBI-том fip: %s, %d байт", "overwrite the UBI volume fip: %s, %d bytes"), img.name, len(cand)),
 		L("прочитать том обратно и сверить CRC32; BL2 не трогается", "read the volume back and compare CRC32; BL2 is not touched"),
 		L("бэкап: ", "backup: ") + before,
 	}); e != nil {
@@ -446,7 +462,7 @@ func (a *App) installUBIFIP(s Serial, p Profile, payload []byte) error {
 		return e
 	}
 	a.cancelNow()
-	a.event(L("UrsusBoot записан в том fip, проверка PASS; SHA256=", "UrsusBoot written to the fip volume, readback PASS; SHA256=") + rep.TargetSHA)
+	a.event(fmt.Sprintf(L("%s записан в том fip, проверка PASS; SHA256=", "%s written to the fip volume, readback PASS; SHA256="), img.name) + rep.TargetSHA)
 	return nil
 }
 
@@ -492,4 +508,78 @@ func (a *App) bootAreaReadback(s Serial, crc uint32) error {
 		return e
 	}
 	return a.deviceCRC(s, verifyAddr, bootAreaSize, crc)
+}
+
+// vanillaImage is the pinned vanilla OpenWrt U-Boot FIP of the UrsusBoot
+// release (the one UrsusFlasher swaps UrsusBoot for), written as is.
+func vanillaImage(p Profile, fip []byte) fipImage {
+	img := fipImage{name: "vanilla U-Boot " + p.BootVersion, phrase: "INSTALL VANILLA UBOOT"}
+	img.build = func(cur []byte) ([]byte, installReport, error) {
+		l, err := parseFIP(fip, uint64(len(fip)))
+		if err != nil {
+			return nil, installReport{}, fmt.Errorf("vanilla FIP: %w", err)
+		}
+		if len(fip) > bootFIPMax || len(l.find(uuidNTFW)) != 1 {
+			return nil, installReport{}, errors.New("vanilla FIP: no single NT_FW or too large")
+		}
+		r := installReport{Method: "vanilla-pinned-ubi", SourceSHA: shaHex(cur), TargetSHA: shaHex(fip),
+			Entries: len(l.Entries), TargetEnd: l.End}
+		nt := l.find(uuidNTFW)[0]
+		r.NTOff, r.TargetNTSize = nt.Off, nt.Size
+		if cl, err := parseFIP(cur, uint64(len(cur))); err == nil {
+			r.SourceEnd = cl.End
+			if nts := cl.find(uuidNTFW); len(nts) == 1 {
+				r.SourceNTSize = nts[0].Size
+			}
+		}
+		return append([]byte(nil), fip...), r, nil
+	}
+	return img
+}
+
+// vanillaUBootWizard puts the pinned vanilla OpenWrt U-Boot back into the UBI
+// volume fip over the UART (return from UrsusBoot, or update an older
+// vanilla). Vanilla U-Boot lives only on the OpenWrt UBI layout; the stock
+// layout is refused.
+func (a *App) vanillaUBootWizard() error {
+	a.showNetworkPrerequisites()
+	a.installPhase(1, L("RAM U-Boot и разметка", "RAM U-Boot and layout"))
+	pref, e := chooseProfileInteractive(a)
+	if e != nil {
+		return e
+	}
+	s, p, _, e := a.acquireRAMUBoot(pref)
+	if e != nil {
+		return e
+	}
+	defer func() { s.Close(); a.closeLog() }()
+	fip, e := os.ReadFile(filepath.Join(a.root, filepath.FromSlash(p.VanillaRel)))
+	if e != nil {
+		return e
+	}
+	img := vanillaImage(p, fip)
+	a.event(fmt.Sprintf(L("%s для %s: %s", "%s for %s: %s"), img.name, p.Model, p.VanillaRel))
+	layout, e := a.bootLayout(s)
+	if e != nil {
+		return e
+	}
+	if layout != "ubi" {
+		return errors.New(L("разметка стоковая Nokia: vanilla U-Boot работает только в UBI-разметке OpenWrt (preloader BL2 + UBI-том fip). "+
+			"Со стока — «Установить UrsusBoot (UART)» или переход на OpenWrt UBI через UrsusFlasher; во flash ничего не записано",
+			"the layout is stock Nokia: vanilla U-Boot runs only on the OpenWrt UBI layout (preloader BL2 + UBI volume fip). "+
+				"From stock use Install UrsusBoot (UART) or move to OpenWrt UBI with UrsusFlasher; nothing was written"))
+	}
+	a.event(L("Разметка: UBI — обновляется только UBI-том fip, BL2 не трогается",
+		"Layout: UBI; only the UBI volume fip is updated, BL2 is not touched"))
+	e = a.installUBIFIP(s, p, img)
+	if e != nil && !errors.Is(e, errAlreadyInstalled) {
+		return e
+	}
+	a.ui.Progress(app.Progress{Label: L("ВСЕГО", "TOTAL"), Current: installSteps, Total: installSteps, Unit: "steps", Overall: true,
+		Detail: L("готово", "done")})
+	a.noteln(L("Можно выполнить reset. Нажмите Enter для reset или введите N чтобы оставить RAM U-Boot.", "Ready to reset. Press Enter to reset or type N to stay in RAM U-Boot."))
+	if a.askResetOrStay() {
+		_ = sendLine(s, "reset")
+	}
+	return nil
 }

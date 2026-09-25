@@ -139,6 +139,7 @@ SPI-NAND 256 МиБ (0x10000000), eraseblock 0x20000, страница (min I/O)
 | `payloads/mf/an7583-preloader.bin` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/ursusboot-uart-preloader.bin` |
 | `payloads/mf/an7583-recovery-ram.fip` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/recovery-safe-u-boot.fip` |
 | `payloads/md/ursusboot-md-0.1.0-alpha5-t67-update.fip` | airoha-ursusboot `8c2567ab` (t67) `xg040-md/ursusboot-update.fip`, из UrsusFlasher 0.2.67; для «Эксперт → Установить UrsusBoot» |
+| `payloads/md/vanilla-u-boot-md-0.1.0-alpha5-t67.fip`, `payloads/mf/vanilla-u-boot-mf-0.1.0-alpha5-t67.fip` | UrsusFlasher 0.2.67 `data/payloads/{md,mf}/vanilla/`; = `vanilla-u-boot.fip` UrsusBoot `8c2567ab` (t67), SHA256 из provenance; для «Эксперт → Вернуть/обновить vanilla U-Boot» |
 | `payloads/mf/ursusboot-mf-0.1.0-alpha5-t67-u-boot.runtime.lzma` | airoha-ursusboot `8c2567ab` (t67) `xg040-mf/u-boot.runtime.lzma`, из UrsusFlasher 0.2.67; для «Эксперт → Установить UrsusBoot» |
 
 Provenance UrsusBoot t67 (коммит, хеши всех файлов сборки) лежит в `payloads/provenance/`.

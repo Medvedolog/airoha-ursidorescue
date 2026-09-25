@@ -214,3 +214,40 @@ func TestParseUBIVolumes(t *testing.T) {
 		t.Fatalf("%+v", vols[1])
 	}
 }
+
+// The pinned vanilla FIPs are written as they are, and the same bytes in the
+// volume read as "already installed".
+func TestVanillaImages(t *testing.T) {
+	for _, id := range []string{"md", "mf"} {
+		p := profiles[id]
+		fip, err := os.ReadFile(p.VanillaRel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if int64(len(fip)) != p.VanillaSize || shaHex(fip) != p.VanillaSHA {
+			t.Fatalf("%s: vanilla pin mismatch", id)
+		}
+		img := vanillaImage(p, fip)
+		if img.phrase != "INSTALL VANILLA UBOOT" || !strings.Contains(img.name, "vanilla U-Boot") {
+			t.Fatalf("%s: image %+v", id, img)
+		}
+		old, _ := os.ReadFile(p.BootRel) // any other FIP-looking current content
+		cand, r, err := img.build(old)
+		if err != nil || !bytes.Equal(cand, fip) || r.TargetSHA != p.VanillaSHA {
+			t.Fatalf("%s: build %v", id, err)
+		}
+		if again, _, _ := img.build(fip); !bytes.Equal(again, fip) {
+			t.Fatalf("%s: vanilla over vanilla must be the same bytes", id)
+		}
+	}
+}
+
+// On MF the UrsusBoot install over this vanilla refuses (unaligned FIP)
+// instead of guessing; the documentation says so.
+func TestMFUrsusBootOverVanillaRefuses(t *testing.T) {
+	v, _ := os.ReadFile(profiles["mf"].VanillaRel)
+	b, _ := os.ReadFile(profiles["mf"].BootRel)
+	if _, _, err := mfDeriveFIP(v, b); err == nil || !strings.Contains(err.Error(), "alignment") {
+		t.Fatalf("want an alignment refusal, got %v", err)
+	}
+}

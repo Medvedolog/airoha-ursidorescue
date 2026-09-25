@@ -18,6 +18,8 @@ install, the UART console frame and the file/folder dialogs are not hardware-tes
   the raw stream; it steps aside for alternate-screen programs and bootmenus.
 - Expert → Install UrsusBoot (UART): persistent UrsusBoot 0.1.0-alpha5-t67 on MD and MF, stock or
   UBI layout, built from the device's own boot area read over the UART; pinned payloads.
+- Expert → Return/update vanilla U-Boot (UART): the pinned vanilla OpenWrt U-Boot t67 from the
+  UrsusFlasher kit into the UBI volume fip, the same UART path as the UrsusBoot install on UBI.
 - Recent paths per operation and Browse (Windows file/folder dialogs, zenity/kdialog on Linux).
 - Fixed a false "readback CRC mismatch": the U-Boot prompt detector took the "=>" of crc32's
   "==>" for a prompt when a UART read ended right after it; readback mismatches are also re-read

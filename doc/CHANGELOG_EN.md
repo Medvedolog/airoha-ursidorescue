@@ -212,6 +212,12 @@ Releases by CI.
 - Result screen: a full-width banner, "√ DONE · <operation> — completed successfully" (green),
   "× FAILED" (bordeaux) or "! INCOMPLETE" (sand), with the same result at the right of the top bar; after
   a success the overall bar shows 100 % ("all done and verified"), not the last step announced.
+- **Expert 8 / TUI Expert → Return/update vanilla U-Boot:** over the UART writes the pinned vanilla
+  OpenWrt U-Boot t67 from the UrsusFlasher 0.2.67 kit (MD `0aac2e6b…`, MF `18b1650e…`, equal to the
+  UrsusBoot provenance) into the UBI volume `fip`, instead of UrsusBoot or an older vanilla. The same
+  path as the UrsusBoot install on UBI: the volume read over the UART into a backup, static volume,
+  room check, TFTP, `INSTALL VANILLA UBOOT`, write and CRC. The stock layout is refused with nothing
+  written. The vanilla files are checked by `validatePinned` and `--selftest`.
 ---
 
 ## 0.2.0-test17 (2026-09-24 12:39–12:49)

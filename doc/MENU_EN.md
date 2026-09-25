@@ -421,6 +421,7 @@ Expert mode
   5. Diagnostics
   6. Transparent UART console (sends nothing by itself)
   7. Install UrsusBoot (UART, MD/MF)
+  8. Return or update vanilla U-Boot (UART, UBI)
   0. Back
 ```
 
@@ -516,6 +517,27 @@ interrupted.
 
 On hardware: on MF the same method (UrsusFlasher 0.2.67 over telnet, stock Nokia) booted and
 survived the move to UBI; the UrsidoRescue UART path itself is not hardware-tested yet.
+
+#### Expert 8. Return or update vanilla U-Boot (UART, UBI)
+
+Writes the pinned vanilla OpenWrt U-Boot from the UrsusFlasher 0.2.67 kit, of the same UrsusBoot t67
+release (`vanilla-u-boot-md|mf-0.1.0-alpha5-t67.fip`, SHA256 pinned in the profiles and equal to the
+UrsusBoot provenance), into the UBI volume `fip`. It is the UART path for what UrsusFlasher does as
+its last step: replace UrsusBoot with vanilla, or update an older vanilla.
+
+1. Profile → RAM U-Boot → layout detection, as in item 7.
+2. **OpenWrt UBI layout only** (preloader BL2 + the `fip` volume). The stock layout is refused and
+   nothing is written: vanilla U-Boot would not boot there; from stock use item 7 or move to UBI
+   with UrsusFlasher.
+3. `ubi part ubi` → exactly one **static** `fip` volume → its content is read over the UART (`md.l` +
+   `crc32`) and kept in the session (`ursusboot/fip-before.bin`).
+4. If the volume already holds exactly this vanilla: "already installed", nothing to write.
+5. The image over TFTP → RAM check → typed `INSTALL VANILLA UBOOT` → `ubi write` → `ubi read` +
+   CRC32. BL2 is not touched. Progress: the same 6 steps as item 7.
+
+Putting UrsusBoot back: on MD with item 7 (it writes the pinned FIP whole). On MF item 7 refuses over
+this vanilla with nothing written: the MF UrsusBoot is built by replacing BL33 in the current FIP, and
+the vanilla FIP entries are not aligned (like UrsusFlasher, the wizard requires 16-byte alignment).
 
 ---
 
