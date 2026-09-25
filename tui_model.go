@@ -1053,7 +1053,7 @@ func (m *tuiModel) viewMenu(h int) []string {
 	if !spaced && it.hint != "" {
 		desc = append([]string{tsSand.Render(it.hint)}, desc...)
 	}
-	// The winking bear only takes free space: big in the top-left corner when
+	// The bear only takes free space: big in the top-left corner when
 	// the whole menu and description still fit under it, otherwise small in
 	// the rows the list leaves empty beside a longer description, otherwise
 	// not at all. The description always wins.

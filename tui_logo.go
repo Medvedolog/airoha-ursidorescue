@@ -6,42 +6,32 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// The winking, smiling teddy-bear head of the Ursus family, drawn with
+// The smiling teddy-bear head of the Ursus family, drawn with
 // half-block characters (▀▄█), which every console font has. The big one is
 // generated from ellipses (head, ears) with the inner ears, the eyes, the
 // nose and the smile cut out; the small one is drawn by hand for short
-// terminals. The right eye winks: its "▀▀▀" is the only accent.
+// terminals. Both are mirror-symmetric (a test keeps them so).
 var (
 	bearBig = []string{
 		" ████        ████",
 		"▀█  ██████████  █▀",
 		" ████████████████",
-		"▄████  ████▀▀▀███▄",
+		"▄████  ████  ████▄",
 		"████████▀▀████████",
 		" ████▀██▄▄██▀████",
 		"  ▀███▄▄▄▄▄▄███▀",
 		"      ▀▀▀▀▀▀",
 	}
-	// The small head keeps its features small: the open eye a half-cell dot,
-	// the wink a two-cell lid, a four-cell smile.
+	// The small head keeps its features small: half-cell eyes, a nose and
+	// a short smile, mirror-symmetric like the big one.
 	bearSmall = []string{
 		"▄███▄    ▄███▄",
 		"▀█▄▄██████▄▄█▀",
-		" ███▀███▄▄███",
+		" ███▀████▀███",
 		" ████▀▄▄▀████",
-		"  ▀▀█▄▄▄▄█▀▀",
+		"  ▀███▄▄███▀",
 	}
 )
-
-// The wink is the only accent: the token on the eye row of each head.
-const bearWink = "▀▀▀"
-
-func bearWinkOf(art []string) (row int, token string) {
-	if len(art) == len(bearSmall) {
-		return 2, "▄▄"
-	}
-	return 3, bearWink
-}
 
 // tuiLogo is the bear with the name and version beside it, for a screen
 // corner, within rows × width. It returns nil when not even the small bear
@@ -74,11 +64,6 @@ func tuiLogo(rows, width int) []string {
 	out := make([]string, len(art))
 	for i, l := range art {
 		drawn := tsBrand.Render(l)
-		if row, tok := bearWinkOf(art); i == row {
-			if j := strings.Index(l, tok); j >= 0 {
-				drawn = tsBrand.Render(l[:j]) + tsSand.Render(tok) + tsBrand.Render(l[j+len(tok):])
-			}
-		}
 		out[i] = " " + drawn // a margin from the screen edge
 		if t := i - first; t >= 0 && t < len(text) {
 			if line := out[i] + strings.Repeat(" ", artW-lipgloss.Width(l)+3) + text[t]; lipgloss.Width(line) <= width {

@@ -203,7 +203,8 @@ Releases by CI.
   the top bar shows the operation's whole name or only its step, never a cut name; STOP is one button
   ("■ STOP: s / Ctrl+C") and when it acts is said in the operation panel; the chosen port is remembered
   and shown as "○ COM6 free" between operations (a vanished port is asked again); status marks √ and ×
-  instead of ✓ and ✗, which Windows console fonts lack; the small bear has a smaller eye and smile.
+  instead of ✓ and ✗, which Windows console fonts lack; both bears are redrawn mirror-symmetric without the wink
+  (the small one: half-cell eyes, a nose, a short smile; a test keeps them symmetric).
 ---
 
 ## 0.2.0-test17 (2026-09-24 12:39–12:49)

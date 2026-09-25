@@ -260,9 +260,9 @@ func TestTUILogo(t *testing.T) {
 				}
 			}
 		}
-		// Where there is room the winking bear and the version are shown.
+		// Where there is room the bear and the version are shown.
 		m.tab, m.cur = 0, 0
-		if v := m.View(); !(strings.Contains(v, bearBig[3][:strings.Index(bearBig[3], bearWink)]) || strings.Contains(v, bearSmall[2][:strings.Index(bearSmall[2], "▄▄")])) || !strings.Contains(v, appVersion) {
+		if v := m.View(); !(strings.Contains(v, bearBig[3]) || strings.Contains(v, bearSmall[2])) || !strings.Contains(v, appVersion) {
 			t.Errorf("%dx%d: the bear with the version must be in the main tab:\n%s", sz[0], sz[1], v)
 		}
 	}
@@ -483,5 +483,23 @@ func TestTUIHideLog(t *testing.T) {
 	}
 	if w := lipgloss.Width(m.viewLog(5)[0]); w != 100 {
 		t.Fatalf("log bar width %d, want the full 100", w)
+	}
+}
+
+// Both bears are mirror images of themselves: no crooked face.
+func TestBearSymmetric(t *testing.T) {
+	for _, art := range [][]string{bearBig, bearSmall} {
+		w := 0
+		for _, l := range art {
+			w = max(w, len([]rune(l)))
+		}
+		for _, l := range art {
+			r := []rune(l + strings.Repeat(" ", w-len([]rune(l))))
+			for i := range r {
+				if r[i] != r[len(r)-1-i] {
+					t.Fatalf("row %q is not symmetric at %d", l, i)
+				}
+			}
+		}
 	}
 }
