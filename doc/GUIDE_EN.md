@@ -236,11 +236,12 @@ operation the screen shows its result and session ID; the full path to the log d
 |---|---|
 | ↑ ↓, ← → / Tab | pick an item and a section; in a dialog, pick an option |
 | Enter | run the item; answer a dialog |
-| F4, p | choose and connect the UART port (or disconnect) |
-| s, Ctrl+C | STOP during an operation; the core decides (a second Ctrl+C within 3 s forces exit) |
+| F4, p | choose and connect the UART port (or disconnect). The port is remembered: closed between operations (the top bar shows "○ COM6 free", other programs may use it), the next operation opens it without asking |
+| s, Ctrl+C | the same STOP button (top right). When it acts is written in the operation panel: at once, after the current chunk (the current step is not cut) or unavailable now. A second Ctrl+C within 3 s forces exit |
 | PgUp / PgDn, End | scroll the log, jump to new lines |
 | F2, f | log filter: all / UART / events |
 | F3, m | large log |
+| F5, h | fold the log to its bar (the operation panel with steps and commands stays) / show it |
 | l | language: Russian / English |
 | F10, q | quit (when no operation runs) |
 

@@ -222,7 +222,15 @@ func (a *App) connectChosenPort(owner *app.PortOwner) error {
 	for err == nil {
 		err = owner.Connect(name)
 		if err == nil {
+			a.rememberPort(name)
 			return nil
+		}
+		if !errors.Is(err, errPortInUse) && a.portOverride == "" && name == a.rememberedPort() {
+			// The port chosen before is gone (adapter unplugged): ask again.
+			a.status("!", fmt.Sprintf(L("%s недоступен (%v) — выберите порт", "%s is not available (%v); choose a port"), name, err), app.LevelWarn)
+			a.rememberPort("")
+			name, err = a.askPort()
+			continue
 		}
 		if !errors.Is(err, errPortInUse) || a.portOverride != "" {
 			return fmt.Errorf(L("не удалось открыть %s: %w", "open %s: %w"), name, err)
@@ -244,7 +252,7 @@ func (a *App) connectChosenPort(owner *app.PortOwner) error {
 		case "", "r", "к":
 			err = nil // the same port again
 		case "p", "з":
-			name, err = a.choosePort()
+			name, err = a.askPort()
 		default:
 			return cancelledError{L("выбор порта отменён", "port choice cancelled")}
 		}
@@ -404,4 +412,18 @@ func (a *App) stopBeforeCommand(command string) error {
 		return stopError(L("до команды ", "before the command ") + command)
 	}
 	return nil
+}
+
+// rememberPort keeps the operator's port for the next operation and the top
+// bar; "" forgets it.
+func (a *App) rememberPort(name string) {
+	a.portMu.Lock()
+	a.lastPort = name
+	a.portMu.Unlock()
+}
+
+func (a *App) rememberedPort() string {
+	a.portMu.Lock()
+	defer a.portMu.Unlock()
+	return a.lastPort
 }

@@ -22,16 +22,26 @@ var (
 		"  ▀███▄▄▄▄▄▄███▀",
 		"      ▀▀▀▀▀▀",
 	}
+	// The small head keeps its features small: the open eye a half-cell dot,
+	// the wink a two-cell lid, a four-cell smile.
 	bearSmall = []string{
 		"▄███▄    ▄███▄",
 		"▀█▄▄██████▄▄█▀",
-		" ██  ███▀▀▀██",
-		" ███▀█▄▄█▀███",
+		" ███▀███▄▄███",
+		" ████▀▄▄▀████",
 		"  ▀▀█▄▄▄▄█▀▀",
 	}
 )
 
+// The wink is the only accent: the token on the eye row of each head.
 const bearWink = "▀▀▀"
+
+func bearWinkOf(art []string) (row int, token string) {
+	if len(art) == len(bearSmall) {
+		return 2, "▄▄"
+	}
+	return 3, bearWink
+}
 
 // tuiLogo is the bear with the name and version beside it, for a screen
 // corner, within rows × width. It returns nil when not even the small bear
@@ -64,8 +74,10 @@ func tuiLogo(rows, width int) []string {
 	out := make([]string, len(art))
 	for i, l := range art {
 		drawn := tsBrand.Render(l)
-		if j := strings.Index(l, bearWink); j >= 0 {
-			drawn = tsBrand.Render(l[:j]) + tsSand.Render(bearWink) + tsBrand.Render(l[j+len(bearWink):])
+		if row, tok := bearWinkOf(art); i == row {
+			if j := strings.Index(l, tok); j >= 0 {
+				drawn = tsBrand.Render(l[:j]) + tsSand.Render(tok) + tsBrand.Render(l[j+len(tok):])
+			}
 		}
 		out[i] = " " + drawn // a margin from the screen edge
 		if t := i - first; t >= 0 && t < len(text) {

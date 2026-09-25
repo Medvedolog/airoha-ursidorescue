@@ -126,16 +126,16 @@ func TestChromeFollowsWidthOnlyResize(t *testing.T) {
 func TestTopBarPhase(t *testing.T) {
 	m := &tuiModel{busy: true, opTitle: "Установить UrsusBoot (UART)"}
 	m.progress = &app.Progress{Label: "READ", Current: 37, Total: 100}
-	if ph := m.phase(); !strings.Contains(ph, "READ 37%") {
-		t.Fatalf("phase %q", ph)
+	if name, step := m.phase(); name != m.opTitle || step != "READ 37%" {
+		t.Fatalf("phase %q %q", name, step)
 	}
 	m.progress = nil
 	m.overall = &app.Progress{Current: 1, Total: 6}
-	if ph := m.phase(); !strings.HasSuffix(ph, "2/6") {
-		t.Fatalf("phase %q", ph)
+	if _, step := m.phase(); !strings.HasSuffix(step, "2/6") {
+		t.Fatalf("step %q", step)
 	}
 	m.busy = false
-	if m.phase() != "" {
+	if name, step := m.phase(); name != "" || step != "" {
 		t.Fatal("no phase when idle")
 	}
 }

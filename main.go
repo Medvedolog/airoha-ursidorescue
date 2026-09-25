@@ -128,6 +128,8 @@ type App struct {
 	op        string       // its operation ID
 	probeSess *app.Session // current Porting session (spans probe items)
 	recent    recentPaths  // paths given in this run, per operation
+	portMu    sync.Mutex
+	lastPort  string // the UART the operator chose last; kept closed between operations
 }
 
 func main() { os.Exit(realMain()) }
@@ -502,6 +504,15 @@ func (a *App) choosePort() (string, error) {
 	if a.portOverride != "" {
 		return a.portOverride, nil
 	}
+	// The TUI keeps the port chosen before (the top bar shows it; p changes
+	// it). The text console asks every time, as it always did.
+	if name := a.rememberedPort(); name != "" && a.frontEnd == "tui" {
+		return name, nil
+	}
+	return a.askPort()
+}
+
+func (a *App) askPort() (string, error) {
 	ports := listSerialPorts()
 	title := L("Найденные UART:", "UART ports found:")
 	if len(ports) == 0 {
@@ -897,7 +908,9 @@ func promptPresent(b []byte) bool {
 	if len(b) > 8192 {
 		b = b[len(b)-8192:]
 	}
-	clean := ansiCSIForPromptRE.ReplaceAll(b, nil)
+	// ANSI counts as a line break: a bootmenu may draw the prompt by
+	// cursor addressing right after other text.
+	clean := ansiCSIForPromptRE.ReplaceAll(b, []byte("\n"))
 	clean = bytes.TrimRight(clean, " \t\r\n\x00")
 	for _, suffix := range [][]byte{
 		[]byte("AN7581>"),
@@ -905,7 +918,18 @@ func promptPresent(b []byte) bool {
 		[]byte("U-Boot>"),
 		[]byte("=>"),
 	} {
-		if bytes.HasSuffix(clean, suffix) {
+		if !bytes.HasSuffix(clean, suffix) {
+			continue
+		}
+		// A prompt starts a line (or follows the ANSI a menu drew with):
+		// "crc32 … ==>" cut by a serial read right after the arrow, or
+		// "a=>b" in printenv, is output, not the prompt.
+		before := len(clean) - len(suffix)
+		if before == 0 {
+			return true
+		}
+		switch clean[before-1] {
+		case '\n', '\r', ' ', '\t', 0:
 			return true
 		}
 	}
@@ -1811,20 +1835,30 @@ func (a *App) verifyRAM(s Serial, path string, addr uint64) error {
 }
 
 func (a *App) readbackCRC(s Serial, target string, off, size, ram uint64, expected uint32) error {
-	if _, e := a.ubootCommand(s, fmt.Sprintf("mw.b 0x%x 0x00 0x%x", ram, size), 2*time.Minute); e != nil {
-		return e
+	// A mismatch is read again before it counts: the check only reads, and a
+	// garbled UART exchange must not look like bad flash.
+	var last error
+	for attempt := 1; attempt <= 3; attempt++ {
+		if attempt > 1 {
+			a.event(fmt.Sprintf(L("Проверка после записи: повтор чтения %d/3 (%v)", "Readback: reading again %d/3 (%v)"), attempt, last))
+			a.waitQuiet(s, 300*time.Millisecond, 2*time.Second)
+		}
+		if _, e := a.ubootCommand(s, fmt.Sprintf("mw.b 0x%x 0x00 0x%x", ram, size), 2*time.Minute); e != nil {
+			return e
+		}
+		if _, e := a.ubootCommand(s, fmt.Sprintf("mtd read %s 0x%x 0x%x 0x%x", target, ram, off, size), 10*time.Minute); e != nil {
+			return e
+		}
+		out, e := a.ubootCommand(s, fmt.Sprintf("crc32 0x%x 0x%x", ram, size), 2*time.Minute)
+		if e != nil {
+			return e
+		}
+		if regexp.MustCompile(fmt.Sprintf(`(?i)(?:0x)?%08x`, expected)).Match(out) {
+			return nil
+		}
+		last = fmt.Errorf(L("CRC после записи не совпал target=%s off=0x%x ожидался=%08x", "readback CRC mismatch target=%s off=0x%x expected=%08x"), target, off, expected)
 	}
-	if _, e := a.ubootCommand(s, fmt.Sprintf("mtd read %s 0x%x 0x%x 0x%x", target, ram, off, size), 10*time.Minute); e != nil {
-		return e
-	}
-	out, e := a.ubootCommand(s, fmt.Sprintf("crc32 0x%x 0x%x", ram, size), 2*time.Minute)
-	if e != nil {
-		return e
-	}
-	if !regexp.MustCompile(fmt.Sprintf(`(?i)(?:0x)?%08x`, expected)).Match(out) {
-		return fmt.Errorf(L("CRC после записи не совпал target=%s off=0x%x ожидался=%08x", "readback CRC mismatch target=%s off=0x%x expected=%08x"), target, off, expected)
-	}
-	return nil
+	return last
 }
 
 // ---------------- Workflows ----------------

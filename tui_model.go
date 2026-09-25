@@ -85,7 +85,7 @@ type tuiLogLine struct {
 	text  string
 	st    lipgloss.Style
 	lst   lipgloss.Style // label style
-	mark  string         // ✓ ! ✗ for statuses, readable without colour
+	mark  string         // √ ! × for statuses, readable without colour (in every Windows console font)
 	note  bool           // operator guidance (LevelNote), drawn like device output
 }
 
@@ -144,6 +144,9 @@ type tuiModel struct {
 	scroll  int
 	filter  int
 	logMax  bool
+	// logHidden folds the log to its bar: the panel keeps the program's
+	// steps and commands, the menu gets the room.
+	logHidden bool
 
 	dlg   *tuiDialog
 	input textinput.Model
@@ -268,12 +271,14 @@ func hotkey(k tea.KeyMsg) string {
 		return "m"
 	case tea.KeyF4:
 		return "p"
+	case tea.KeyF5:
+		return "h"
 	case tea.KeyF10:
 		return "q"
 	case tea.KeyRunes:
 		if len(k.Runes) == 1 {
 			r := k.Runes[0]
-			if l, ok := map[rune]string{'а': "f", 'А': "f", 'ь': "m", 'Ь': "m", 'ы': "s", 'Ы': "s", 'з': "p", 'З': "p", 'й': "q", 'Й': "q", 'о': "j", 'л': "k", 'д': "l", 'Д': "l"}[r]; ok {
+			if l, ok := map[rune]string{'а': "f", 'А': "f", 'ь': "m", 'Ь': "m", 'ы': "s", 'Ы': "s", 'з': "p", 'З': "p", 'р': "h", 'Р': "h", 'й': "q", 'Й': "q", 'о': "j", 'л': "k", 'д': "l", 'Д': "l"}[r]; ok {
 				return l
 			}
 			return strings.ToLower(string(r))
@@ -299,7 +304,7 @@ func (m *tuiModel) key(k tea.KeyMsg) tea.Cmd {
 			m.scroll = 0
 			return nil
 		}
-	case tea.KeyF2, tea.KeyF3:
+	case tea.KeyF2, tea.KeyF3, tea.KeyF5:
 		if m.dlg != nil {
 			m.logKey(hotkey(k))
 			return nil
@@ -367,6 +372,11 @@ func (m *tuiModel) logKey(hk string) bool {
 		return true
 	case "m":
 		m.logMax = !m.logMax
+		m.logHidden = false
+		return true
+	case "h":
+		m.logHidden = !m.logHidden
+		m.scroll = 0
 		return true
 	}
 	return false
@@ -394,7 +404,7 @@ func (m *tuiModel) start(it tuiItem) tea.Cmd {
 	a := m.a
 	// A full-screen item picks its port here, in the TUI, rather than in
 	// the plain console after the screen was handed over.
-	if _, ok := a.portOwner().Connected(); consoleOwning[it.kind] && !ok && a.portOverride == "" {
+	if _, ok := a.portOwner().Connected(); consoleOwning[it.kind] && !ok && a.portOverride == "" && a.rememberedPort() == "" {
 		m.dlg = &tuiDialog{isPort: true, port: listSerialPorts(), then: &it}
 		m.input.SetValue("")
 		m.input.Focus()
@@ -570,6 +580,7 @@ func (m *tuiModel) portKey(k tea.KeyMsg) tea.Cmd {
 		m.dlg = nil
 		owner := m.a.portOwner()
 		if name == "" && d.cursor == len(d.port) {
+			m.a.rememberPort("")
 			return func() tea.Msg { return tuiPortMsg{err: owner.Disconnect()} }
 		}
 		if name == "" && d.cursor < len(d.port) {
@@ -584,6 +595,7 @@ func (m *tuiModel) portKey(k tea.KeyMsg) tea.Cmd {
 			} else if err != nil {
 				return tuiPortMsg{err: fmt.Errorf("%s: %w", name, err)}
 			}
+			m.a.rememberPort(name)
 			return tuiPortMsg{name: name, then: d.then}
 		}
 	}
@@ -599,19 +611,19 @@ func (m *tuiModel) portKey(k tea.KeyMsg) tea.Cmd {
 func tuiTone(l app.Level, text string) (st, tag lipgloss.Style, mark string) {
 	switch l {
 	case app.LevelError:
-		return tsErrB, tsErrTag, "✗ "
+		return tsErrB, tsErrTag, "× "
 	case app.LevelWarn:
 		return tsSand, tsTag, "! "
 	case app.LevelOK:
-		return tsOKB, tsTag, "✓ "
+		return tsOKB, tsTag, "√ "
 	}
 	u := strings.ToUpper(text)
 	switch {
 	case strings.Contains(u, "PASS") || strings.Contains(u, "ГОТОВО") || strings.Contains(u, "ЗАВЕРШЕН") || strings.Contains(u, "[OK]"):
-		return tsOKB, tsTag, "✓ "
+		return tsOKB, tsTag, "√ "
 	case strings.Contains(u, "FAIL") || strings.Contains(u, "ERROR") || strings.Contains(u, "ОШИБ") ||
 		strings.Contains(u, "ОТМЕН") || strings.Contains(u, "CANCEL"):
-		return tsErrB, tsErrTag, "✗ "
+		return tsErrB, tsErrTag, "× "
 	case strings.Contains(u, "WARN") || strings.Contains(u, "ВНИМАН"):
 		return tsSand, tsTag, "! "
 	case strings.Contains(u, "TFTP") || strings.Contains(u, "XMODEM") || strings.Contains(u, "ОЖИД") || strings.Contains(u, "WAIT"):
@@ -757,6 +769,9 @@ func (m *tuiModel) scrollBy(n int) {
 // (≈35 %, at least 5 rows).
 func (m *tuiModel) logRows() int {
 	body := m.h - 3
+	if m.logHidden && m.dlg == nil {
+		return 0
+	}
 	if m.logMax && m.dlg == nil {
 		return max(5, body-5)
 	}
@@ -783,8 +798,12 @@ func (m *tuiModel) View() string {
 		title = L("МЕНЮ", "MENU")
 		// Idle menu: the menu and the item description come first; the log
 		// gives way down to 3 rows and grows back once an operation runs.
-		mainLines = m.viewMenu(body - 4)
-		mainH = max(mainH, min(len(mainLines), body-4))
+		room := body - 4
+		if m.logHidden {
+			room = body - 1
+		}
+		mainLines = m.viewMenu(room)
+		mainH = max(mainH, min(len(mainLines), room))
 		logH = body - mainH
 	}
 	out := []string{m.viewTop(), m.rule(title)}
@@ -833,11 +852,27 @@ func (m *tuiModel) stopLabel() string {
 	case c.Requested:
 		return tsStop.Render(L("ОСТАНОВКА ЗАПРОШЕНА", "STOP REQUESTED"))
 	case c.Mode == app.CancelUnavailable:
-		return tsStopOff.Render(L("ОСТАНОВКА НЕДОСТУПНА", "STOP UNAVAILABLE"))
-	case c.Mode == app.CancelAtCheckpoint:
-		return tsStop.Render(L("s СТОП · ", "s STOP · ") + c.Checkpoint)
+		return tsStopOff.Render(L("СТОП недоступен", "STOP unavailable"))
 	}
-	return tsStop.Render(L("s СТОП", "s STOP"))
+	// s and Ctrl+C are the same STOP; when it takes effect is said in the
+	// operation panel.
+	return tsStop.Render(L("■ СТОП: s / Ctrl+C", "■ STOP: s / Ctrl+C"))
+}
+
+// stopNote says what STOP does right now, in words.
+func (m *tuiModel) stopNote() string {
+	c := m.cancel
+	switch {
+	case c.Requested && c.Mode == app.CancelAtCheckpoint:
+		return L("Остановка запрошена: операция остановится ", "Stop requested: the operation will stop ") + c.Checkpoint
+	case c.Requested:
+		return L("Остановка запрошена.", "Stop requested.")
+	case c.Mode == app.CancelUnavailable:
+		return L("СТОП сейчас недоступен: ", "STOP is unavailable now: ") + c.Reason
+	case c.Mode == app.CancelAtCheckpoint:
+		return L("СТОП (s или Ctrl+C) не прервёт текущий шаг: операция остановится ", "STOP (s or Ctrl+C) will not cut the current step: the operation stops ") + c.Checkpoint
+	}
+	return L("СТОП (s или Ctrl+C) — остановить сразу, до следующей команды.", "STOP (s or Ctrl+C): stop at once, before the next command.")
 }
 
 // viewTop keeps the STOP label whole: on a narrow screen the version, then
@@ -848,21 +883,33 @@ func (m *tuiModel) viewTop() string {
 	port := on(tsBad, "● ") + on(tsMuted, L("порт не выбран (p)", "no port (p)"))
 	if name, ok := m.a.portOwner().Connected(); ok {
 		port = on(tsOK, "● ") + on(tsInk, name)
+	} else if name := m.a.rememberedPort(); name != "" {
+		// Chosen before and released between operations, so other programs
+		// can use it; the next operation opens it again.
+		port = on(tsMuted, "○ ") + on(tsInk, name) + on(tsMuted, L(" свободен", " free"))
 	}
 	sep := on(tsFaint, "  │  ")
 	// While an operation runs: its name and phase (the operation ID is on the
 	// result screen, not here).
-	op := ""
-	if ph := m.phase(); ph != "" {
-		op = sep + on(tsSand, ph)
+	// The operation's name whole, or only its step when the name does not
+	// fit: a cut-off name reads worse than none (it is in the panel below).
+	name, step := m.phase()
+	full, short := "", ""
+	if name != "" {
+		full = sep + on(tsSand, name)
+		if step != "" {
+			full += on(tsFaint, " · ") + on(tsSand, step)
+			short = sep + on(tsSand, step)
+		}
 	}
 	brand := on(tsBrand, " UrsidoRescue")
 	right := m.stopLabel()
 	var left string
 	for _, l := range []string{
-		brand + on(tsFaint, " "+appVersion) + sep + port + op,
-		brand + sep + port + op,
-		brand + op,
+		brand + on(tsFaint, " "+appVersion) + sep + port + full,
+		brand + sep + port + full,
+		brand + sep + port + short,
+		brand + short,
 		brand + sep + port,
 		brand,
 	} {
@@ -879,21 +926,17 @@ func (m *tuiModel) viewTop() string {
 
 // phase is the running operation and where it is: "UrsusBoot · READ 37%",
 // or the overall step when no transfer runs.
-func (m *tuiModel) phase() string {
+func (m *tuiModel) phase() (name, step string) {
 	if !m.busy {
-		return ""
-	}
-	name := m.opTitle
-	if r := []rune(name); len(r) > 22 {
-		name = string(r[:21]) + "…"
+		return "", ""
 	}
 	switch p := m.progress; {
 	case p != nil && p.Total > 0:
-		return fmt.Sprintf("%s · %s %d%%", name, p.Label, p.Current*100/p.Total)
+		step = fmt.Sprintf("%s %d%%", p.Label, p.Current*100/p.Total)
 	case m.overall != nil && m.overall.Total > 0:
-		return fmt.Sprintf("%s · %d/%d", name, min(m.overall.Current+1, m.overall.Total), m.overall.Total)
+		step = fmt.Sprintf(L("шаг %d/%d", "step %d/%d"), min(m.overall.Current+1, m.overall.Total), m.overall.Total)
 	}
-	return name
+	return m.opTitle, step
 }
 
 func tail(s string, n int) string {
@@ -1060,7 +1103,10 @@ func (m *tuiModel) viewOperation(h int) []string {
 	lines := []string{tsBrand.Render(m.opTitle)}
 	switch {
 	case m.busy:
-		lines = append(lines, tsMuted.Render(L("выполняется… (s — СТОП)", "running… (s — STOP)")))
+		lines = append(lines, tsMuted.Render(L("выполняется…", "running…")))
+		for _, l := range wrapLines(m.stopNote(), m.w) {
+			lines = append(lines, tsMuted.Render(l))
+		}
 	case m.resultWarn:
 		for _, l := range wrapLines(L("НЕ ПОЛНОСТЬЮ: ", "INCOMPLETE: ")+m.result, m.w) {
 			lines = append(lines, tsSand.Render(l))
@@ -1302,7 +1348,15 @@ func (m *tuiModel) viewLog(h int) []string {
 			vis = append(vis, tsGutter.Render("│ ")+wrapped[j])
 		}
 	}
-	out := []string{bar(tsLogBar, m.w, left, right)}
+	if m.logHidden {
+		right = L("скрыт — F5 показать ", "hidden — F5 to show ")
+	} else {
+		right += L("· F5 скрыть ", "· F5 hide ")
+	}
+	out := []string{bar(tsLogBar, m.w, left, tsLogBar.Render(right))}
+	if m.logHidden {
+		return fit(out, h)
+	}
 	for i := len(vis) - 1; i >= 0; i-- {
 		out = append(out, vis[i])
 	}
@@ -1315,9 +1369,9 @@ func (m *tuiModel) viewHelp() string {
 	case m.dlg != nil:
 		s = L(" ↑↓←→ выбор · Enter ответ · PgUp/PgDn лог · Ctrl+C СТОП", " ↑↓←→ pick · Enter answer · PgUp/PgDn log · Ctrl+C STOP")
 	case m.busy:
-		s = L(" s / Ctrl+C СТОП · PgUp/PgDn лог · F2 фильтр · F3 лог крупно", " s / Ctrl+C STOP · PgUp/PgDn log · F2 filter · F3 large log")
+		s = L(" s / Ctrl+C СТОП · PgUp/PgDn лог · F2 фильтр · F3 крупно · F5 скрыть", " s / Ctrl+C STOP · PgUp/PgDn log · F2 filter · F3 large · F5 hide")
 	case m.result != "":
-		s = L(" Enter — в меню · PgUp/PgDn лог · F2 фильтр · F3 лог крупно", " Enter — menu · PgUp/PgDn log · F2 filter · F3 large log")
+		s = L(" Enter — в меню · PgUp/PgDn лог · F2 фильтр · F3 крупно · F5 скрыть", " Enter — menu · PgUp/PgDn log · F2 filter · F3 large · F5 hide")
 	default:
 		s = L(" ↑↓←→ выбор · Enter запуск · F4 порт · F2 фильтр · F3 лог · l язык · F10 выход", " ↑↓←→ pick · Enter run · F4 port · F2 filter · F3 log · l language · F10 quit")
 	}

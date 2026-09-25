@@ -92,6 +92,11 @@ func TestPrompt(t *testing.T) {
 		[]byte("foo > bar"),
 		[]byte("AN7583> still printing"),
 		[]byte("echo U-Boot> not-a-prompt"),
+		// A serial read cut right after crc32's arrow (seen on hardware:
+		// the value came in the next read and the readback was misjudged).
+		[]byte("crc32 0x90000000 0x800000\r\ncrc32 for 90000000 ... 907fffff ==>"),
+		[]byte("crc32 for 90000000 ... 907fffff ==> "),
+		[]byte("bootcmd=run a=>"),
 	}
 	for _, in := range bad {
 		if promptPresent(in) {

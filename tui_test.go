@@ -64,7 +64,7 @@ func TestTUIFits80x24(t *testing.T) {
 	m.Update(tuiProgressMsg{Label: "IBU", Current: 9, Total: 30, Detail: "chunk 10/30"})
 	m.Update(tuiCancelMsg{Mode: app.CancelAtCheckpoint, Checkpoint: "after chunk 10/30", Op: "op-x-a121"})
 	v := checkFits(t, m, "operation")
-	if !strings.Contains(v, "after chunk 10/30") {
+	if !strings.Contains(strings.ReplaceAll(v, "\n", " "), "after chunk") || !strings.Contains(m.stopNote(), "after chunk 10/30") {
 		t.Errorf("operation view lacks the STOP checkpoint:\n%s", v)
 	}
 	if strings.Contains(m.viewTop(), "a121") {
@@ -136,15 +136,19 @@ func TestTUIStopLabels(t *testing.T) {
 	for _, tc := range []struct {
 		c    app.CancelState
 		want string
+		note string
 	}{
-		{app.CancelState{Mode: app.CancelNow}, "СТОП"},
-		{app.CancelState{Mode: app.CancelAtCheckpoint, Checkpoint: "после части 3/30"}, "после части 3/30"},
-		{app.CancelState{Mode: app.CancelUnavailable, Reason: "BL2"}, "ОСТАНОВКА НЕДОСТУПНА"},
-		{app.CancelState{Mode: app.CancelAtCheckpoint, Requested: true}, "ОСТАНОВКА ЗАПРОШЕНА"},
+		{app.CancelState{Mode: app.CancelNow}, "СТОП: s / Ctrl+C", "сразу"},
+		{app.CancelState{Mode: app.CancelAtCheckpoint, Checkpoint: "после части 3/30"}, "СТОП: s / Ctrl+C", "после части 3/30"},
+		{app.CancelState{Mode: app.CancelUnavailable, Reason: "BL2"}, "СТОП недоступен", "BL2"},
+		{app.CancelState{Mode: app.CancelAtCheckpoint, Requested: true}, "ОСТАНОВКА ЗАПРОШЕНА", "запрошена"},
 	} {
 		m.Update(tuiCancelMsg(tc.c))
 		if top := m.viewTop(); !strings.Contains(top, tc.want) {
 			t.Errorf("%+v: top bar %q lacks %q", tc.c, top, tc.want)
+		}
+		if note := m.stopNote(); !strings.Contains(note, tc.note) {
+			t.Errorf("%+v: note %q lacks %q", tc.c, note, tc.note)
 		}
 	}
 	if !strings.Contains(tuiStopText(app.CancelState{Mode: app.CancelUnavailable, Reason: "BL2 is being verified"}), "BL2 is being verified") {
@@ -258,7 +262,7 @@ func TestTUILogo(t *testing.T) {
 		}
 		// Where there is room the winking bear and the version are shown.
 		m.tab, m.cur = 0, 0
-		if v := m.View(); !strings.Contains(v, bearWink) || !strings.Contains(v, appVersion) {
+		if v := m.View(); !(strings.Contains(v, bearBig[3][:strings.Index(bearBig[3], bearWink)]) || strings.Contains(v, bearSmall[2][:strings.Index(bearSmall[2], "▄▄")])) || !strings.Contains(v, appVersion) {
 			t.Errorf("%dx%d: the bear with the version must be in the main tab:\n%s", sz[0], sz[1], v)
 		}
 	}
@@ -438,7 +442,7 @@ func TestTUILogPlainTextIsLime(t *testing.T) {
 	if !strings.Contains(v, lime) {
 		t.Error("plain log text must be dark lime")
 	}
-	if !strings.Contains(v, tsErrB.Render("broken")) || !strings.Contains(v, "✗") {
+	if !strings.Contains(v, tsErrB.Render("broken")) || !strings.Contains(v, "×") {
 		t.Error("statuses keep their colours")
 	}
 }
@@ -456,5 +460,28 @@ func TestTUIBusyPortDialogReadsWell(t *testing.T) {
 	}
 	if strings.Contains(v, "(r)") || strings.Contains(v, "[r]") || strings.Contains(v, L("Нет", "No")+" ") {
 		t.Fatalf("console letters must not show in the TUI, nor a generic No:\n%s", v)
+	}
+}
+
+// F5 folds the log to its bar and gives the room back; the bar is filled
+// to the right edge.
+func TestTUIHideLog(t *testing.T) {
+	m, _, _ := testTUI(t, 100, 30)
+	m.busy, m.opTitle = true, "x"
+	shown := m.logRows()
+	m.key(tea.KeyMsg{Type: tea.KeyF5})
+	if !m.logHidden || m.logRows() != 0 || shown == 0 {
+		t.Fatalf("hidden=%v rows=%d (was %d)", m.logHidden, m.logRows(), shown)
+	}
+	v := m.View()
+	if !strings.Contains(v, "F5") || strings.Count(v, "\n") != 29 {
+		t.Fatalf("view with the log hidden:\n%s", v)
+	}
+	m.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'р'}})
+	if m.logHidden {
+		t.Fatal("р (h in the Russian layout) must show the log again")
+	}
+	if w := lipgloss.Width(m.viewLog(5)[0]); w != 100 {
+		t.Fatalf("log bar width %d, want the full 100", w)
 	}
 }

@@ -194,6 +194,16 @@ Releases by CI.
   bootmenu, window width, Browse for a file and a folder, recent paths, then the UrsusBoot install.
   Build `404b3b5`: CI PASS / HW PENDING. The guide now says a backup folder needs mtd16; mtd0…mtd15
   are optional.
+- **False "readback CRC mismatch" during a stock restore (found on hardware).** The device computed the
+  right CRC (`==> 15f1f21c` = the expected one), but the program checked the output before it arrived:
+  `promptPresent` took the `=>` at the end of `crc32 … ==>` for the U-Boot prompt when a UART read ended
+  right after the arrow. A prompt now counts only at a line start (or after ANSI), with a regression test
+  for that cut. Besides, a readback mismatch is read again twice (read-only) before it is an error.
+- TUI after the Windows run: the log bar is filled to the right edge; F5 / h folds the log to its bar;
+  the top bar shows the operation's whole name or only its step, never a cut name; STOP is one button
+  ("■ STOP: s / Ctrl+C") and when it acts is said in the operation panel; the chosen port is remembered
+  and shown as "○ COM6 free" between operations (a vanished port is asked again); status marks √ and ×
+  instead of ✓ and ✗, which Windows console fonts lack; the small bear has a smaller eye and smile.
 ---
 
 ## 0.2.0-test17 (2026-09-24 12:39–12:49)

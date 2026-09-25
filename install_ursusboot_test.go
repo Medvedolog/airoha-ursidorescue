@@ -23,6 +23,7 @@ type ubootSim struct {
 	line     []byte
 	out      []byte
 	corrupt  int // corrupt this many md.l dumps
+	crcLie   int // report a wrong crc32 this many times
 	commands []string
 }
 
@@ -99,7 +100,12 @@ func (u *ubootSim) run(cmd string) string {
 		for i := range buf {
 			buf[i] = u.ram[addr+uint64(i)]
 		}
-		return fmt.Sprintf("crc32 for %08x ... %08x ==> %08x\r\n", addr, addr+n-1, crc32.ChecksumIEEE(buf))
+		c := crc32.ChecksumIEEE(buf)
+		if u.crcLie > 0 {
+			u.crcLie--
+			c ^= 1
+		}
+		return fmt.Sprintf("crc32 for %08x ... %08x ==> %08x\r\n", addr, addr+n-1, c)
 	case f[0] == "mtd" && f[1] == "read":
 		src := u.nand[f[2]]
 		addr, off, n := hexArg(f[3]), hexArg(f[4]), hexArg(f[5])
@@ -172,5 +178,22 @@ func TestBootAreaReadback(t *testing.T) {
 	sim = newSim(area[:bl2Size], area[bl2Size:])
 	if err := a.bootAreaReadback(sim, crc32.ChecksumIEEE(area)^1); err == nil {
 		t.Fatal("a wrong CRC passed")
+	}
+}
+
+// A readback mismatch is read again before it fails the write.
+func TestReadbackCRCRetries(t *testing.T) {
+	a := &App{ui: (&app.Recorder{}).UI()}
+	part := bytes.Repeat([]byte{0x3c}, 0x1000)
+	want := crc32.ChecksumIEEE(part)
+	sim := newSim(nil, part)
+	sim.crcLie = 2
+	if err := a.readbackCRC(sim, "ubi", 0, 0x1000, verifyAddr, want); err != nil {
+		t.Fatalf("two bad reads then a good one must pass: %v", err)
+	}
+	sim = newSim(nil, part)
+	sim.crcLie = 3
+	if err := a.readbackCRC(sim, "ubi", 0, 0x1000, verifyAddr, want); err == nil {
+		t.Fatal("three mismatches must fail")
 	}
 }
