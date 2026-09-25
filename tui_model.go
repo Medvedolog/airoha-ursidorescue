@@ -42,6 +42,8 @@ var (
 	tsMenu    = lipgloss.NewStyle().Bold(true).Foreground(tcInk)
 	tsUART    = lipgloss.NewStyle().Foreground(tcLime)
 	tsErr     = lipgloss.NewStyle().Foreground(tcBordo)
+	tsErrB    = lipgloss.NewStyle().Bold(true).Foreground(tcBordo)
+	tsOKB     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#5fdc5f")) // distinct from the lime log text
 	tsErrTag  = lipgloss.NewStyle().Bold(true).Foreground(tcBordo)
 	tsTag     = lipgloss.NewStyle().Bold(true).Foreground(tcAmber)
 	tsAmber2  = lipgloss.NewStyle().Foreground(tcAmber2)
@@ -83,6 +85,8 @@ type tuiLogLine struct {
 	text  string
 	st    lipgloss.Style
 	lst   lipgloss.Style // label style
+	mark  string         // ✓ ! ✗ for statuses, readable without colour
+	note  bool           // operator guidance (LevelNote), drawn like device output
 }
 
 const tuiLogCap = 5000
@@ -128,7 +132,8 @@ type tuiModel struct {
 	resultNote string
 	lastSess   string // session of the finished item, for the report
 	lastOp     string
-	progress   *app.Progress
+	progress   *app.Progress // the current transfer (XMODEM, TFTP…)
+	overall    *app.Progress // the whole operation (chunk N of M)
 	cancel     app.CancelState
 	lastCtrlC  time.Time
 
@@ -165,9 +170,14 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.addEvent(app.Event(msg))
 	case tuiProgressMsg:
 		p := app.Progress(msg)
-		if p.Done {
-			m.progress = nil
-		} else {
+		switch {
+		case p.Overall && p.Done:
+			m.overall = nil
+		case p.Overall:
+			m.overall = &p
+		case p.Done:
+			m.progress, m.overall = nil, nil
+		default:
 			m.progress = &p
 		}
 	case tuiOutputMsg:
@@ -572,28 +582,28 @@ func (m *tuiModel) portKey(k tea.KeyMsg) tea.Cmd {
 
 // tuiTone colours an event like the console and UrsusFlasher do: by its
 // level, and for plain events by what it says.
-func tuiTone(l app.Level, text string) (st, tag lipgloss.Style) {
+func tuiTone(l app.Level, text string) (st, tag lipgloss.Style, mark string) {
 	switch l {
 	case app.LevelError:
-		return tsErr, tsErrTag
+		return tsErrB, tsErrTag, "✗ "
 	case app.LevelWarn:
-		return tsSand, tsTag
+		return tsSand, tsTag, "! "
 	case app.LevelOK:
-		return tsOK, tsTag
+		return tsOKB, tsTag, "✓ "
 	}
 	u := strings.ToUpper(text)
 	switch {
 	case strings.Contains(u, "PASS") || strings.Contains(u, "ГОТОВО") || strings.Contains(u, "ЗАВЕРШЕН") || strings.Contains(u, "[OK]"):
-		return tsOK, tsTag
+		return tsOKB, tsTag, "✓ "
 	case strings.Contains(u, "FAIL") || strings.Contains(u, "ERROR") || strings.Contains(u, "ОШИБ") ||
 		strings.Contains(u, "ОТМЕН") || strings.Contains(u, "CANCEL"):
-		return tsErr, tsErrTag
+		return tsErrB, tsErrTag, "✗ "
 	case strings.Contains(u, "WARN") || strings.Contains(u, "ВНИМАН"):
-		return tsSand, tsTag
+		return tsSand, tsTag, "! "
 	case strings.Contains(u, "TFTP") || strings.Contains(u, "XMODEM") || strings.Contains(u, "ОЖИД") || strings.Contains(u, "WAIT"):
-		return tsAmber2, tsTag
+		return tsAmber2, tsTag, ""
 	}
-	return tsInk, tsTag
+	return tsInk, tsTag, ""
 }
 
 func (m *tuiModel) addEvent(e app.Event) {
@@ -614,12 +624,12 @@ func (m *tuiModel) addEvent(e app.Event) {
 	}
 	for i, l := range strings.Split(strings.Trim(e.Text, "\n"), "\n") {
 		l = stripTerminal(l)
-		st, tag := tuiTone(e.Level, e.Label+" "+l)
-		line := tuiLogLine{kind: logEvent, text: l, st: st, lst: tag}
+		st, tag, mark := tuiTone(e.Level, e.Label+" "+l)
+		line := tuiLogLine{kind: logEvent, text: l, st: st, lst: tag, note: e.Level == app.LevelNote}
 		if i == 0 {
-			line.ts, line.label = ts, e.Label
-		} else if e.Label != "" {
-			line.text = strings.Repeat(" ", len([]rune(e.Label))+3) + l
+			line.ts, line.label, line.mark = ts, e.Label, mark
+		} else if e.Label != "" || mark != "" {
+			line.text = strings.Repeat(" ", len([]rune(mark))+len([]rune(e.Label))+3*btoi(e.Label != "")) + l
 		}
 		m.push(line)
 		if m.busy && strings.TrimSpace(l) != "" {
@@ -648,9 +658,10 @@ func (l tuiLogLine) render(w int, withTS bool) []string {
 		head = "[" + l.label + "] "
 	}
 	var out []string
-	for i, t := range wrapLines(head+l.text, w) {
-		if i == 0 && head != "" {
-			t = l.lst.Render(head) + l.st.Render(strings.TrimPrefix(t, head))
+	for i, t := range wrapLines(l.mark+head+l.text, w) {
+		if i == 0 && l.mark+head != "" {
+			rest := strings.TrimPrefix(strings.TrimPrefix(t, l.mark), head)
+			t = l.st.Render(l.mark) + l.lst.Render(head) + l.st.Render(rest)
 		} else {
 			t = l.st.Render(t)
 		}
@@ -795,7 +806,9 @@ func (m *tuiModel) rule(title string) string {
 // bar paints a full-width line on a background.
 func bar(st lipgloss.Style, w int, left, right string) string {
 	gap := max(1, w-lipgloss.Width(left)-lipgloss.Width(right))
-	return st.Render(left + strings.Repeat(" ", gap) + right)
+	// Each part gets the background itself: coloured pieces inside left end
+	// with a reset, which would leave the gap unfilled.
+	return st.Render(left) + st.Render(strings.Repeat(" ", gap)) + right
 }
 
 func (m *tuiModel) stopLabel() string {
@@ -1024,6 +1037,9 @@ func (m *tuiModel) viewOperation(h int) []string {
 	default:
 		lines = append(lines, tsOK.Render(m.result))
 	}
+	if p := m.overall; p != nil {
+		lines = append(lines, m.overallLine(p))
+	}
 	if p := m.progress; p != nil {
 		lines = append(lines, m.progressLine(p))
 	}
@@ -1052,6 +1068,22 @@ func (m *tuiModel) viewOperation(h int) []string {
 		lines = append(lines, ev[i])
 	}
 	return lines
+}
+
+// overallLine is the whole operation's progress: a wide bar with the step
+// count, so a 30-chunk write shows where it is at a glance.
+func (m *tuiModel) overallLine(p *app.Progress) string {
+	w := max(10, min(40, m.w-50))
+	n := 0
+	if p.Total > 0 {
+		n = max(0, min(w, int(p.Current*int64(w)/p.Total)))
+	}
+	pct := int64(0)
+	if p.Total > 0 {
+		pct = p.Current * 100 / p.Total
+	}
+	return tsSand.Render(L("Общий прогресс ", "Overall ")) + tsOK.Render(strings.Repeat("█", n)) + tsFaint.Render(strings.Repeat("░", w-n)) +
+		tsSand.Render(fmt.Sprintf(" %d%% ", pct)) + tsInk.Render(p.Detail)
 }
 
 func (m *tuiModel) progressLine(p *app.Progress) string {
@@ -1223,8 +1255,8 @@ func (m *tuiModel) viewLog(h int) []string {
 	var vis []string
 	for i := end - 1; i >= 0 && len(vis) < rows; i-- {
 		l := lines[i]
-		if l.st.GetForeground() == tsInk.GetForeground() {
-			l.st = tsUART // plain log text is dark lime; status colours stay
+		if l.note {
+			l.st = tsUART // notes are dark lime like device output; statuses and program steps stand out
 		}
 		wrapped := l.render(m.w-2, false)
 		for j := len(wrapped) - 1; j >= 0 && len(vis) < rows; j-- {
@@ -1272,4 +1304,11 @@ func capFirst(s string) string {
 		r[0] = []rune(strings.ToUpper(string(r[0])))[0]
 	}
 	return string(r)
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

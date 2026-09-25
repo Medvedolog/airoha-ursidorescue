@@ -64,6 +64,9 @@ func (c *consoleUI) Event(e app.Event) {
 }
 
 func (c *consoleUI) Progress(p app.Progress) {
+	if p.Overall {
+		return // the console reports every step as its own line already
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if p.Done {

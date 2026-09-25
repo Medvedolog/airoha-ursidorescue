@@ -438,7 +438,7 @@ func TestTUILogPlainTextIsLime(t *testing.T) {
 	if !strings.Contains(v, lime) {
 		t.Error("plain log text must be dark lime")
 	}
-	if !strings.Contains(v, tsErr.Render("broken")) {
+	if !strings.Contains(v, tsErrB.Render("broken")) || !strings.Contains(v, "✗") {
 		t.Error("statuses keep their colours")
 	}
 }

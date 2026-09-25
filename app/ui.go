@@ -62,6 +62,9 @@ type Progress struct {
 	Detail string
 	// Done marks the end of this progress sequence.
 	Done bool
+	// Overall is the whole operation's progress (step N of M) next to the
+	// current transfer. A console that already reports every step may skip it.
+	Overall bool
 }
 
 // AskKind selects what an Ask expects back.

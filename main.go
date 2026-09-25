@@ -329,6 +329,17 @@ func (a *App) noteln(args ...any) { a.note(strings.TrimSuffix(fmt.Sprintln(args.
 func (a *App) notef(format string, args ...any) {
 	a.note(strings.TrimSuffix(fmt.Sprintf(format, args...), "\n"))
 }
+
+// overall reports the whole write: chunks done of n, BL2 being the last
+// step (n+1). Front ends show it above the current transfer.
+func (a *App) overall(done, chunks int) {
+	detail := fmt.Sprintf(L("запись: часть %d из %d, затем BL2", "writing: chunk %d of %d, then BL2"), done+1, chunks)
+	if done >= chunks {
+		detail = L("все части записаны и сверены; последний шаг — BL2", "all chunks written and verified; last step: BL2")
+	}
+	a.ui.Progress(app.Progress{Label: L("ВСЕГО", "TOTAL"), Current: int64(done), Total: int64(chunks + 1), Unit: "steps", Overall: true, Detail: detail})
+}
+
 func (a *App) status(label, text string, l app.Level) {
 	a.ui.Event(app.Event{Level: l, Label: label, Text: text})
 }
@@ -1553,24 +1564,81 @@ func detectLocalIP() string {
 	return ""
 }
 
+// networkIP finds this PC's address in 192.168.1.0/24 (any .2–.254). A
+// static address on a NIC without link is hidden by Windows until the router
+// brings its port up, so it waits a little, then lets the operator retry,
+// type an address or cancel.
 func (a *App) networkIP() (string, error) {
-	ip := detectLocalIP()
-	if ip != "" {
-		a.status("NET", L("адрес ПК: ", "PC address: ")+ip, app.LevelOK)
-		return ip, nil
+	for {
+		if ip := a.waitLocalIP(localIPWait); ip != "" {
+			a.status("NET", L("адрес ПК: ", "PC address: ")+ip, app.LevelOK)
+			return ip, nil
+		}
+		v, _ := a.ui.Ask(app.AskRequest{Kind: app.AskText,
+			Title: L("На ПК нет адреса в подсети 192.168.1.x.\nЗадайте сетевой карте, подключённой к роутеру (LAN2/LAN3), любой адрес 192.168.1.2–192.168.1.254 с маской 255.255.255.0. Если адрес уже задан, проверьте кабель: без линка Windows адрес не показывает.",
+				"This PC has no address in 192.168.1.x.\nGive the NIC connected to the router (LAN2/LAN3) any address 192.168.1.2–192.168.1.254 with mask 255.255.255.0. If it is set already, check the cable: without a link Windows hides the address."),
+			Prompt: L("Повторить поиск (r), ввести адрес (m) или отмена (n)? [r]: ", "Search again (r), type an address (m) or cancel (n)? [r]: "),
+			Quick: []app.Choice{
+				{Key: "r", Label: L("Повторить поиск", "Search again")},
+				{Key: "m", Label: L("Ввести адрес", "Type an address")},
+				{Key: "n", Label: L("Отмена", "Cancel")},
+			},
+			Default: "r"})
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "", "r", "к":
+			continue
+		case "m", "ь":
+			ip, err := a.askLocalIP()
+			if err == nil {
+				return ip, nil
+			}
+			a.status("NET", err.Error(), app.LevelWarn)
+		default:
+			return "", cancelledError{L("настройка сети отменена", "network setup cancelled")}
+		}
 	}
-	a.noteln(L("На ПК не найден IPv4 192.168.1.x. Настройте Ethernet статически, рекомендуется 192.168.1.254/24.", "No 192.168.1.x IPv4 address on this PC. Configure Ethernet statically, 192.168.1.254/24 recommended."))
-	v := a.ask(L("Введите локальный IP после настройки [192.168.1.254]: ", "Enter the local IP after configuring it [192.168.1.254]: "))
+}
+
+// localIPWait is how long to wait for a link before asking.
+var localIPWait = 20 * time.Second
+
+// waitLocalIP polls for a 192.168.1.x address for up to d.
+func (a *App) waitLocalIP(d time.Duration) string {
+	if ip := detectLocalIP(); ip != "" {
+		return ip
+	}
+	a.status("NET", L("жду адрес 192.168.1.x на сетевой карте (линк к роутеру)…", "waiting for a 192.168.1.x address on a NIC (link to the router)…"), app.LevelInfo)
+	for end := time.Now().Add(d); time.Now().Before(end); {
+		if a.stop.Requested() {
+			return ""
+		}
+		time.Sleep(time.Second)
+		if ip := detectLocalIP(); ip != "" {
+			return ip
+		}
+	}
+	return ""
+}
+
+// askLocalIP takes an address typed by the operator: 192.168.1.2–.254 that
+// this PC can bind.
+func (a *App) askLocalIP() (string, error) {
+	v := a.ask(L("Адрес ПК 192.168.1.x (кроме .1) [192.168.1.254]: ", "PC address 192.168.1.x (not .1) [192.168.1.254]: "))
 	if v == "" {
 		v = defaultLocalIP
 	}
+	ip := net.ParseIP(v).To4()
+	if ip == nil || ip[0] != 192 || ip[1] != 168 || ip[2] != 1 || ip[3] == 0 || ip[3] == 1 || ip[3] == 255 {
+		return "", fmt.Errorf(L("%s не подходит: нужен 192.168.1.2–192.168.1.254", "%s does not fit: 192.168.1.2–192.168.1.254 is needed"), v)
+	}
 	ln, e := net.ListenUDP("udp4", mustUDPAddr(v, 0))
 	if e != nil {
-		return "", fmt.Errorf(L("адрес %s не принадлежит ПК/нельзя bind: %w", "address %s does not belong to this PC / cannot bind: %w"), v, e)
+		return "", fmt.Errorf(L("адрес %s не назначен сетевой карте этого ПК (или нет линка): %w", "address %s is not on a NIC of this PC (or there is no link): %w"), v, e)
 	}
 	ln.Close()
 	return v, nil
 }
+
 func mustUDPAddr(ip string, port int) *net.UDPAddr {
 	a, _ := net.ResolveUDPAddr("udp4", fmt.Sprintf("%s:%d", ip, port))
 	return a
@@ -2207,6 +2275,7 @@ func (a *App) stockRestoreWizard() error {
 	}
 	for i, ch := range prep.chunks {
 		a.cancelAt(fmt.Sprintf(L("после части %d/%d", "after chunk %d/%d"), i+1, len(prep.chunks)))
+		a.overall(i, len(prep.chunks))
 		if i > 0 {
 			if e = a.loadChunkWithKnownLocal(s, ch, fmt.Sprintf("stock-%02d.bin", i), local); e != nil {
 				return e
@@ -2251,6 +2320,7 @@ func (a *App) stockRestoreWizard() error {
 		return errors.New(L("карта bad-блоков изменилась во время записи IBU; BL2 не тронут", "bad-block map changed during IBU write; BL2 remains untouched"))
 	}
 	a.cancelAt(L("перед записью BL2", "before writing BL2"))
+	a.overall(len(prep.chunks), len(prep.chunks))
 	if e = a.loadChunkWithKnownLocal(s, prep.bl2, "stock-bl2.bin", local); e != nil {
 		return e
 	}
@@ -2375,6 +2445,7 @@ func (a *App) physicalRestoreWizard() error {
 	}
 	for i, ch := range chunks {
 		a.cancelAt(fmt.Sprintf(L("после части %d/%d", "after chunk %d/%d"), i+1, len(chunks)))
+		a.overall(i, len(chunks))
 		if i > 0 {
 			if e = a.loadChunkWithKnownLocal(s, ch, fmt.Sprintf("physical-%02d.bin", i), local); e != nil {
 				return e
@@ -2395,6 +2466,7 @@ func (a *App) physicalRestoreWizard() error {
 		}
 	}
 	a.cancelAt(L("перед записью BL2", "before writing BL2"))
+	a.overall(len(chunks), len(chunks))
 	if e = a.loadChunkWithKnownLocal(s, bl, "physical-bl2.bin", local); e != nil {
 		return e
 	}

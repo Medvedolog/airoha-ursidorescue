@@ -101,6 +101,14 @@ Releases by CI.
   amber, PASS green, errors bordeaux), router output in dark lime; the running log shows no times (they
   stay in the log files), the operation panel shows them as a faint column so text does not jump; the top
   bar no longer shows "op …xxxx", which looked like a stray checksum.
+- PC address for TFTP: any 192.168.1.2–.254 fits, not only .254. Without one the program waits up to 20 s
+  for a link (Windows hides a static address on a NIC without link until the router brings its port up),
+  then says what to set and offers Search again / Type an address / Cancel; a typed address is checked
+  (subnet, not .1, on a NIC of this PC) and a wrong one asks again instead of ending the operation.
+- TUI: the overall progress of stock and full-NAND writes ("chunk N of M, then BL2") as a wide line above
+  the current transfer; the console skips it, as it prints every chunk as its own line.
+- TUI: statuses stand out in the log: success bold bright green with ✓, warning with !, error bold bordeaux
+  with ✗; program steps light, notes and router output dark lime. The top bar is filled up to STOP.
 - Busy COM port: the dialog says which port is busy, what may hold it and what to do, with Retry / Another
   port / Cancel buttons (Cancel was wrongly labelled No); the console letters `(r)` and `[1]` are not shown in
   the TUI, which has buttons and a list instead.
