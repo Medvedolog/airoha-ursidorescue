@@ -190,6 +190,10 @@ Releases by CI.
   Windows file dialog (comdlg32, no cgo) or zenity/kdialog on Linux. A path is remembered as soon as it
   checks out. The stock backup can also be a folder: the Explorer window in folder mode
   (IFileOpenDialog, FOS_PICKFOLDERS, over COM without cgo); on Linux `zenity --directory` / kdialog.
+- Hardware check protocol `doc/HW_SMOKE_STAGE2_RU.md` (Russian): the UART frame, alternate screen,
+  bootmenu, window width, Browse for a file and a folder, recent paths, then the UrsusBoot install.
+  Build `404b3b5`: CI PASS / HW PENDING. The guide now says a backup folder needs mtd16; mtd0…mtd15
+  are optional.
 ---
 
 ## 0.2.0-test17 (2026-09-24 12:39–12:49)

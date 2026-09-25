@@ -187,6 +187,10 @@
   выбора файла Windows (comdlg32, без cgo) или zenity/kdialog в Linux. Путь запоминается сразу после
   проверки. Для бэкапа стока — ещё и выбор каталога: окно проводника в режиме папки
   (IFileOpenDialog, FOS_PICKFOLDERS, через COM без cgo), в Linux — `zenity --directory` / kdialog.
+- Протокол проверки на железе `doc/HW_SMOKE_STAGE2_RU.md`: рамка UART, alternate screen, bootmenu,
+  ширина окна, «Обзор» файла и каталога, недавние пути, затем установка UrsusBoot. Статус сборки
+  `404b3b5`: CI PASS / HW PENDING. В руководстве уточнено: каталог бэкапа должен содержать mtd16,
+  остальные mtd0…mtd15 необязательны.
 ---
 
 ## 0.2.0-test17 — 24.09.2026 12:39–12:49

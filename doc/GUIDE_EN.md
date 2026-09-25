@@ -265,9 +265,9 @@ console. `NO_COLOR` turns colours off.
 **File paths.** When a file is asked for, the program offers up to three paths already given for this
 operation in the current run (a number, or ↑↓ + Enter) and "Browse…" (`*`), the standard Windows file
 dialog; on Linux zenity or kdialog when a graphical session has one. For the stock backup there is also
-"Browse: a backup folder…" (`**`), the same Explorer window in folder mode (a folder with
-mtd0…mtd16). A path is remembered as soon as it
-checks out, so after an error it need not be typed again. These paths are not written to disk.
+"Browse: a backup folder…" (`**`), the same Explorer window in folder mode : a backup
+folder that holds mtd16 (`mtd16.bin`, `.bin.gz`…); mtd0…mtd15 are optional, the program only
+shows how many of the 17 it found. A path is remembered as soon as it checks out, so after an error it need not be typed again. These paths are not written to disk.
 
 **Command line:**
 
