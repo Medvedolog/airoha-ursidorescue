@@ -258,8 +258,14 @@ top (port, 115200 8N1, RAW/LINE, log), keys and session at the bottom, the devic
 between. On entry a plate says the port, that nothing is sent by itself and how to leave; an empty
 screen is normal while the device is silent. Without a port chosen yet, the TUI asks for it in its
 dialog first. When a fullscreen program runs on the router (`top`, `vi`, a bootmenu) the frame gives
-it the whole screen and comes back when it exits (or on Ctrl+]). The TUI returns when you leave the
+it the whole screen: `top`/`vi` (alternate screen) until they leave it, a bootmenu (hidden cursor + clear)
+until the cursor is shown again; Ctrl+] brings it back at any time. A plain shell `clear` keeps the frame. The TUI returns when you leave the
 console. `NO_COLOR` turns colours off.
+
+**File paths.** When a file is asked for, the program offers up to three paths already given for this
+operation in the current run (a number, or ↑↓ + Enter) and "Browse…" (`*`), the standard Windows file
+dialog; on Linux zenity or kdialog when a graphical session has one. A path is remembered as soon as it
+checks out, so after an error it need not be typed again. These paths are not written to disk.
 
 **Command line:**
 

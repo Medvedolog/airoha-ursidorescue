@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -35,22 +36,90 @@ func TestChromeBarsFit(t *testing.T) {
 	setLang("ru")
 }
 
-// A fullscreen program on the device takes the chrome down; leaving the
-// alternate screen brings it back.
-func TestChromeStepsAsideForFullscreen(t *testing.T) {
-	tt := &uartTerm{chrome: &termChrome{on: true, rows: 24, cols: 80}}
-	if tt.chromeDeviceLocked([]byte("\x1b[?1049h\x1b[H\x1b[2J")) || !tt.chrome.suspended {
-		t.Fatal("fullscreen output must suspend the chrome")
+// feedAll runs chunks through the parser and records bytes and actions in
+// stream order, as "data" and "<act>" entries.
+func feedAll(p *chromeParser, chunks ...string) []string {
+	var got []string
+	for _, c := range chunks {
+		for _, pc := range p.feed([]byte(c), true) {
+			if len(pc.data) > 0 {
+				got = append(got, string(pc.data))
+			}
+			if pc.act != actNone {
+				got = append(got, fmt.Sprintf("<%d>", pc.act))
+			}
+		}
 	}
-	if tt.chromeRowsLocked() != 0 {
-		t.Fatal("the pager must use the whole screen while suspended")
+	return got
+}
+
+func TestChromeParserAltScreen(t *testing.T) {
+	var p chromeParser
+	got := feedAll(&p, "top\r\n\x1b[?1049h\x1b[H\x1b[2JTOP", "\x1b[?104", "9lAN7581> ")
+	want := []string{"top\r\n", fmt.Sprintf("<%d>", actSuspend), "\x1b[?1049h\x1b[H\x1b[2JTOP",
+		"\x1b[?1049l", fmt.Sprintf("<%d>", actResume), "AN7581> "}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("split exit:\n got %q\nwant %q", got, want)
 	}
-	if !tt.chromeDeviceLocked([]byte("bye\x1b[?1049l")) {
-		t.Fatal("leaving the alternate screen must restore the chrome")
+}
+
+// A U-Boot bootmenu: cursor hidden, clear, menu; cursor shown on exit.
+func TestChromeParserSoftFullscreen(t *testing.T) {
+	var p chromeParser
+	got := feedAll(&p, "\x1b[?25l\x1b[2J\x1b[1;1H  1. Boot\x1b[?2", "5hStarting kernel")
+	want := []string{"\x1b[?25l", fmt.Sprintf("<%d>", actSuspend), "\x1b[2J\x1b[1;1H  1. Boot", "\x1b[?25h",
+		fmt.Sprintf("<%d>", actResumeClear), "Starting kernel"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("bootmenu:\n got %q\nwant %q", got, want)
 	}
-	plain := &uartTerm{}
-	if plain.chromeDeviceLocked([]byte("\x1b[2J")) {
-		t.Fatal("no chrome in the text console")
+}
+
+// A shell "clear" and bare cursor show/hide do not take the screen.
+func TestChromeParserBareSequences(t *testing.T) {
+	var p chromeParser
+	got := feedAll(&p, "\x1b[?25h", "\x1b[H\x1b[2J# ", "\x1b[?25lx\x1b[?25h", "\x1b[5;10Hy")
+	want := []string{"\x1b[?25h", "\x1b[3;1H\x1b[2J", fmt.Sprintf("<%d>", actRefresh), "# ",
+		"\x1b[?25lx\x1b[?25h", "\x1b[5;10Hy"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("bare:\n got %q\nwant %q", got, want)
+	}
+	if p.mode != modeNone {
+		t.Fatal("bare sequences changed the mode")
+	}
+}
+
+// Nothing is lost or reordered, whatever the read boundaries.
+func TestChromeParserAnySplit(t *testing.T) {
+	stream := "a\x1b[?1049hb\x1b[31mc\x1b[?1049ld\x1b[?25l\x1b[2Je\x1b[?25hf\x1bMg"
+	for cut := 0; cut <= len(stream); cut++ {
+		var p chromeParser
+		var data strings.Builder
+		var acts []chromeAct
+		for _, c := range []string{stream[:cut], stream[cut:]} {
+			for _, pc := range p.feed([]byte(c), false) {
+				data.Write(pc.data)
+				if pc.act != actNone {
+					acts = append(acts, pc.act)
+				}
+			}
+		}
+		if data.String() != stream {
+			t.Fatalf("cut %d: bytes changed: %q", cut, data.String())
+		}
+		if fmt.Sprint(acts) != fmt.Sprint([]chromeAct{actSuspend, actResume, actSuspend, actResumeClear}) {
+			t.Fatalf("cut %d: actions %v", cut, acts)
+		}
+	}
+}
+
+func TestChromeFollowsWidthOnlyResize(t *testing.T) {
+	saved := chromeSize
+	defer func() { chromeSize = saved }()
+	chromeSize = func() (int, int) { return 24, 120 }
+	tt := &uartTerm{a: &App{}, s: &fakeSerial{name: "COM6"}, raw: true, chrome: &termChrome{on: true, rows: 24, cols: 80}}
+	tt.deviceOutput([]byte("x"))
+	if tt.chrome.cols != 120 {
+		t.Fatalf("cols %d after a width-only resize", tt.chrome.cols)
 	}
 }
 
@@ -81,5 +150,17 @@ func TestFullScreenItemPicksPortInTUI(t *testing.T) {
 	}
 	if m.dlg == nil || !m.dlg.isPort || m.dlg.then == nil || m.dlg.then.kind != "shell" {
 		t.Fatalf("port dialog with the pending item expected: %+v", m.dlg)
+	}
+}
+
+// A new operation starts without the previous one's progress.
+func TestStartClearsProgress(t *testing.T) {
+	a := &App{ui: (&app.Recorder{}).UI(), portOverride: "COM1"}
+	m := newTUIModel(a, &tuiUI{})
+	m.overall = &app.Progress{Current: 6, Total: 6}
+	m.progress = &app.Progress{Label: "READ", Current: 1, Total: 2}
+	_ = m.start(tuiItem{label: "x", kind: "support-bundle"})
+	if m.overall != nil || m.progress != nil {
+		t.Fatal("progress survived into the next operation")
 	}
 }

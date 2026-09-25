@@ -389,7 +389,23 @@ func (t *uartTerm) flushPagerLocked() {
 func (t *uartTerm) deviceOutput(d []byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	c := t.chrome
+	if c == nil {
+		t.outputLocked(d)
+		return
+	}
+	t.chromeSizeCheckLocked()
+	// Device bytes and chrome actions in stream order: a program's exit
+	// sequence is followed by the resume, then by whatever it printed next.
+	for _, pc := range c.parser.feed(d, c.on && !c.suspended) {
+		if len(pc.data) > 0 {
+			t.outputLocked(pc.data)
+		}
+		t.chromeApplyLocked(pc.act)
+	}
+}
 
+func (t *uartTerm) outputLocked(d []byte) {
 	// Probe across read boundaries: a CSI sequence is only a few bytes, but a
 	// serial read may split it anywhere.
 	probe := make([]byte, 0, len(t.pagerANSIProbe)+len(d))
@@ -399,21 +415,6 @@ func (t *uartTerm) deviceOutput(d []byte) {
 		t.pagerANSIProbe = append(t.pagerANSIProbe[:0], probe[len(probe)-64:]...)
 	} else {
 		t.pagerANSIProbe = append(t.pagerANSIProbe[:0], probe...)
-	}
-	if t.chromeDeviceLocked(probe) {
-		// Bring the chrome back right after the program leaves the alternate
-		// screen, so what the device prints next (its prompt) stays visible.
-		if i := altScreenExit(d); i >= 0 {
-			os.Stdout.Write(d[:i])
-			d = d[i:]
-			t.chromeResumeLocked()
-			t.pagerANSIProbe = t.pagerANSIProbe[:0]
-		} else {
-			defer func() {
-				t.chromeResumeLocked()
-				t.pagerANSIProbe = t.pagerANSIProbe[:0]
-			}()
-		}
 	}
 
 	if t.pagerEnabled && hasFullscreenANSI(probe) {
@@ -532,10 +533,7 @@ func (t *uartTerm) menuChoice(prefetched byte) {
 	if !t.raw && t.lineShown {
 		t.eraseLineLocked()
 	}
-	if t.chrome != nil && t.chrome.suspended {
-		t.chromeResumeLocked()
-		t.pagerANSIProbe = t.pagerANSIProbe[:0]
-	}
+	t.chromeResumeLocked()
 	t.mu.Unlock()
 	mode := L("сейчас: прозрачный", "now: raw")
 	if !t.raw {

@@ -401,6 +401,7 @@ func (m *tuiModel) start(it tuiItem) tea.Cmd {
 		return nil
 	}
 	m.busy, m.opTitle, m.opEvents, m.result, m.toast = true, it.label, nil, "", ""
+	m.progress, m.overall = nil, nil // the previous operation's stay on its result screen only
 	if consoleOwning[it.kind] {
 		c := &consoleOp{a: a, ui: m.ui, kind: it.kind}
 		_, before := a.LastOperation()

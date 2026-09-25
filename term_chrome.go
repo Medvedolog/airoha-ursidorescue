@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,6 +29,7 @@ type termChrome struct {
 	rows, cols int
 	on         bool // bars drawn, scroll region set
 	suspended  bool // a fullscreen device program owns the screen
+	parser     chromeParser
 }
 
 type chromeInfo struct {
@@ -39,7 +39,8 @@ type chromeInfo struct {
 	simple        bool
 }
 
-func chromeSize() (rows, cols int) {
+// chromeSize is the terminal size; a variable so tests can resize.
+var chromeSize = func() (rows, cols int) {
 	w, h, err := term.GetSize(os.Stdout.Fd())
 	if err != nil {
 		return 0, 0
@@ -205,31 +206,47 @@ func (t *uartTerm) chromeRefreshLocked() {
 	os.Stdout.WriteString("\x1b7" + t.chromeBarsLocked() + fmt.Sprintf("\x1b[3;%dr", rows-2) + "\x1b8")
 }
 
-// chromeDeviceLocked runs before device bytes are written: it steps aside for
-// a fullscreen program and reports whether the chrome should come back after
-// these bytes (the program left the alternate screen).
-func (t *uartTerm) chromeDeviceLocked(probe []byte) (restore bool) {
+// chromeSizeCheckLocked follows a window resize, rows or columns.
+func (t *uartTerm) chromeSizeCheckLocked() {
 	c := t.chrome
-	if c == nil {
-		return false
+	if c == nil || !c.on || c.suspended {
+		return
 	}
-	if c.on && !c.suspended {
-		if hasFullscreenANSI(probe) {
-			c.suspended = true
-			os.Stdout.WriteString("\x1b7\x1b[r\x1b8")
-			return false
-		}
-		if r, _ := chromeSize(); r != c.rows {
-			t.chromeRefreshLocked()
-		}
-		return false
+	if rows, cols := chromeSize(); rows != c.rows || cols != c.cols {
+		t.chromeRefreshLocked()
 	}
-	return c.suspended && (bytes.Contains(probe, []byte("\x1b[?1049l")) || bytes.Contains(probe, []byte("\x1b[?47l")))
 }
 
-// chromeResumeLocked brings the chrome back after a fullscreen program.
+// chromeApplyLocked carries out what the parser saw in the device stream.
+func (t *uartTerm) chromeApplyLocked(act chromeAct) {
+	c := t.chrome
+	switch act {
+	case actSuspend:
+		if c.on && !c.suspended {
+			c.suspended = true
+			os.Stdout.WriteString("\x1b7\x1b[r\x1b8")
+		}
+	case actResume:
+		// Leaving the alternate screen brings the main screen back as it was,
+		// bars included; only the scroll region needs setting again.
+		if c.suspended {
+			c.suspended = false
+			t.chromeRefreshLocked()
+		}
+	case actResumeClear:
+		if c.suspended {
+			t.chromeStartLocked(true)
+		}
+	case actRefresh:
+		t.chromeRefreshLocked()
+	}
+}
+
+// chromeResumeLocked brings the chrome back on the operator's request (the
+// Ctrl+] menu), whatever the device is doing.
 func (t *uartTerm) chromeResumeLocked() {
-	if t.chrome != nil && t.chrome.suspended {
+	if c := t.chrome; c != nil && c.suspended {
+		c.parser.mode, c.parser.hidden = modeNone, false
 		t.chromeStartLocked(true)
 	}
 }
@@ -250,16 +267,4 @@ func (t *uartTerm) chromeRowsLocked() int {
 		return c.rows - 4
 	}
 	return 0
-}
-
-// altScreenExit returns the index just past the sequence with which a
-// fullscreen program leaves the alternate screen, or -1.
-func altScreenExit(d []byte) int {
-	best := -1
-	for _, seq := range [][]byte{[]byte("\x1b[?1049l"), []byte("\x1b[?47l")} {
-		if i := bytes.LastIndex(d, seq); i >= 0 && i+len(seq) > best {
-			best = i + len(seq)
-		}
-	}
-	return best
 }

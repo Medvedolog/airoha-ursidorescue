@@ -127,6 +127,7 @@ type App struct {
 	quietUART bool         // keep bulk U-Boot output (hex dumps) out of the UART panel; the log still gets it
 	op        string       // its operation ID
 	probeSess *app.Session // current Porting session (spans probe items)
+	recent    recentPaths  // paths given in this run, per operation
 }
 
 func main() { os.Exit(realMain()) }
@@ -314,8 +315,7 @@ func (a *App) askResetOrStay() bool {
 		app.Choice{Key: "n", Label: L("Остаться в U-Boot", "Stay in U-Boot")})) != "n"
 }
 func (a *App) askPath(prompt string) (string, error) {
-	v, _ := a.ui.Ask(app.AskRequest{Kind: app.AskPath, Prompt: prompt})
-	p := strings.Trim(strings.TrimSpace(v), "\"")
+	p := a.askPathAnswer(prompt)
 	if p == "" {
 		return "", errors.New(L("пустой путь", "empty path"))
 	}
@@ -326,6 +326,7 @@ func (a *App) askPath(prompt string) (string, error) {
 	if !fileExists(abs) {
 		return "", fmt.Errorf(L("файл не найден: %s", "file not found: %s"), abs)
 	}
+	a.recent.remember(a.opKind, abs)
 	return abs, nil
 }
 
@@ -2155,7 +2156,7 @@ func (a *App) verifyManifestEntry(dir, selected string) error {
 	return nil
 }
 func (a *App) askStockSource() (string, error) {
-	p := strings.Trim(strings.TrimSpace(a.ask(L("Путь к бэкапу: файл mtd16 / all_flash (.bin или .bin.gz) или каталог с mtd16.bin(.gz): ", "Backup path: an mtd16 / all_flash file (.bin or .bin.gz) or a directory with mtd16.bin(.gz): "))), "\"")
+	p := a.askPathAnswer(L("Путь к бэкапу: файл mtd16 / all_flash (.bin или .bin.gz) или каталог с mtd16.bin(.gz): ", "Backup path: an mtd16 / all_flash file (.bin or .bin.gz) or a directory with mtd16.bin(.gz): "))
 	if p == "" {
 		return "", errors.New(L("пустой путь", "empty path"))
 	}
@@ -2167,6 +2168,7 @@ func (a *App) askStockSource() (string, error) {
 	if e != nil {
 		return "", e
 	}
+	a.recent.remember(a.opKind, abs)
 	if !st.IsDir() {
 		return abs, nil
 	}

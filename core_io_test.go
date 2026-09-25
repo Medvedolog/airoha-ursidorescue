@@ -28,7 +28,7 @@ var consoleFrontEnd = map[string]bool{
 func TestCoreHasNoDirectConsoleIO(t *testing.T) {
 	forbidden := map[string]bool{"uiRule": true, "uiStatus": true, "uiEvent": true}
 	fset := token.NewFileSet()
-	for _, file := range []string{"main.go", "main_probe.go", "stock_access.go", "console_ui.go", "install_ursusboot.go", "bootfip.go"} {
+	for _, file := range []string{"main.go", "main_probe.go", "stock_access.go", "console_ui.go", "install_ursusboot.go", "bootfip.go", "paths.go"} {
 		f, err := parser.ParseFile(fset, file, nil, 0)
 		if err != nil {
 			t.Fatal(err)

@@ -179,6 +179,16 @@ Releases by CI.
   TFTP → write → final readback); before the read it says what is read and that nothing was written
   yet; on stock, after the block writes the whole 0x80000 area is read back and CRC32-checked.
 - The small bear's caption no longer shifts the divider at 80 columns.
+- The UART console frame, after the be131bf review: its own streaming reader of control sequences
+  (the pager keeps the old detector). The alternate screen suspends the frame only until its matching
+  exit; a bootmenu, hidden cursor + clear, until the cursor is shown; a bare `ESC[H`, `ESC[2J` or
+  `ESC[?25h` no longer suspends it (a shell `clear` keeps the cursor in the output area and the bars are
+  redrawn). An exit sequence split between reads no longer wipes the next prompt; the frame follows a
+  width-only resize too.
+- A new TUI operation starts without the previous one's overall progress.
+- File paths: up to three recent paths per operation in the run (a number or ↑↓), and "Browse…", the
+  Windows file dialog (comdlg32, no cgo) or zenity/kdialog on Linux. A path is remembered as soon as it
+  checks out.
 ---
 
 ## 0.2.0-test17 (2026-09-24 12:39–12:49)
