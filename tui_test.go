@@ -257,7 +257,7 @@ func TestTUILogo(t *testing.T) {
 		}
 		// Where there is room the winking bear and the version are shown.
 		m.tab, m.cur = 0, 0
-		if v := m.View(); !strings.Contains(v, "o   -") || !strings.Contains(v, appVersion) {
+		if v := m.View(); !strings.Contains(v, bearWink) || !strings.Contains(v, appVersion) {
 			t.Errorf("%dx%d: the bear with the version must be in the main tab:\n%s", sz[0], sz[1], v)
 		}
 	}

@@ -115,6 +115,8 @@ Releases by CI.
   - the result screen shows the session and operation IDs, the full log path is in the log;
   - at 80×24 the item description always fits: while idle the log shrinks to 3 rows and the bear only
     takes free space.
+- TUI: the logo is a sitting, winking teddy bear in half-blocks `▀▄█` (after an ASCII-art picture): ears,
+  an open and a winking eye, nose, arms, feet with pads; big (12 rows) and small (6 rows) for 80×24.
 - TUI: the logo is a winking ASCII bear with the UrsidoRescue name and version: big in the top-left
   corner when the height allows, otherwise small in a free corner of the menu; it never pushes the menu or
   the description off the screen.
