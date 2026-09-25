@@ -420,6 +420,7 @@ Expert mode
   4. Write a raw range into MTD bl2/ubi
   5. Diagnostics
   6. UART Shell (transparent passthrough, sends nothing by itself)
+  7. Install UrsusBoot (UART, MD/MF)
   0. Back
 ```
 
@@ -469,6 +470,42 @@ Same as [main menu item 5](#5-nand--mtd--u-boot-diagnostics).
 Port choice → the session's `uart.log` → a simplified terminal: the same low-latency raw
 mode but without the Ctrl+] menu (Ctrl+] and Ctrl+Q exit). No automatic `x`/Enter/Ctrl-C is sent,
 handy for simply "watching what the router says".
+
+#### Expert 7. Install UrsusBoot (UART, MD/MF)
+
+A persistent UrsusBoot 0.1.0-alpha5-t67 install over the UART and the RAM U-Boot only: no Web, no
+Telnet, no UrsusFlasher. The new boot area is built **from what this device carries now**; no
+static image (install-mtd0) is written.
+
+1. Profile → RAM U-Boot (as in item 1).
+2. Layout: `UBI#` at the start of `ubi` (NAND 0x20000) means **UBI** (OpenWrt / UrsusBoot); a FIP
+   header at `bl2+0x800` means **stock Nokia**; anything else is refused.
+3. The RAM U-Boot has no `tftpput`, so the current content is read to the PC over the UART with
+   `md.l` in 64 KiB pieces; each piece is checked against the device's own `crc32` (and read again
+   on a mismatch). 512 KiB take about 3–4 minutes. The data is kept in the session as a backup
+   (`ursusboot/bootarea-before.bin` or `fip-before.bin`).
+4. The candidate:
+   - **MD**: the pinned `ursusboot-md-0.1.0-alpha5-t67-update.fip` (its TOC, NT_FW ending before the
+     first certificate `0x77800` and the Airoha checksum are proved) goes to physical `0x800`; on
+     stock the live FIP must carry one BL2 (Trusted Boot Firmware) and the stock env CRC must hold;
+   - **MF**: **only** the final NT_FW (BL33) payload of the live FIP is replaced with the pinned
+     `u-boot.runtime.lzma`; the NT_FW size and the FIP end in the TOC are updated, the alignment
+     comes from the FIP itself; every other entry, BL31, the prefix and the env stay byte-exact (a
+     port of UrsusFlasher 0.2.67 `mf_persistent`).
+   The BootROM prefix `0x0–0x7FF` and the stock env `0x7C000–0x7FFFF` never change. If the
+   candidate equals what was read, it reports "already installed" and writes nothing.
+5. **Stock:** no bad blocks in `bl2` or the first `0x60000` of `ubi`. The candidate over TFTP →
+   RAM check → typed `INSTALL URSUSBOOT` → **only the changed** 128 KiB blocks are erased and
+   written, each checked by CRC32, the BL2 block (`0x00000`) last.
+   **UBI:** `ubi part ubi` → exactly one **static** `fip` volume → the candidate over TFTP →
+   `INSTALL URSUSBOOT` → `ubi write` + `ubi read` + CRC32. BL2 is not touched.
+6. Reset or stay in the RAM U-Boot.
+
+STOP before the write (the UART read included) acts at once; the write and its readback are not
+interrupted.
+
+On hardware: on MF the same method (UrsusFlasher 0.2.67 over telnet, stock Nokia) booted and
+survived the move to UBI; the UrsidoRescue UART path itself is not hardware-tested yet.
 
 ---
 

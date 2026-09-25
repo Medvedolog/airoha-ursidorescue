@@ -23,17 +23,18 @@ type operation struct {
 var unstoppable = map[string]bool{"terminal": true, "shell": true}
 
 var operationCatalog = map[string]operation{
-	"stock-restore":    {app.Erase, (*App).stockRestoreWizard},
-	"fip-repair":       {app.Write, (*App).fipRepairWizard},
-	"physical-restore": {app.Erase, (*App).physicalRestoreWizard},
-	"itb-boot":         {app.NonPersistent, (*App).bootRecoveryWizard},
-	"diagnostics":      {app.ReadOnly, (*App).diagnosticsWizard},
-	"support-bundle":   {app.ReadOnly, (*App).supportBundleOperation},
-	"ram-uboot":        {app.NonPersistent, (*App).ramUBootShell},
-	"ubi-volume":       {app.Write, (*App).expertUBIVolume},
-	"raw-mtd":          {app.Write, (*App).expertRawMTD},
-	"terminal":         {app.Manual, (*App).runTerminal},
-	"shell":            {app.Manual, (*App).uartShell},
+	"stock-restore":     {app.Erase, (*App).stockRestoreWizard},
+	"fip-repair":        {app.Write, (*App).fipRepairWizard},
+	"physical-restore":  {app.Erase, (*App).physicalRestoreWizard},
+	"itb-boot":          {app.NonPersistent, (*App).bootRecoveryWizard},
+	"diagnostics":       {app.ReadOnly, (*App).diagnosticsWizard},
+	"support-bundle":    {app.ReadOnly, (*App).supportBundleOperation},
+	"ram-uboot":         {app.NonPersistent, (*App).ramUBootShell},
+	"ubi-volume":        {app.Write, (*App).expertUBIVolume},
+	"raw-mtd":           {app.Write, (*App).expertRawMTD},
+	"ursusboot-install": {app.Write, (*App).ursusBootInstallWizard},
+	"terminal":          {app.Manual, (*App).runTerminal},
+	"shell":             {app.Manual, (*App).uartShell},
 }
 
 // cancelledError is the operator's refusal to confirm, in the UI language.
@@ -278,6 +279,10 @@ var cancelNotes = map[string]func() string{
 	"physical-restore": func() string {
 		return L("до «mtd erase ubi» — сразу; во время стирания и записи частей — после текущей части и её проверки; от стирания BL2 до его проверки — недоступна",
 			"before \"mtd erase ubi\": at once; while erasing and writing chunks: after the current chunk and its readback; from erasing BL2 until it is verified: unavailable")
+	},
+	"ursusboot-install": func() string {
+		return L("до записи (в том числе во время чтения по UART) — сразу; запись и её проверка не прерываются",
+			"before writing (the UART read included): at once; the write and its readback are not interrupted")
 	},
 	"fip-repair": func() string {
 		return L("до записи — сразу; запись тома fip и её проверка не прерываются",

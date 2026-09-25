@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "repo": "Medvedolog/airoha-ursusboot",
+  "commit": "8c2567abda3e7c772021989d66503e73b32581b9",
+  "tree_dirty": false,
+  "version": "0.1.0-alpha5-t67",
+  "board": "xg040-md",
+  "openwrt_ref": "3d1645ee26d6a2e20be71d7fa1716721bac78e53",
+  "openwrt_patches": {
+    "scripts/openwrt/openwrt-pr24025-uboot-fmsh-fm25g02b.patch": "a3e843e60c7efdf6f103c04153c40b711a369962a533f370ffbc38aa0dcf314e"
+  },
+  "atf_source_version": "94892b9e42eb1f6992e60bce904c3ef42ea995c8",
+  "atf_patch_sha256": "5d4791a0fc4a8cfb6d4f0e180b40e456783581bedace56acc386ce25022fa062",
+  "atf_patch_upstream": "Yuzhii0718/atf-airoha@083c14faf832cb2de3d7dc8368dc8fb1c8f6a1e5",
+  "ubi_preloader_sha256": "4c8021d433aaf05374f918451ff9d6b140f26b6ec991f5f5ef1d38bcd7e67aa6",
+  "ubi_bl2_image_sha256": "cf7bc26f43ba08f9b8ffcbbb1201c4dc1259c8523d7694e30f3a3c1b2a42861f",
+  "vanilla_fip_sha256": "0aac2e6bc3781f8a27a7d86b88700b46e929e70a56703f938cc09f1346fd170a",
+  "vanilla_uboot_variant": "an7581_nokia_xg-040g-md",
+  "recovery_safe_fip_sha256": "be3fc9bd8bc1be310106dd2ed71bc91f9a741313c350e5c7af88a7ba7ac8e688",
+  "recovery_safe_fip_size": 314168,
+  "recovery_safe_bl31_sha256": "a81dbbe98acb1dabc2afcbf72e73ad87e24efa8dd88e559612a024c28ece920e",
+  "recovery_safe_bl33_sha256": "ef507131991a4d7936476a78783e1c977b9d32c793415f471689a6d47a600e0d",
+  "recovery_safe_donor_sha256": "2ebcbf3981e3e56b6389521fc2caa3320cf259c08f173b660b29366b9290bcc1",
+  "files": {
+    "BUILD-INFO.txt": "22ee2cecf3b75c32c7271d7ec5780f3816c392142ec05c9b5a8e4a87a9e0d1c6",
+    "RECOVERY-SAFE-FIP-REPACK.json": "9edfd509dfedb263e27ae95cb45f2173da76dd6c3ac67763b10f3230039a8bc8",
+    "SHA256SUMS": "ce001fd0e5b88f117845da2b544d564d4035f7414db1645239889618f6aac311",
+    "an7581-bl2.bin": "b2cd55a76087ace29c757db74e192055ce900c8d6cddf3ad6fceb7852c6f9b9f",
+    "recovery-safe-u-boot.bin": "1a1508d021dfd4ea10eafcec22eeb746bce40767207010327df712cd5219d031",
+    "recovery-safe-u-boot.fip": "be3fc9bd8bc1be310106dd2ed71bc91f9a741313c350e5c7af88a7ba7ac8e688",
+    "u-boot.bin": "7f135018c1be28259565f892007786789d51b1efbe835b6be7f25f7bc438f7ad",
+    "u-boot.config": "adff76d698167d0080b6ece9c11b00918950811d254d65e8a298565f5953175f",
+    "u-boot.lzma": "d6b7a64f470bf0d732bbe3c1df9ee6c539facc1a15edef874eb3afdf48e52e65",
+    "ursusboot-install-mtd0.bin": "0047786494bb764c44a0e86359c615ba3c743b016030c19ade9caeae318effdf",
+    "ursusboot-ubi-preloader.fip": "4c8021d433aaf05374f918451ff9d6b140f26b6ec991f5f5ef1d38bcd7e67aa6",
+    "ursusboot-update.fip": "9e9de3fb015088dcfa0ea41cc88f2deec42db5b3603b7ba714781813dc52ecc0",
+    "vanilla-u-boot.bin": "c121f6a8b507b65b15f39eb56b2002dfc33d7cb28fb298fcdbb806de8834b55b",
+    "vanilla-u-boot.fip": "0aac2e6bc3781f8a27a7d86b88700b46e929e70a56703f938cc09f1346fd170a"
+  },
+  "hw_status": "HW_PENDING"
+}

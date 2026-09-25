@@ -155,6 +155,16 @@ Releases by CI.
   UrsusBoot pipeline, with no UrsusBoot code.
 - Documentation and `PROBE.md` updated to test17: network and LAN prerequisites, coloured output,
   EOT, stock LAN assist, `--stock-lan-assist`, the Telnet-only passive plan and late credential refresh.
+- **Expert 7 / TUI Expert → Install UrsusBoot (UART)**: a persistent UrsusBoot 0.1.0-alpha5-t67
+  install on MD and MF over the UART and the RAM U-Boot only, for the stock and the UBI layout.
+  The candidate is built from the device's current content: it is read over the UART (`md.l` in
+  64 KiB pieces, each checked against the device's `crc32`; the RAM U-Boot has no `tftpput`) and
+  kept in the session as a backup. MD: the pinned t67 update.fip at `0x800` of the live boot area;
+  MF: only BL33 replaced in the live FIP (a port of UrsusFlasher 0.2.67). The BootROM prefix and
+  the stock env stay byte-exact; only changed blocks are written, BL2 last; on UBI only the
+  (static) `fip` volume. Typed phrase `INSTALL URSUSBOOT`. The new pinned payloads and their
+  provenance are in `payloads/`; `--selftest` checks them too. The fip-volume write of Restore FIP
+  moved into a shared helper (same commands).
 
 ---
 

@@ -62,8 +62,14 @@ type Profile struct {
 	RAMFIPRel     string
 	RAMFIPSize    int64
 	RAMFIPSHA     string
-	Status        string
-	StatusRU      string
+	// UrsusBoot for the persistent install (Expert): MD — the whole update
+	// FIP, MF — the runtime BL33 (LZMA) the device's own FIP is derived with.
+	BootRel     string
+	BootSize    int64
+	BootSHA     string
+	BootVersion string
+	Status      string
+	StatusRU    string
 }
 
 var profiles = map[string]Profile{
@@ -73,8 +79,11 @@ var profiles = map[string]Profile{
 		PreloaderSHA: "6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808",
 		RAMFIPRel:    "payloads/md/an7581-fudan-capable-ram.fip", RAMFIPSize: 314064,
 		RAMFIPSHA: "f0323b30b7eaaa142fabc31769ce0be7f5f0d4306b40635ef3a4e3c0356dac14",
-		Status:    "MD RAM FIP: UrsusBoot 0.1.0-alpha5-t66 RECOVERY_SAFE (Fudan FM25S01A + FM25G02B), RC18 contract; HW PENDING. UrsidoRescue implementation itself is LAB until first hardware cycle.",
-		StatusRU:  "MD RAM FIP: UrsusBoot 0.1.0-alpha5-t66 RECOVERY_SAFE (Fudan FM25S01A + FM25G02B), контракт RC18; на железе не проверен. Сама реализация UrsidoRescue — LAB до первого цикла на железе.",
+		BootRel:   "payloads/md/ursusboot-md-0.1.0-alpha5-t67-update.fip", BootSize: 503808,
+		BootSHA:     "9e9de3fb015088dcfa0ea41cc88f2deec42db5b3603b7ba714781813dc52ecc0",
+		BootVersion: "0.1.0-alpha5-t67",
+		Status:      "MD RAM FIP: UrsusBoot 0.1.0-alpha5-t66 RECOVERY_SAFE (Fudan FM25S01A + FM25G02B), RC18 contract; HW PENDING. UrsidoRescue implementation itself is LAB until first hardware cycle.",
+		StatusRU:    "MD RAM FIP: UrsusBoot 0.1.0-alpha5-t66 RECOVERY_SAFE (Fudan FM25S01A + FM25G02B), контракт RC18; на железе не проверен. Сама реализация UrsidoRescue — LAB до первого цикла на железе.",
 	},
 	"mf": {
 		ID: "mf", Model: "Nokia XG-040G-MF", SoC: "AN7583",
@@ -82,8 +91,11 @@ var profiles = map[string]Profile{
 		PreloaderSHA: "c2ac1c183b18bc34632c958dfe0bd1dfdfb607f090e39c41126956641893362f",
 		RAMFIPRel:    "payloads/mf/an7583-recovery-ram.fip", RAMFIPSize: 324908,
 		RAMFIPSHA: "7b564e83ac3b7f8d15dc42b3980197f2176ca2dfd5bc1703eff2b66938a1d782",
-		Status:    "MF RAM FIP: UrsusBoot 0.1.0-alpha5-t66 RECOVERY_SAFE (Fudan FM25S01A + FM25G02B), RC18 contract; HW PENDING. UrsidoRescue integration is LAB until hardware validation.",
-		StatusRU:  "MF RAM FIP: UrsusBoot 0.1.0-alpha5-t66 RECOVERY_SAFE (Fudan FM25S01A + FM25G02B), контракт RC18; на железе не проверен. Интеграция в UrsidoRescue — LAB до проверки на железе.",
+		BootRel:   "payloads/mf/ursusboot-mf-0.1.0-alpha5-t67-u-boot.runtime.lzma", BootSize: 319614,
+		BootSHA:     "105bfe1bab6638da89b37e8fc173481d51bdbc8012e86d1c2f8f1f579b6dce51",
+		BootVersion: "0.1.0-alpha5-t67",
+		Status:      "MF RAM FIP: UrsusBoot 0.1.0-alpha5-t66 RECOVERY_SAFE (Fudan FM25S01A + FM25G02B), RC18 contract; HW PENDING. UrsidoRescue integration is LAB until hardware validation.",
+		StatusRU:    "MF RAM FIP: UrsusBoot 0.1.0-alpha5-t66 RECOVERY_SAFE (Fudan FM25S01A + FM25G02B), контракт RC18; на железе не проверен. Интеграция в UrsidoRescue — LAB до проверки на железе.",
 	},
 }
 
@@ -112,6 +124,7 @@ type App struct {
 	cancelMu  sync.Mutex   // guards cancel, ui/sess/op/opKind swaps against RequestStop
 	lastSess  string       // directory of the latest operation's session
 	lastOp    string       // ID of the latest operation
+	quietUART bool         // keep bulk U-Boot output (hex dumps) out of the UART panel; the log still gets it
 	op        string       // its operation ID
 	probeSess *app.Session // current Porting session (spans probe items)
 }
@@ -372,7 +385,7 @@ func validatePinned(root string, p Profile) error {
 		size  int64
 		sha   string
 		label string
-	}{{p.PreloaderRel, p.PreloaderSize, p.PreloaderSHA, "preloader"}, {p.RAMFIPRel, p.RAMFIPSize, p.RAMFIPSHA, "RAM FIP"}} {
+	}{{p.PreloaderRel, p.PreloaderSize, p.PreloaderSHA, "preloader"}, {p.RAMFIPRel, p.RAMFIPSize, p.RAMFIPSHA, "RAM FIP"}, {p.BootRel, p.BootSize, p.BootSHA, "UrsusBoot"}} {
 		path := filepath.Join(root, filepath.FromSlash(x.rel))
 		st, e := os.Stat(path)
 		if e != nil {
@@ -1032,7 +1045,7 @@ func (a *App) readUntilPrompt(s Serial, timeout time.Duration, command string) (
 			continue
 		}
 		d := append([]byte(nil), buf[:n]...)
-		a.logBytes(d, true)
+		a.logBytes(d, !a.quietUART)
 		out = append(out, d...)
 		if len(out) > 1024*1024 {
 			out = out[len(out)-512*1024:]
@@ -1869,19 +1882,9 @@ func (a *App) fipRepairWizard() error {
 		return e
 	}
 	a.cancelBlocked(L("запись тома fip и её проверка", "writing the fip volume and its readback"))
-	if _, e = a.ubootCommand(s, fmt.Sprintf("ubi write 0x%x fip 0x%x", loadAddr, st.Size()), 5*time.Minute); e != nil {
-		return e
-	}
-	if _, e = a.ubootCommand(s, fmt.Sprintf("ubi read 0x%x fip 0x%x", verifyAddr, st.Size()), 5*time.Minute); e != nil {
-		return e
-	}
 	crc, _ := crcFile(path)
-	out, e := a.ubootCommand(s, fmt.Sprintf("crc32 0x%x 0x%x", verifyAddr, st.Size()), 60*time.Second)
-	if e != nil {
+	if e = a.ubiWriteVerified(s, "fip", uint64(st.Size()), crc); e != nil {
 		return e
-	}
-	if !regexp.MustCompile(fmt.Sprintf(`(?i)(?:0x)?%08x`, crc)).Match(out) {
-		return errors.New(L("CRC32 FIP после записи не совпал", "FIP readback CRC32 mismatch"))
 	}
 	a.cancelNow()
 	a.event(L("Запись FIP + проверка PASS; SHA256 источника=", "FIP write + readback PASS; source SHA256=") + sha)
@@ -2571,11 +2574,12 @@ func (a *App) expertMenu() error {
 		fmt.Println(L("  4. Записать raw range в MTD bl2/ubi", "  4. Write a raw range into MTD bl2/ubi"))
 		fmt.Println(L("  5. Диагностика", "  5. Diagnostics"))
 		fmt.Println(L("  6. UART Shell (прозрачный терминал, ничего не отправляет сам)", "  6. UART Shell (transparent passthrough, sends nothing by itself)"))
+		fmt.Println(L("  7. Установить UrsusBoot (UART, MD/MF)", "  7. Install UrsusBoot (UART, MD/MF)"))
 		fmt.Println(L("  0. Назад", "  0. Back"))
 		v := a.ask(L("Выбор: ", "Choice: "))
-		ops := map[string]string{"1": "terminal", "2": "ram-uboot", "3": "ubi-volume", "4": "raw-mtd", "5": "diagnostics", "6": "shell"}
+		ops := map[string]string{"1": "terminal", "2": "ram-uboot", "3": "ubi-volume", "4": "raw-mtd", "5": "diagnostics", "6": "shell", "7": "ursusboot-install"}
 		switch v {
-		case "1", "2", "3", "4", "5", "6":
+		case "1", "2", "3", "4", "5", "6", "7":
 			if e := a.RunOperation(ops[v]); e != nil {
 				return e
 			}
@@ -2856,6 +2860,17 @@ func (a *App) selftest() error {
 		}
 		if e := validateFIP(filepath.Join(a.root, filepath.FromSlash(p.RAMFIPRel))); e != nil {
 			return fmt.Errorf("%s FIP: %w", p.ID, e)
+		}
+		boot, e := os.ReadFile(filepath.Join(a.root, filepath.FromSlash(p.BootRel)))
+		if e != nil {
+			return e
+		}
+		if p.ID == "md" {
+			if _, e = mdCheckFIP(boot); e != nil {
+				return fmt.Errorf("md UrsusBoot FIP: %w", e)
+			}
+		} else if boot[0] != 0x5D {
+			return errors.New("mf UrsusBoot BL33 is not LZMA-Alone")
 		}
 	}
 	xs, e := parseBadBlocks([]byte("0x00020000\n0x00040000\n"), ubiSize)

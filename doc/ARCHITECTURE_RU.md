@@ -138,6 +138,13 @@ SPI-NAND 256 МиБ (0x10000000), eraseblock 0x20000, страница (min I/O)
 | `payloads/md/an7581-fudan-capable-ram.fip` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-md/recovery-safe-u-boot.fip` |
 | `payloads/mf/an7583-preloader.bin` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/ursusboot-uart-preloader.bin` |
 | `payloads/mf/an7583-recovery-ram.fip` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/recovery-safe-u-boot.fip` |
+| `payloads/md/ursusboot-md-0.1.0-alpha5-t67-update.fip` | airoha-ursusboot `8c2567ab` (t67) `xg040-md/ursusboot-update.fip`, из UrsusFlasher 0.2.67; для «Эксперт → Установить UrsusBoot» |
+| `payloads/mf/ursusboot-mf-0.1.0-alpha5-t67-u-boot.runtime.lzma` | airoha-ursusboot `8c2567ab` (t67) `xg040-mf/u-boot.runtime.lzma`, из UrsusFlasher 0.2.67; для «Эксперт → Установить UrsusBoot» |
+
+Provenance UrsusBoot t67 (коммит, хеши всех файлов сборки) лежит в `payloads/provenance/`.
+Установщик (`bootfip.go`, `install_ursusboot.go`) — порт `ursusboot_install.build_candidate` (MD) и
+`mf_persistent.build_stock_derived_candidate` (MF) из UrsusFlasher 0.2.67: кандидат всегда
+собирается из текущего содержимого устройства, прочитанного по UART (`md.l` + `crc32`).
 
 RAM FIP собираются конвейером UrsusBoot, но содержат ванильный OpenWrt U-Boot (`3d1645ee` + PR 24025) по
 контракту RECOVERY_SAFE RC18, без кода UrsusBoot (см. [ABOUT](ABOUT_RU.md)).

@@ -18,7 +18,7 @@ func TestCatalogueRiskClasses(t *testing.T) {
 		"stock-restore": app.Erase, "fip-repair": app.Write, "physical-restore": app.Erase,
 		"itb-boot": app.NonPersistent, "diagnostics": app.ReadOnly, "support-bundle": app.ReadOnly,
 		"ram-uboot": app.NonPersistent, "ubi-volume": app.Write, "raw-mtd": app.Write,
-		"terminal": app.Manual, "shell": app.Manual,
+		"terminal": app.Manual, "shell": app.Manual, "ursusboot-install": app.Write,
 	}
 	for k, r := range want {
 		op, ok := operationCatalog[k]

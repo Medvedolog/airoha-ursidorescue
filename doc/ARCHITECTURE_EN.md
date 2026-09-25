@@ -139,6 +139,13 @@ a profile update means the program refuses to work. File provenance:
 | `payloads/md/an7581-fudan-capable-ram.fip` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-md/recovery-safe-u-boot.fip` |
 | `payloads/mf/an7583-preloader.bin` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/ursusboot-uart-preloader.bin` |
 | `payloads/mf/an7583-recovery-ram.fip` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/recovery-safe-u-boot.fip` |
+| `payloads/md/ursusboot-md-0.1.0-alpha5-t67-update.fip` | airoha-ursusboot `8c2567ab` (t67) `xg040-md/ursusboot-update.fip`, from UrsusFlasher 0.2.67; for Expert → Install UrsusBoot |
+| `payloads/mf/ursusboot-mf-0.1.0-alpha5-t67-u-boot.runtime.lzma` | airoha-ursusboot `8c2567ab` (t67) `xg040-mf/u-boot.runtime.lzma`, from UrsusFlasher 0.2.67; for Expert → Install UrsusBoot |
+
+The UrsusBoot t67 provenance (commit, hashes of every build file) is in `payloads/provenance/`.
+The installer (`bootfip.go`, `install_ursusboot.go`) ports UrsusFlasher 0.2.67
+`ursusboot_install.build_candidate` (MD) and `mf_persistent.build_stock_derived_candidate` (MF): the
+candidate is always built from the device's current content, read over the UART (`md.l` + `crc32`).
 
 The RAM FIPs are built by the UrsusBoot pipeline but contain a vanilla OpenWrt U-Boot (`3d1645ee` + PR 24025)
 under the RECOVERY_SAFE RC18 contract, with no UrsusBoot code (see [ABOUT](ABOUT_EN.md)).
