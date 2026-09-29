@@ -123,7 +123,7 @@ func chromeFooter(w int, ci chromeInfo) string {
 	if ci.simple {
 		keys = []string{L("Ctrl+] / Ctrl+Q назад", "Ctrl+] / Ctrl+Q back")}
 	} else if ci.network {
-		keys = []string{L("F2 файл→RAM", "F2 file→RAM"), L("F3 диагностика", "F3 diagnostics"), L("F4 строки/RAW", "F4 line/RAW"),
+		keys = []string{L("F2 ↑файл", "F2 ↑file"), L("F3 ↓файл", "F3 ↓file"), L("F4 строки/RAW", "F4 line/RAW"),
 			L("F5 пресеты", "F5 presets"), L("F10 выход", "F10 quit")}
 	} else {
 		keys = []string{L("F2 XMODEM →", "F2 XMODEM →"), L("F3 XMODEM ←", "F3 XMODEM ←"), L("F4 строки/RAW", "F4 line/RAW"),
@@ -168,8 +168,8 @@ func chromePlate(w int, title string, ci chromeInfo) string {
 	if ci.simple {
 		lines = append(lines, tsInk.Render(L("Ctrl+] или Ctrl+Q — назад в меню · Ctrl+P — пейджер", "Ctrl+] or Ctrl+Q back to the menu · Ctrl+P pager")))
 	} else if ci.network {
-		lines = append(lines, tsInk.Render(L("F2 — файл в RAM · F3 — диагностика · F4 — построчный/прозрачный · F5 — read-only пресеты · F10 — назад",
-			"F2 file to RAM · F3 diagnostics · F4 line/raw · F5 read-only presets · F10 back")))
+		lines = append(lines, tsInk.Render(L("F2 — отправить файл в RAM · F3 — получить диагностику/RAM · F4 — построчный/прозрачный · F5 — read-only пресеты · F10 — назад",
+			"F2 send a file to RAM · F3 receive diagnostics/RAM · F4 line/raw · F5 read-only presets · F10 back")))
 		lines = append(lines, tsMuted.Render(L("Ctrl-C на пустом UrsusBoot> защищён двойным нажатием; flash сам терминал не пишет.",
 			"Ctrl-C at idle UrsusBoot> is guarded by a double press; the terminal itself does not write flash.")))
 	} else {
