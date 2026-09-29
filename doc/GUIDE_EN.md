@@ -264,6 +264,17 @@ it the whole screen: `top`/`vi` (alternate screen) until they leave it, a bootme
 until the cursor is shown again; Ctrl+] brings it back at any time. A plain shell `clear` keeps the frame. The TUI returns when you leave the
 console. `NO_COLOR` turns colours off.
 
+**UrsusBoot Ethernet console.** Expert has a separate mode for an already running UrsusBoot/WebFailsafe:
+no COM port is needed; the program connects to `http://192.168.1.1/ws/console` using the pinned
+`ursusboot-console-v1` WebSocket protocol and validates the UrsusBoot hello. Override the IP with
+`URSUSBOOT_IP` or `NOKIA_ROUTER_IP`. Hotkeys: **F2** sends a file to RAM (initramfs/firmware/FIP/preloader
+over HTTP, or an arbitrary file over XMODEM on the same WebSocket), **F3** saves HTTP diagnostics or exports
+a RAM range up to 64 MiB through `tftpput` with SHA256 before/after, **F4** toggles LINE/RAW, **F5** opens
+read-only presets (`version`, `bdinfo`, `mtd list`, `printenv`, bad-block queries), and **F10** returns.
+A single Ctrl-C at an idle `UrsusBoot>` is withheld; a second Ctrl-C within 2 s confirms it because the
+first one would stop WebFailsafe. This console mode itself does not erase or write NAND; F2 accepts data
+into RAM only.
+
 **File paths.** When a file is asked for, the program offers up to three paths already given for this
 operation in the current run (a number, or ↑↓ + Enter) and "Browse…" (`*`), the standard Windows file
 dialog; on Linux zenity or kdialog when a graphical session has one. For the stock backup there is also
