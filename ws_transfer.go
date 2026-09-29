@@ -76,7 +76,7 @@ func (a *App) wsXmodemSend(host, path string) error {
 		return err
 	}
 	if st.Size() <= 0 || st.Size() > wsRAMMaxFile {
-		return fmt.Errorf(L("XMODEM: размер должен быть 1..64 МиБ", "XMODEM size must be 1..64 MiB"))
+		return errors.New(L("XMODEM: размер должен быть 1..64 МиБ", "XMODEM size must be 1..64 MiB"))
 	}
 	expected, err := shaFile(path)
 	if err != nil {
@@ -319,12 +319,12 @@ func (a *App) wsReceiveRAM(host string) error {
 	}
 	addr, err := strconv.ParseUint(raw, 0, 64)
 	if err != nil {
-		return fmt.Errorf(L("неверный адрес RAM", "invalid RAM address"))
+		return errors.New(L("неверный адрес RAM", "invalid RAM address"))
 	}
 	raw = strings.TrimSpace(a.ask(L("Длина, например 0x100000: ", "Length, e.g. 0x100000: ")))
 	size, err := strconv.ParseUint(raw, 0, 64)
 	if err != nil || size == 0 || size > wsRAMMaxFile || addr < wsRAMMin || addr+size > wsRAMMax {
-		return fmt.Errorf(L("диапазон должен быть внутри 0x80000000..0xC0000000 и не больше 64 МиБ", "range must be within 0x80000000..0xC0000000 and at most 64 MiB"))
+		return errors.New(L("диапазон должен быть внутри 0x80000000..0xC0000000 и не больше 64 МиБ", "range must be within 0x80000000..0xC0000000 and at most 64 MiB"))
 	}
 
 	dir := a.sessionScratch("ws-ram")
