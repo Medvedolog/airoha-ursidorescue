@@ -34,7 +34,7 @@ type uartTerm struct {
 	pagerPending    []byte
 	pagerANSIProbe  []byte
 	lastASCIINotice time.Time
-	ctrlCAt        time.Time // WebSocket idle-prompt Ctrl-C guard
+	ctrlCAt         time.Time // WebSocket idle-prompt Ctrl-C guard
 
 	chrome *termChrome // UrsidoRescue bars around the stream (TUI only); nil in the text console
 }
@@ -289,8 +289,9 @@ func (t *uartTerm) writeRawInput(p []byte) error {
 			continue
 		}
 		i := -1
+		_, network := isUrsusWS(t.s)
 		for n, b := range p {
-			if b == 0x1d || b == 0x11 || b == 0x10 || (b == 0x03 && func() bool { _, ok := isUrsusWS(t.s); return ok }()) {
+			if b == 0x1d || b == 0x11 || b == 0x10 || (b == 0x03 && network) {
 				i = n
 				break
 			}
