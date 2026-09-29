@@ -177,7 +177,7 @@ func (c *consoleOp) Run() error {
 }
 
 // consoleOwning are the operations that need the real terminal.
-var consoleOwning = map[string]bool{"terminal": true, "shell": true, "ram-uboot": true}
+var consoleOwning = map[string]bool{"terminal": true, "shell": true, "ram-uboot": true, "ws-console": true}
 
 // tuiStopText is the TUI's rendering of the core's answer to STOP.
 func tuiStopText(c app.CancelState) string {
