@@ -152,6 +152,7 @@ func TestTranslateWindowsConsoleKey(t *testing.T) {
 		{"ctrl-c", winVKC, 0, winLeftCtrlPressed, 1, "\x03"},
 		{"ctrl-z", winVKZ, 0, winLeftCtrlPressed, 1, "\x1a"},
 		{"ctrl-menu", winVKOEM6, 0, winRightCtrlPressed, 1, "\x1d"},
+		{"f5", winVKF5, 0, 0, 1, "\x1b[15~"},
 		{"cyrillic", 0, 'й', 0, 1, "й"},
 	}
 	for _, tc := range cases {
