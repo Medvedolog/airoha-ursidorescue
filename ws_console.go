@@ -292,9 +292,8 @@ func (w *ursusWSPort) Write(p []byte) error {
 }
 
 func (w *ursusWSPort) ResetInput() error {
-	w.readMu.Lock()
-	w.pending = nil
-	w.readMu.Unlock()
+	// WebSocket frames are already ordered and the XMODEM readiness byte may
+	// be the last byte emitted by loadx. Never discard it here.
 	return nil
 }
 
@@ -351,7 +350,7 @@ func (a *App) runUrsusWSConsole() error {
 				a.status("!", err.Error(), app.LevelWarn)
 			}
 		case 'd':
-			if err := a.wsSaveDiagnostics(host); err != nil {
+			if err := a.wsDownloadMenu(host); err != nil {
 				a.status("!", err.Error(), app.LevelWarn)
 			}
 		default:
@@ -409,6 +408,7 @@ func (a *App) wsUploadRAM(host string) error {
 			{Key: "3", Label: "UrsusBoot FIP"},
 			{Key: "4", Label: "Vanilla FIP"},
 			{Key: "5", Label: "UBI preloader"},
+			{Key: "6", Label: L("произвольный файл через XMODEM", "arbitrary file over XMODEM")},
 		},
 		Prompt: L("Тип [Enter — назад]: ", "Type [Enter — back]: "),
 	})
@@ -419,9 +419,11 @@ func (a *App) wsUploadRAM(host string) error {
 		"4": {"/api/vanilla-fip-begin", "/api/vanilla-fip-chunk"},
 		"5": {"/api/ubi-preloader-begin", "/api/ubi-preloader-chunk"},
 	}
-	ep, ok := endpoints[strings.TrimSpace(v)]
-	if !ok {
-		return nil
+	choice := strings.TrimSpace(v)
+	if choice != "6" {
+		if _, ok := endpoints[choice]; !ok {
+			return nil
+		}
 	}
 
 	path, err := a.askPath(L("Файл: ", "File: "))
@@ -435,6 +437,10 @@ func (a *App) wsUploadRAM(host string) error {
 	if st.Size() <= 0 {
 		return errors.New(L("файл пуст", "file is empty"))
 	}
+	if choice == "6" {
+		return a.wsXmodemSend(host, path)
+	}
+	ep := endpoints[choice]
 
 	gen := fmt.Sprintf("ursido-%x", time.Now().UnixMilli())
 	total := st.Size()
