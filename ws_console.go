@@ -51,7 +51,6 @@ type ursusWSPort struct {
 }
 
 func (w *ursusWSPort) Name() string { return "ws://" + w.host }
-func (w *ursusWSPort) isUrsusWebSocket() bool { return true }
 func (w *ursusWSPort) Host() string { return w.host }
 
 func (w *ursusWSPort) setAction(a byte) {
@@ -99,13 +98,16 @@ func connectUrsusWSAt(host string, port int, timeout time.Duration) (*ursusWSPor
 	}
 	key := base64.StdEncoding.EncodeToString(keyBytes)
 	hostHeader := host
-	if port != 80 { hostHeader = net.JoinHostPort(host, strconv.Itoa(port)) }
+	if port != 80 {
+		hostHeader = net.JoinHostPort(host, strconv.Itoa(port))
+	}
 	req := fmt.Sprintf("GET /ws/console HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: %s\r\n\r\n",
 		hostHeader, key, ursusWSProtocol)
 	_ = conn.SetDeadline(time.Now().Add(timeout))
 	if _, err := io.WriteString(conn, req); err != nil {
 		return fail(err)
 	}
+
 	br := bufio.NewReader(conn)
 	tp := textproto.NewReader(br)
 	status, err := tp.ReadLine()
@@ -130,6 +132,7 @@ func connectUrsusWSAt(host string, port int, timeout time.Duration) (*ursusWSPor
 	if h.Get("Sec-WebSocket-Protocol") != ursusWSProtocol {
 		return fail(fmt.Errorf("live console protocol mismatch: %q", h.Get("Sec-WebSocket-Protocol")))
 	}
+
 	w := &ursusWSPort{conn: conn, br: br, host: host}
 	_ = conn.SetDeadline(time.Time{})
 	hello, err := w.recvMessage(timeout)
@@ -155,12 +158,14 @@ func (w *ursusWSPort) recvExact(n int) ([]byte, error) {
 func (w *ursusWSPort) sendFrame(op byte, payload []byte) error {
 	w.writeMu.Lock()
 	defer w.writeMu.Unlock()
+
 	w.stateMu.Lock()
 	closed := w.closed
 	w.stateMu.Unlock()
 	if closed {
 		return io.EOF
 	}
+
 	mask := make([]byte, 4)
 	if _, err := rand.Read(mask); err != nil {
 		return err
@@ -197,6 +202,7 @@ func (w *ursusWSPort) recvMessage(timeout time.Duration) ([]byte, error) {
 		_ = w.conn.SetReadDeadline(time.Time{})
 	}
 	defer w.conn.SetReadDeadline(time.Time{})
+
 	for {
 		h, err := w.recvExact(2)
 		if err != nil {
@@ -216,25 +222,33 @@ func (w *ursusWSPort) recvMessage(timeout time.Duration) ([]byte, error) {
 		n := uint64(h[1] & 0x7f)
 		if n == 126 {
 			x, err := w.recvExact(2)
-			if err != nil { return nil, err }
+			if err != nil {
+				return nil, err
+			}
 			n = uint64(binary.BigEndian.Uint16(x))
 		} else if n == 127 {
 			x, err := w.recvExact(8)
-			if err != nil { return nil, err }
+			if err != nil {
+				return nil, err
+			}
 			n = binary.BigEndian.Uint64(x)
 		}
 		if n > ursusWSMaxFrame {
 			return nil, fmt.Errorf("live console frame too large: %d", n)
 		}
 		payload, err := w.recvExact(int(n))
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		switch op {
 		case 1, 2:
 			return payload, nil
 		case 8:
 			return nil, io.EOF
 		case 9:
-			if err := w.sendFrame(10, payload); err != nil { return nil, err }
+			if err := w.sendFrame(10, payload); err != nil {
+				return nil, err
+			}
 		case 10:
 			// pong
 		default:
@@ -290,12 +304,8 @@ func (w *ursusWSPort) Close() error {
 		w.stateMu.Unlock()
 		return nil
 	}
-	w.closed = true
 	w.stateMu.Unlock()
-	// Best effort close frame; closed is temporarily cleared for sendFrame.
-	w.stateMu.Lock()
-	w.closed = false
-	w.stateMu.Unlock()
+
 	_ = w.sendFrame(8, []byte{0x03, 0xe8})
 	w.stateMu.Lock()
 	w.closed = true
@@ -321,6 +331,7 @@ func (a *App) runUrsusWSConsole() error {
 		return err
 	}
 	defer a.closeLog()
+
 	for {
 		a.note(fmt.Sprintf(L("UrsusBoot Ethernet-консоль: %s · WebSocket /ws/console. Прямой кабель рекомендуется; F10 — выход.",
 			"UrsusBoot Ethernet console: %s · WebSocket /ws/console. A direct cable is recommended; F10 quits."), host))
@@ -347,7 +358,8 @@ func (a *App) runUrsusWSConsole() error {
 			return nil
 		}
 		v := strings.ToLower(a.askQuick(L("Вернуться к Ethernet-консоли? [Y/n]: ", "Return to the Ethernet console? [Y/n]: "), "y",
-			app.Choice{Key: "y", Label: L("Да", "Yes")}, app.Choice{Key: "n", Label: L("Нет", "No")}))
+			app.Choice{Key: "y", Label: L("Да", "Yes")},
+			app.Choice{Key: "n", Label: L("Нет", "No")}))
 		if v == "n" || v == "no" || v == "н" || v == "нет" {
 			return nil
 		}
@@ -356,14 +368,22 @@ func (a *App) runUrsusWSConsole() error {
 
 func wsJSON(host, method, path string, headers map[string]string, body []byte, timeout time.Duration) (map[string]any, error) {
 	req, err := http.NewRequest(method, "http://"+host+path, bytes.NewReader(body))
-	if err != nil { return nil, err }
-	for k, v := range headers { req.Header.Set(k, v) }
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 	cl := &http.Client{Timeout: timeout}
 	resp, err := cl.Do(req)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	var out map[string]any
 	if len(data) != 0 {
 		if err := json.Unmarshal(data, &out); err != nil {
@@ -379,11 +399,19 @@ func wsJSON(host, method, path string, headers map[string]string, body []byte, t
 func (a *App) wsUploadRAM(host string) error {
 	a.ui.Event(app.Event{Kind: app.KindSectionStart, Text: L("ФАЙЛ В RAM URSUSBOOT", "FILE TO URSUSBOOT RAM")})
 	defer a.ui.Event(app.Event{Kind: app.KindSectionEnd})
-	v, _ := a.ui.Ask(app.AskRequest{Kind: app.AskChoice, Title: L("Тип файла — только приём в RAM, flash не записывается:", "File type — RAM receive only; flash is not written:"),
+
+	v, _ := a.ui.Ask(app.AskRequest{
+		Kind:  app.AskChoice,
+		Title: L("Тип файла — только приём в RAM, flash не записывается:", "File type — RAM receive only; flash is not written:"),
 		Choices: []app.Choice{
-			{Key:"1", Label:"initramfs"}, {Key:"2", Label:L("прошивка OpenWrt","OpenWrt firmware")},
-			{Key:"3", Label:"UrsusBoot FIP"}, {Key:"4", Label:"Vanilla FIP"}, {Key:"5", Label:"UBI preloader"},
-		}, Prompt:L("Тип [Enter — назад]: ","Type [Enter — back]: ")})
+			{Key: "1", Label: "initramfs"},
+			{Key: "2", Label: L("прошивка OpenWrt", "OpenWrt firmware")},
+			{Key: "3", Label: "UrsusBoot FIP"},
+			{Key: "4", Label: "Vanilla FIP"},
+			{Key: "5", Label: "UBI preloader"},
+		},
+		Prompt: L("Тип [Enter — назад]: ", "Type [Enter — back]: "),
+	})
 	endpoints := map[string][2]string{
 		"1": {"/api/initramfs-begin", "/api/initramfs-chunk"},
 		"2": {"/api/firmware-begin", "/api/firmware-chunk"},
@@ -392,64 +420,115 @@ func (a *App) wsUploadRAM(host string) error {
 		"5": {"/api/ubi-preloader-begin", "/api/ubi-preloader-chunk"},
 	}
 	ep, ok := endpoints[strings.TrimSpace(v)]
-	if !ok { return nil }
+	if !ok {
+		return nil
+	}
+
 	path, err := a.askPath(L("Файл: ", "File: "))
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	st, err := os.Stat(path)
-	if err != nil { return err }
-	if st.Size() <= 0 { return errors.New(L("файл пуст", "file is empty")) }
+	if err != nil {
+		return err
+	}
+	if st.Size() <= 0 {
+		return errors.New(L("файл пуст", "file is empty"))
+	}
+
 	gen := fmt.Sprintf("ursido-%x", time.Now().UnixMilli())
+	total := st.Size()
 	base := map[string]string{
 		"X-Ursus-Generation": gen,
-		"X-Ursus-Total": strconv.FormatInt(st.Size(),10),
-		"X-Ursus-Filename": url.QueryEscape(filepath.Base(path)),
+		"X-Ursus-Total":      strconv.FormatInt(total, 10),
+		"X-Ursus-Filename":   url.QueryEscape(filepath.Base(path)),
 	}
 	ack, err := wsJSON(host, "POST", ep[0], base, nil, 30*time.Second)
-	if err != nil { return fmt.Errorf("upload begin: %w", err) }
+	if err != nil {
+		return fmt.Errorf("upload begin: %w", err)
+	}
 	if g, _ := ack["generation"].(string); g != "" && g != gen {
 		return fmt.Errorf("upload generation mismatch: %q != %q", g, gen)
 	}
+	if n, ok := jsonNumberInt64(ack["declared_size"]); ok && n != total {
+		return fmt.Errorf("upload declared size mismatch: %d != %d", n, total)
+	}
+	if n, ok := jsonNumberInt64(ack["received"]); ok && n != 0 {
+		return fmt.Errorf("upload begin offset mismatch: %d", n)
+	}
+
 	f, err := os.Open(path)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer f.Close()
 	buf := make([]byte, ursusWSChunk)
 	var off int64
-	for off < st.Size() {
+	for off < total {
 		n, er := io.ReadFull(f, buf)
-		if er == io.ErrUnexpectedEOF { er = nil }
-		if er == io.EOF && n == 0 { break }
-		if er != nil { return er }
-		h := map[string]string{
-			"Content-Type":"application/octet-stream",
-			"X-Ursus-Generation":gen,
-			"X-Ursus-Offset":strconv.FormatInt(off,10),
-			"X-Ursus-Total":strconv.FormatInt(st.Size(),10),
+		if er == io.ErrUnexpectedEOF {
+			er = nil
 		}
-		if _, err := wsJSON(host, "POST", ep[1], h, buf[:n], 90*time.Second); err != nil {
-			return fmt.Errorf(L("передача оборвалась на %d/%d; flash не затронута: %w", "transfer stopped at %d/%d; flash was not touched: %w"), off, st.Size(), err)
+		if er == io.EOF && n == 0 {
+			break
+		}
+		if er != nil {
+			return er
+		}
+		h := map[string]string{
+			"Content-Type":       "application/octet-stream",
+			"X-Ursus-Generation": gen,
+			"X-Ursus-Offset":     strconv.FormatInt(off, 10),
+			"X-Ursus-Total":      strconv.FormatInt(total, 10),
+		}
+		chunkAck, err := wsJSON(host, "POST", ep[1], h, buf[:n], 90*time.Second)
+		if err != nil {
+			return fmt.Errorf(L("передача оборвалась на %d/%d; flash не затронута: %w", "transfer stopped at %d/%d; flash was not touched: %w"), off, total, err)
 		}
 		off += int64(n)
-		a.ui.Progress(app.Progress{Label:"HTTP", Current:off, Total:st.Size(), Unit:"bytes", Detail:fmt.Sprintf("%d / %d",off,st.Size())})
+		if got, ok := jsonNumberInt64(chunkAck["received"]); ok && got != off {
+			return fmt.Errorf("upload offset ACK mismatch: got %d want %d", got, off)
+		}
+		a.ui.Progress(app.Progress{Label: "HTTP", Current: off, Total: total, Unit: "bytes", Detail: fmt.Sprintf("%d / %d", off, total)})
 	}
-	a.ui.Progress(app.Progress{Label:"HTTP", Current:st.Size(), Total:st.Size(), Unit:"bytes", Done:true})
-	a.status(L("ГОТОВО","DONE"), fmt.Sprintf(L("%d байт приняты UrsusBoot в RAM; запуск/запись не выполнялись", "%d bytes accepted into UrsusBoot RAM; no boot/write was started"), st.Size()), app.LevelOK)
+	if off != total {
+		return fmt.Errorf("upload ended at %d/%d", off, total)
+	}
+	a.ui.Progress(app.Progress{Label: "HTTP", Current: total, Total: total, Unit: "bytes", Done: true})
+	a.status(L("ГОТОВО", "DONE"), fmt.Sprintf(L("%d байт приняты UrsusBoot в RAM; запуск/запись не выполнялись", "%d bytes accepted into UrsusBoot RAM; no boot/write was started"), total), app.LevelOK)
 	return nil
+}
+
+func jsonNumberInt64(v any) (int64, bool) {
+	switch x := v.(type) {
+	case float64:
+		return int64(x), x == float64(int64(x))
+	case json.Number:
+		n, err := x.Int64()
+		return n, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func (a *App) wsSaveDiagnostics(host string) error {
 	dir := a.sessionScratch("ws-diagnostics")
 	_ = os.MkdirAll(dir, 0o755)
 	st, err := wsJSON(host, "GET", "/api/status", nil, nil, 8*time.Second)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	if p, _ := st["product"].(string); p != "" && p != "UrsusBoot" {
 		return fmt.Errorf("unexpected product %q", p)
 	}
 	data, _ := json.MarshalIndent(st, "", "  ")
 	statusPath := filepath.Join(dir, "status.json")
-	if err := os.WriteFile(statusPath, append(data,'\n'), 0o644); err != nil { return err }
+	if err := os.WriteFile(statusPath, append(data, '\n'), 0o644); err != nil {
+		return err
+	}
 
 	req, _ := http.NewRequest("GET", "http://"+host+"/api/operation-log", nil)
-	resp, err := (&http.Client{Timeout:8*time.Second}).Do(req)
+	resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
 	if err == nil {
 		defer resp.Body.Close()
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
@@ -458,7 +537,12 @@ func (a *App) wsSaveDiagnostics(host string) error {
 		}
 	}
 	sha, _ := shaFile(statusPath)
-	a.ui.Artifact(app.Artifact{Kind:"ws-diagnostics", Label:L("Диагностика UrsusBoot:","UrsusBoot diagnostics:"), Path:statusPath, SHA256:sha})
+	a.ui.Artifact(app.Artifact{
+		Kind:   "ws-diagnostics",
+		Label:  L("Диагностика UrsusBoot:", "UrsusBoot diagnostics:"),
+		Path:   statusPath,
+		SHA256: sha,
+	})
 	return nil
 }
 
@@ -472,10 +556,20 @@ func (t *uartTerm) wsPresetMenu() {
 		"\r\n[PRESETS: 1 version · 2 bdinfo · 3 mtd list · 4 printenv · 5 mtd bad bl2 · 6 mtd bad ubi · 7 help · Enter back] "))
 	c := t.readByte()
 	fmt.Print("\r\n")
-	cmd := map[byte]string{'1':"version",'2':"bdinfo",'3':"mtd list",'4':"printenv",'5':"mtd bad bl2",'6':"mtd bad ubi",'7':"help"}[c]
-	if cmd == "" { return }
+	cmd := map[byte]string{
+		'1': "version",
+		'2': "bdinfo",
+		'3': "mtd list",
+		'4': "printenv",
+		'5': "mtd bad bl2",
+		'6': "mtd bad ubi",
+		'7': "help",
+	}[c]
+	if cmd == "" {
+		return
+	}
 	t.logSent("<PRESET " + cmd + ">")
-	_ = t.s.Write([]byte(cmd+"\r"))
+	_ = t.s.Write([]byte(cmd + "\r"))
 }
 
 func (t *uartTerm) sendCtrlC() {
