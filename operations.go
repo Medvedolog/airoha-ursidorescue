@@ -35,6 +35,7 @@ var operationCatalog = map[string]operation{
 	"ursusboot-install": {app.Write, (*App).ursusBootInstallWizard},
 	"vanilla-uboot":     {app.Write, (*App).vanillaUBootWizard},
 	"terminal":          {app.Manual, (*App).runTerminal},
+	"ws-console":        {app.Manual, (*App).runUrsusWSConsole},
 	"shell":             {app.Manual, (*App).uartShell},
 }
 
