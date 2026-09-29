@@ -169,7 +169,7 @@ func TestStartClearsProgress(t *testing.T) {
 // forms, and Windows keys arrive as the xterm ones.
 func TestFKeys(t *testing.T) {
 	for in, want := range map[string]byte{"ab\x1bOQcd": 's', "\x1b[13~": 'r', "\x1b[[D": 'l', "x\x1b[21~": 'q'} {
-		if i, n, act := findFKey([]byte(in)); i < 0 || act != want || in[i:i+n][0] != 0x1b {
+		if i, n, act := findFKey([]byte(in)); i < 0 || act != want || in[i : i+n][0] != 0x1b {
 			t.Fatalf("%q: %d %d %c", in, i, n, act)
 		}
 	}
