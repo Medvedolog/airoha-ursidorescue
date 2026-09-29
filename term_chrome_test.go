@@ -28,7 +28,7 @@ func TestChromeBarsFit(t *testing.T) {
 			if f := chromeFooter(120, ci); !strings.Contains(f, "Ctrl+Q") && !strings.Contains(f, "F10") {
 				t.Fatalf("footer lacks the exit key: %q", f)
 			}
-			if p := chromePlate(80, "UART", "COM6", simple); !strings.Contains(p, "COM6") || strings.Contains(strings.ReplaceAll(p, "\r\n", ""), "\n") {
+			if p := chromePlate(80, "UART", chromeInfo{port:"COM6", simple:simple}); !strings.Contains(p, "COM6") || strings.Contains(strings.ReplaceAll(p, "\r\n", ""), "\n") {
 				t.Fatalf("plate: %q", p)
 			}
 		}
