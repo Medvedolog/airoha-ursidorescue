@@ -73,6 +73,9 @@ func tuiMenu() []tuiGroup {
 		// Expert, ordered by risk: tools that write nothing first, then the
 		// writes, the raw MTD write last.
 		{L("Эксперт", "Expert"), []tuiItem{
+			{label: L("UrsusBoot Ethernet-консоль", "UrsusBoot Ethernet console"), hint: "MANUAL · WebSocket · F2/F3/F5", kind: "ws-console",
+				desc: L("Живая консоль уже запущенного UrsusBoot/WebFailsafe по Ethernet, UART не нужен. По умолчанию 192.168.1.1 (URSUSBOOT_IP/NOKIA_ROUTER_IP переопределяют). F2 — принять файл в RAM по HTTP без запуска/записи; F3 — сохранить диагностику на ПК; F4 — строки/RAW; F5 — безопасные read-only пресеты; F10 — назад.\n\nCtrl-C на пустом UrsusBoot> защищён двойным нажатием, потому что одиночный остановил бы WebFailsafe. Рекомендуется прямой кабель: у live-консоли нет аутентификации.",
+					"Live console of an already running UrsusBoot/WebFailsafe over Ethernet; no UART required. Defaults to 192.168.1.1 (URSUSBOOT_IP/NOKIA_ROUTER_IP override it). F2 receives a file into RAM over HTTP without boot/write; F3 saves diagnostics to the PC; F4 line/raw; F5 safe read-only presets; F10 back.\n\nCtrl-C at an idle UrsusBoot> is guarded by a double press because a single press would stop WebFailsafe. A direct cable is recommended: the live console has no authentication.")},
 			{label: L("Прозрачная UART-консоль", "Transparent UART console"), hint: L("MANUAL · сама не шлёт", "MANUAL · sends nothing"), kind: "shell",
 				desc: L("Прозрачная UART-консоль: только ваши клавиши и вывод устройства, сама ничего не отправляет. Подходит для BootROM, U-Boot и Linux — что сейчас на том конце. Без меню и XMODEM.\n\nВыход: Ctrl+] или Ctrl+Q.",
 					"A transparent UART console: only your keys and the device output, sends nothing by itself. For the BootROM, U-Boot or Linux, whatever is on the other end. No menu, no XMODEM.\n\nLeave with Ctrl+] or Ctrl+Q.")},
