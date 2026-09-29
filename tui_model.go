@@ -418,7 +418,7 @@ func (m *tuiModel) start(it tuiItem) tea.Cmd {
 	a := m.a
 	// A full-screen item picks its port here, in the TUI, rather than in
 	// the plain console after the screen was handed over.
-	if _, ok := a.portOwner().Connected(); consoleOwning[it.kind] && !ok && a.portOverride == "" && a.rememberedPort() == "" {
+	if _, ok := a.portOwner().Connected(); consoleOwning[it.kind] && it.kind != "ws-console" && !ok && a.portOverride == "" && a.rememberedPort() == "" {
 		m.dlg = &tuiDialog{isPort: true, port: listSerialPorts(), then: &it}
 		m.input.SetValue("")
 		m.input.Focus()
