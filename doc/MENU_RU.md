@@ -421,6 +421,7 @@ Porting Collector — **только чтение**. Его задача — с�
   6. Прозрачная UART-консоль (ничего не отправляет сама)
   7. Установка UrsusBoot (UART, MD/MF)
   8. Возврат или обновление vanilla U-Boot (UART, UBI)
+  9. UrsusBoot Ethernet-консоль (WebSocket, F2/F3/F5)
   0. Назад
 ```
 
@@ -430,6 +431,23 @@ Porting Collector — **только чтение**. Его задача — с�
 затем установка UrsusBoot, запись UBI-тома и последней — raw-запись в MTD. Риск виден прямо под
 названием пункта: `MANUAL`, `RAM only`, `WRITE`, `RAW WRITE` (в Главном также `ERASE`). Номера в
 текстовой консоли не менялись.
+
+#### Эксперт 9. UrsusBoot Ethernet-консоль
+
+Для уже запущенного UrsusBoot/WebFailsafe; UART не нужен. Подключение к `/ws/console` с проверкой
+`Sec-WebSocket-Accept`, subprotocol `ursusboot-console-v1` и hello `product=UrsusBoot`.
+По умолчанию используется `192.168.1.1`, переопределение — `URSUSBOOT_IP`/`NOKIA_ROUTER_IP`.
+
+- **F2 ↑ файл** — initramfs/firmware/FIP/preloader по HTTP в RAM; шестой вариант — произвольный файл
+  через `loadx` + XMODEM поверх того же WebSocket, после передачи сверяется SHA256 в RAM.
+- **F3 ↓ файл** — сохранить HTTP-диагностику либо произвольный диапазон RAM до 64 МиБ через
+  `tftpput`; файл принимается встроенным TFTP-сервером UrsidoRescue и сверяется SHA256 до и после.
+- **F4** — построчный/RAW, **F5** — read-only пресеты (`version`, `bdinfo`, `mtd list`,
+  `printenv`, `mtd bad bl2/ubi`, `help`), **F10** — выход.
+- Ctrl-C на пустом `UrsusBoot>` требует второго нажатия за 2 с: одиночный Ctrl-C остановил бы WebFailsafe.
+
+Этот режим сам не запускает boot/write/erase. HTTP-upload заканчивается в RAM; NAND-presets из
+UrsusFlasher сюда намеренно не перенесены как второй destructive-движок.
 
 #### Эксперт 1. UART-терминал + XMODEM
 
