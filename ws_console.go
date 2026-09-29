@@ -453,14 +453,11 @@ func (a *App) wsUploadRAM(host string) error {
 	if err != nil {
 		return fmt.Errorf("upload begin: %w", err)
 	}
-	if g, _ := ack["generation"].(string); g != "" && g != gen {
-		return fmt.Errorf("upload generation mismatch: %q != %q", g, gen)
-	}
-	if n, ok := jsonNumberInt64(ack["declared_size"]); ok && n != total {
-		return fmt.Errorf("upload declared size mismatch: %d != %d", n, total)
-	}
-	if n, ok := jsonNumberInt64(ack["received"]); ok && n != 0 {
-		return fmt.Errorf("upload begin offset mismatch: %d", n)
+	g, _ := ack["generation"].(string)
+	declared, dok := jsonNumberInt64(ack["declared_size"])
+	received, rok := jsonNumberInt64(ack["received"])
+	if g != gen || !dok || declared != total || !rok || received != 0 {
+		return fmt.Errorf("upload begin ACK mismatch: generation=%q declared=%v received=%v", g, ack["declared_size"], ack["received"])
 	}
 
 	f, err := os.Open(path)
@@ -492,8 +489,11 @@ func (a *App) wsUploadRAM(host string) error {
 			return fmt.Errorf(L("передача оборвалась на %d/%d; flash не затронута: %w", "transfer stopped at %d/%d; flash was not touched: %w"), off, total, err)
 		}
 		off += int64(n)
-		if got, ok := jsonNumberInt64(chunkAck["received"]); ok && got != off {
-			return fmt.Errorf("upload offset ACK mismatch: got %d want %d", got, off)
+		cg, _ := chunkAck["generation"].(string)
+		cd, cdok := jsonNumberInt64(chunkAck["declared_size"])
+		got, gok := jsonNumberInt64(chunkAck["received"])
+		if cg != gen || !cdok || cd != total || !gok || got != off {
+			return fmt.Errorf("upload chunk ACK mismatch: generation=%q declared=%v received=%v want=%d", cg, chunkAck["declared_size"], chunkAck["received"], off)
 		}
 		a.ui.Progress(app.Progress{Label: "HTTP", Current: off, Total: total, Unit: "bytes", Detail: fmt.Sprintf("%d / %d", off, total)})
 	}
@@ -524,7 +524,7 @@ func (a *App) wsSaveDiagnostics(host string) error {
 	if err != nil {
 		return err
 	}
-	if p, _ := st["product"].(string); p != "" && p != "UrsusBoot" {
+	if p, _ := st["product"].(string); p != "UrsusBoot" {
 		return fmt.Errorf("unexpected product %q", p)
 	}
 	data, _ := json.MarshalIndent(st, "", "  ")
