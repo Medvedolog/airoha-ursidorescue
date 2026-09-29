@@ -74,11 +74,15 @@ func isUrsusWS(s Serial) (*ursusWSPort, bool) {
 }
 
 func connectUrsusWS(host string, timeout time.Duration) (*ursusWSPort, error) {
+	return connectUrsusWSAt(host, 80, timeout)
+}
+
+func connectUrsusWSAt(host string, port int, timeout time.Duration) (*ursusWSPort, error) {
 	host = strings.TrimSpace(host)
 	if host == "" {
 		host = defaultRouterIP
 	}
-	addr := net.JoinHostPort(host, "80")
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	d := net.Dialer{Timeout: timeout}
 	conn, err := d.Dial("tcp", addr)
 	if err != nil {
@@ -94,8 +98,10 @@ func connectUrsusWS(host string, timeout time.Duration) (*ursusWSPort, error) {
 		return fail(err)
 	}
 	key := base64.StdEncoding.EncodeToString(keyBytes)
+	hostHeader := host
+	if port != 80 { hostHeader = net.JoinHostPort(host, strconv.Itoa(port)) }
 	req := fmt.Sprintf("GET /ws/console HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: %s\r\n\r\n",
-		host, key, ursusWSProtocol)
+		hostHeader, key, ursusWSProtocol)
 	_ = conn.SetDeadline(time.Now().Add(timeout))
 	if _, err := io.WriteString(conn, req); err != nil {
 		return fail(err)
