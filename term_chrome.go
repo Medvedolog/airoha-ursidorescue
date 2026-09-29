@@ -37,6 +37,8 @@ type chromeInfo struct {
 	raw, pager    bool
 	log           bool
 	simple        bool
+	network       bool
+	host          string
 }
 
 // chromeSize is the terminal size; a variable so tests can resize.
@@ -50,6 +52,9 @@ var chromeSize = func() (rows, cols int) {
 
 func (t *uartTerm) chromeInfoLocked() chromeInfo {
 	ci := chromeInfo{port: t.s.Name(), raw: t.raw, pager: t.pagerEnabled, simple: t.simple}
+	if w, ok := isUrsusWS(t.s); ok {
+		ci.network, ci.host = true, w.Host()
+	}
 	t.a.logMu.Lock()
 	ci.log = t.a.logFile != nil
 	t.a.logMu.Unlock()
@@ -77,12 +82,25 @@ func chromeHeader(w int, ci chromeInfo) string {
 	}
 	brand := on(tsBrand, " UrsidoRescue")
 	port := on(tsInk, ci.port) + on(tsOK, " ●")
-	for _, l := range []string{
-		brand + on(tsFaint, " "+appVersion) + sep + port + sep + on(tsInk, "UART 115200 8N1") + sep + on(tsSand, chromeMode(ci)) + sep + on(tsInk, "LOG") + logDot,
-		brand + sep + port + sep + on(tsInk, "115200 8N1") + sep + on(tsSand, chromeMode(ci)) + sep + on(tsInk, "LOG") + logDot,
-		brand + sep + port + sep + on(tsSand, chromeMode(ci)),
-		brand + sep + port,
-	} {
+	if ci.network {
+		port = on(tsInk, "UrsusBoot "+ci.host) + on(tsOK, " ●")
+	}
+	var variants []string
+	if ci.network {
+		variants = []string{
+			brand + on(tsFaint, " "+appVersion) + sep + port + sep + on(tsInk, "WebSocket") + sep + on(tsSand, chromeMode(ci)) + sep + on(tsInk, "LOG") + logDot,
+			brand + sep + port + sep + on(tsInk, "WebSocket") + sep + on(tsSand, chromeMode(ci)),
+			brand + sep + port,
+		}
+	} else {
+		variants = []string{
+			brand + on(tsFaint, " "+appVersion) + sep + port + sep + on(tsInk, "UART 115200 8N1") + sep + on(tsSand, chromeMode(ci)) + sep + on(tsInk, "LOG") + logDot,
+			brand + sep + port + sep + on(tsInk, "115200 8N1") + sep + on(tsSand, chromeMode(ci)) + sep + on(tsInk, "LOG") + logDot,
+			brand + sep + port + sep + on(tsSand, chromeMode(ci)),
+			brand + sep + port,
+		}
+	}
+	for _, l := range variants {
 		if lipgloss.Width(l) < w {
 			return bar(tsBar, w, l, "")
 		}
@@ -104,6 +122,9 @@ func chromeFooter(w int, ci chromeInfo) string {
 	var keys []string
 	if ci.simple {
 		keys = []string{L("Ctrl+] / Ctrl+Q назад", "Ctrl+] / Ctrl+Q back")}
+	} else if ci.network {
+		keys = []string{L("F2 файл→RAM", "F2 file→RAM"), L("F3 диагностика", "F3 diagnostics"), L("F4 строки/RAW", "F4 line/RAW"),
+			L("F5 пресеты", "F5 presets"), L("F10 выход", "F10 quit")}
 	} else {
 		keys = []string{L("F2 XMODEM →", "F2 XMODEM →"), L("F3 XMODEM ←", "F3 XMODEM ←"), L("F4 строки/RAW", "F4 line/RAW"),
 			L("F10 выход", "F10 quit"), L("Ctrl+] меню", "Ctrl+] menu")}
@@ -138,20 +159,25 @@ func truncW(s string, w int) string {
 
 // chromePlate is the entry notice printed once inside the scroll region, so an
 // empty UART does not look like a broken program.
-func chromePlate(w int, title, port string, simple bool) string {
-	lines := []string{
-		tsBrand.Render(title),
-		tsInk.Render(port + " · 115200 8N1 · " + L("сам ничего не отправляет — только ваши клавиши", "sends nothing by itself, only your keys")),
+func chromePlate(w int, title string, ci chromeInfo) string {
+	endpoint := ci.port + " · 115200 8N1"
+	if ci.network {
+		endpoint = "UrsusBoot " + ci.host + " · WebSocket /ws/console"
 	}
-	if simple {
+	lines := []string{tsBrand.Render(title), tsInk.Render(endpoint)}
+	if ci.simple {
 		lines = append(lines, tsInk.Render(L("Ctrl+] или Ctrl+Q — назад в меню · Ctrl+P — пейджер", "Ctrl+] or Ctrl+Q back to the menu · Ctrl+P pager")))
+	} else if ci.network {
+		lines = append(lines, tsInk.Render(L("F2 — файл в RAM · F3 — диагностика · F4 — построчный/прозрачный · F5 — read-only пресеты · F10 — назад",
+			"F2 file to RAM · F3 diagnostics · F4 line/raw · F5 read-only presets · F10 back")))
+		lines = append(lines, tsMuted.Render(L("Ctrl-C на пустом UrsusBoot> защищён двойным нажатием; flash сам терминал не пишет.",
+			"Ctrl-C at idle UrsusBoot> is guarded by a double press; the terminal itself does not write flash.")))
 	} else {
 		lines = append(lines, tsInk.Render(L("F2 — XMODEM отправить · F3 — XMODEM принять · F4 — построчный/прозрачный · F10 или Ctrl+Q — назад",
 			"F2 XMODEM send · F3 XMODEM receive · F4 line/raw · F10 or Ctrl+Q back")))
 		lines = append(lines, tsInk.Render(L("Ctrl+] — меню (то же и путь к логу) · Ctrl+P — пейджер", "Ctrl+] menu (the same, and the log path) · Ctrl+P pager")))
 	}
-	lines = append(lines, tsMuted.Render(L("Пустой экран — это нормально: ждём вывод устройства. Нажмите Enter, чтобы увидеть приглашение.",
-		"An empty screen is normal: waiting for the device. Press Enter to see its prompt.")))
+	lines = append(lines, tsMuted.Render(L("Пустой экран — это нормально: ждём вывод устройства.", "An empty screen is normal: waiting for the device.")))
 	box := tsBox.Width(max(20, min(w-2, 96)))
 	return strings.ReplaceAll(box.Render(strings.Join(lines, "\n")), "\n", "\r\n") + "\r\n"
 }
