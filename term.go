@@ -132,6 +132,7 @@ const (
 	winVKF2     = 0x71
 	winVKF3     = 0x72
 	winVKF4     = 0x73
+	winVKF5     = 0x74
 	winVKF10    = 0x79
 
 	winRightCtrlPressed = 0x0004
@@ -186,6 +187,8 @@ func translateWindowsConsoleKey(vk uint16, ch rune, controlState uint32, repeat 
 			one = []byte("\x1bOR")
 		case winVKF4:
 			one = []byte("\x1bOS")
+		case winVKF5:
+			one = []byte("\x1b[15~")
 		case winVKF10:
 			one = []byte("\x1b[21~")
 		}
