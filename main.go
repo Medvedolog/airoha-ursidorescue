@@ -2621,11 +2621,12 @@ func (a *App) expertMenu() error {
 		fmt.Println(L("  6. Прозрачная UART-консоль (ничего не отправляет сама)", "  6. Transparent UART console (sends nothing by itself)"))
 		fmt.Println(L("  7. Установка UrsusBoot (UART, MD/MF)", "  7. Install UrsusBoot (UART, MD/MF)"))
 		fmt.Println(L("  8. Возврат или обновление vanilla U-Boot (UART, UBI)", "  8. Return or update vanilla U-Boot (UART, UBI)"))
+		fmt.Println(L("  9. UrsusBoot Ethernet-консоль (WebSocket, F2/F3/F5)", "  9. UrsusBoot Ethernet console (WebSocket, F2/F3/F5)"))
 		fmt.Println(L("  0. Назад", "  0. Back"))
 		v := a.ask(L("Выбор: ", "Choice: "))
-		ops := map[string]string{"1": "terminal", "2": "ram-uboot", "3": "ubi-volume", "4": "raw-mtd", "5": "diagnostics", "6": "shell", "7": "ursusboot-install", "8": "vanilla-uboot"}
+		ops := map[string]string{"1": "terminal", "2": "ram-uboot", "3": "ubi-volume", "4": "raw-mtd", "5": "diagnostics", "6": "shell", "7": "ursusboot-install", "8": "vanilla-uboot", "9": "ws-console"}
 		switch v {
-		case "1", "2", "3", "4", "5", "6", "7", "8":
+		case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 			if e := a.RunOperation(ops[v]); e != nil {
 				return e
 			}
