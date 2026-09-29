@@ -422,6 +422,7 @@ Expert mode
   6. Transparent UART console (sends nothing by itself)
   7. Install UrsusBoot (UART, MD/MF)
   8. Return or update vanilla U-Boot (UART, UBI)
+  9. UrsusBoot Ethernet console (WebSocket, F2/F3/F5)
   0. Back
 ```
 
@@ -431,6 +432,24 @@ In the TUI the same items are ordered by risk: the transparent UART console, the
 XMODEM, the RAM U-Boot, then the UrsusBoot install, the UBI volume write and, last, the raw MTD write.
 The risk shows right under each item: `MANUAL`, `RAM only`, `WRITE`, `RAW WRITE` (`ERASE` in Main).
 The text console keeps its numbers.
+
+#### Expert 9. UrsusBoot Ethernet console
+
+For an already running UrsusBoot/WebFailsafe; no UART is needed. The client connects to `/ws/console`
+and validates `Sec-WebSocket-Accept`, subprotocol `ursusboot-console-v1`, and the
+`product=UrsusBoot` hello. It defaults to `192.168.1.1`; override with
+`URSUSBOOT_IP`/`NOKIA_ROUTER_IP`.
+
+- **F2 ↑ file**: initramfs/firmware/FIP/preloader over HTTP into RAM; option 6 sends an arbitrary
+  file through `loadx` + XMODEM on the same WebSocket and verifies the RAM SHA256.
+- **F3 ↓ file**: save HTTP diagnostics or export an arbitrary RAM range up to 64 MiB through
+  `tftpput`; UrsidoRescue's built-in TFTP receiver saves it and verifies SHA256 before/after.
+- **F4** toggles line/raw; **F5** opens read-only presets (`version`, `bdinfo`, `mtd list`,
+  `printenv`, `mtd bad bl2/ubi`, `help`); **F10** exits.
+- Ctrl-C at an idle `UrsusBoot>` needs a second press within 2 s because one Ctrl-C would stop WebFailsafe.
+
+This mode itself never starts boot/write/erase. HTTP uploads stop in RAM; UrsusFlasher's destructive
+NAND presets are intentionally not duplicated here as a second write engine.
 
 #### Expert 1. UART terminal + XMODEM
 
