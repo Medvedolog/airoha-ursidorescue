@@ -92,7 +92,7 @@ func (a *App) wsXmodemSend(host, path string) error {
 	if err := w.Write([]byte(fmt.Sprintf("loadx 0x%x\r", wsRAMLoadAddr))); err != nil {
 		return err
 	}
-	_, err = wsReadUntil(w, 30*time.Second, func(b []byte) bool {
+	readyOut, err := wsReadUntil(w, 30*time.Second, func(b []byte) bool {
 		low := bytes.ToLower(b)
 		if bytes.Contains(low, []byte("unknown command")) || bytes.Contains(low, []byte("usage:")) {
 			return true
@@ -102,6 +102,14 @@ func (a *App) wsXmodemSend(host, path string) error {
 	})
 	if err != nil {
 		return fmt.Errorf("UrsusBoot loadx readiness: %w", err)
+	}
+	readyLow := bytes.ToLower(readyOut)
+	if bytes.Contains(readyLow, []byte("unknown command")) || bytes.Contains(readyLow, []byte("usage:")) {
+		return errors.New("UrsusBoot rejected loadx")
+	}
+	pos := bytes.Index(readyLow, []byte("ready for binary (xmodem)"))
+	if pos < 0 || !bytes.Contains(readyOut[pos:], []byte{'C'}) {
+		return errors.New("UrsusBoot loadx did not request XMODEM-CRC")
 	}
 
 	a.event(L("UrsusBoot loadx готов; XMODEM идёт поверх того же WebSocket", "UrsusBoot loadx ready; XMODEM uses the same WebSocket"))
@@ -152,7 +160,7 @@ func parseTFTPRequest(p []byte) (op uint16, name, mode string, opts map[string]s
 	return
 }
 
-func runTFTPPutReceiver(bindIP string, port int, output, expectedName, allowedHost string, ready chan error, done chan tftpPutResult) {
+func runTFTPPutReceiver(bindIP string, port int, output, expectedName, allowedHost string, cancel <-chan struct{}, ready chan error, done chan tftpPutResult) {
 	res := tftpPutResult{}
 	finish := func(err error) {
 		res.err = err
@@ -179,10 +187,18 @@ func runTFTPPutReceiver(bindIP string, port int, output, expectedName, allowedHo
 	var peer *net.UDPAddr
 	var opts map[string]string
 	for time.Now().Before(deadline) {
+		if tftpCancelled(cancel) {
+			finish(errors.New("TFTP PUT cancelled"))
+			return
+		}
 		_ = c.SetReadDeadline(time.Now().Add(time.Second))
 		n, a, er := c.ReadFromUDP(buf)
 		if er != nil {
 			if ne, ok := er.(net.Error); ok && ne.Timeout() {
+				if tftpCancelled(cancel) {
+					finish(errors.New("TFTP PUT cancelled"))
+					return
+				}
 				continue
 			}
 			if isExpectedUDPNoise(er) {
@@ -231,10 +247,18 @@ func runTFTPPutReceiver(bindIP string, port int, output, expectedName, allowedHo
 	expectedBlock := uint16(1)
 	retries := 0
 	for {
+		if tftpCancelled(cancel) {
+			finish(errors.New("TFTP PUT cancelled"))
+			return
+		}
 		_ = c.SetReadDeadline(time.Now().Add(time.Second))
 		n, a, er := c.ReadFromUDP(buf)
 		if er != nil {
 			if ne, ok := er.(net.Error); ok && ne.Timeout() {
+				if tftpCancelled(cancel) {
+					finish(errors.New("TFTP PUT cancelled"))
+					return
+				}
 				retries++
 				if retries >= 120 {
 					finish(errors.New("TFTP PUT timeout"))
@@ -276,6 +300,15 @@ func runTFTPPutReceiver(bindIP string, port int, output, expectedName, allowedHo
 			expectedBlock++
 			if len(payload) < blockSize {
 				_ = f.Sync()
+				// Briefly linger so a lost final ACK can be retransmitted.
+				_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+				if dupN, dupAddr, dupErr := c.ReadFromUDP(buf); dupErr == nil && dupAddr.String() == peer.String() && dupN >= 4 {
+					dupOp := binary.BigEndian.Uint16(buf[:2])
+					dupBlock := binary.BigEndian.Uint16(buf[2:4])
+					if dupOp == 3 && dupBlock == block {
+						_, _ = c.WriteToUDP(ack, peer)
+					}
+				}
 				finish(nil)
 				return
 			}
@@ -287,7 +320,11 @@ func runTFTPPutReceiver(bindIP string, port int, output, expectedName, allowedHo
 }
 
 func localIPForHost(host string) (string, error) {
-	c, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: net.ParseIP(host), Port: 9})
+	remote, err := net.ResolveUDPAddr("udp4", net.JoinHostPort(host, "9"))
+	if err != nil {
+		return "", err
+	}
+	c, err := net.DialUDP("udp4", nil, remote)
 	if err != nil {
 		return "", err
 	}
@@ -372,18 +409,24 @@ func (a *App) wsReceiveRAM(host string) error {
 	partial := out + ".partial"
 	ready := make(chan error, 1)
 	done := make(chan tftpPutResult, 1)
-	go runTFTPPutReceiver(local, port, partial, remote, host, ready, done)
+	cancel := make(chan struct{})
+	go runTFTPPutReceiver(local, port, partial, remote, host, cancel, ready, done)
 	if err := <-ready; err != nil {
 		return err
 	}
 	a.event(fmt.Sprintf(L("TFTP PUT: принимаю %d байт на %s:%d", "TFTP PUT: receiving %d bytes on %s:%d"), size, local, port))
 
 	console, cmdErr := wsCommand(w, fmt.Sprintf("tftpput 0x%x 0x%x %s:%d:%s", addr, size, local, port, remote), max(90*time.Second, time.Duration(size/10000)*time.Second))
-	res := <-done
 	if cmdErr != nil {
+		close(cancel)
+		res := <-done
 		_ = os.Remove(partial)
+		if res.err != nil && !strings.Contains(res.err.Error(), "cancelled") {
+			return fmt.Errorf("%w; TFTP receiver: %v", cmdErr, res.err)
+		}
 		return cmdErr
 	}
+	res := <-done
 	if res.err != nil || uint64(res.bytes) != size {
 		_ = os.Remove(partial)
 		return fmt.Errorf("TFTP PUT incomplete: %d/%d: %v", res.bytes, size, res.err)
