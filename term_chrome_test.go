@@ -153,6 +153,18 @@ func TestFullScreenItemPicksPortInTUI(t *testing.T) {
 	}
 }
 
+// The Ethernet console owns the terminal but never needs a serial-port dialog.
+func TestWSConsoleSkipsUARTPortDialog(t *testing.T) {
+	a := &App{ui: (&app.Recorder{}).UI()}
+	m := newTUIModel(a, &tuiUI{})
+	if cmd := m.start(tuiItem{label: "network", kind: "ws-console"}); cmd == nil || !m.busy {
+		t.Fatal("the network console must start without waiting for a UART port")
+	}
+	if m.dlg != nil {
+		t.Fatalf("unexpected UART dialog: %+v", m.dlg)
+	}
+}
+
 // A new operation starts without the previous one's progress.
 func TestStartClearsProgress(t *testing.T) {
 	a := &App{ui: (&app.Recorder{}).UI(), portOverride: "COM1"}
