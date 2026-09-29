@@ -34,6 +34,7 @@ type uartTerm struct {
 	pagerPending    []byte
 	pagerANSIProbe  []byte
 	lastASCIINotice time.Time
+	ctrlCAt        time.Time // WebSocket idle-prompt Ctrl-C guard
 
 	chrome *termChrome // UrsidoRescue bars around the stream (TUI only); nil in the text console
 }
@@ -62,11 +63,17 @@ func (a *App) runTerminalOnMode(s Serial, simple bool) error {
 	t := &uartTerm{a: a, s: s, prompt: "] ", raw: true, simple: simple}
 	t.ed.hidx = 0
 	title := L("UART-терминал + XMODEM", "UART terminal + XMODEM")
-	if simple {
+	if _, ok := isUrsusWS(s); ok {
+		title = L("UrsusBoot Ethernet-консоль", "UrsusBoot Ethernet console")
+	} else if simple {
 		title = L("Прозрачная UART-консоль", "Transparent UART console")
 	}
 	if a.frontEnd == "tui" {
 		t.chrome = &termChrome{title: strings.ToUpper(title)}
+	} else if _, ok := isUrsusWS(s); ok {
+		fmt.Printf(L("\nUrsusBoot Ethernet-консоль %s — WebSocket /ws/console\n", "\nUrsusBoot Ethernet console %s — WebSocket /ws/console\n"), s.Name())
+		fmt.Println(L("F2 — файл в RAM по HTTP · F3 — диагностика на ПК · F4 — строки/RAW · F5 — read-only пресеты · F10 — выход.",
+			"F2 file to RAM over HTTP · F3 diagnostics to PC · F4 line/raw · F5 read-only presets · F10 quit."))
 	} else if simple {
 		fmt.Printf(L("\nПрозрачная UART-консоль %s — 115200 8N1, без flow control\n", "\nTransparent UART console %s — 115200 8N1, no flow\n"), s.Name())
 		fmt.Println(L("Ctrl+] / Ctrl+Q — выход, Ctrl+P — pager для обычного текста; полноэкранные TUI обходят его автоматически.",
@@ -94,7 +101,7 @@ func (a *App) runTerminalOnMode(s Serial, simple bool) error {
 	if t.chrome != nil {
 		t.mu.Lock()
 		t.chromeStartLocked(false)
-		os.Stdout.WriteString(chromePlate(max(40, t.chrome.cols), title, s.Name(), simple))
+		os.Stdout.WriteString(chromePlate(max(40, t.chrome.cols), title, t.chromeInfoLocked()))
 		t.mu.Unlock()
 		defer func() {
 			t.mu.Lock()
@@ -125,6 +132,11 @@ func (a *App) runTerminalOnMode(s Serial, simple bool) error {
 			i, size, act := -1, 0, byte(0)
 			if t.fkeysLocal() {
 				i, size, act = findFKey(chunk)
+				if act == 'n' {
+					if _, ok := isUrsusWS(t.s); !ok { // F5 belongs to the UART device outside the network console
+						i, size, act = -1, 0, 0
+					}
+				}
 			}
 			part := chunk
 			if i >= 0 {
@@ -278,7 +290,7 @@ func (t *uartTerm) writeRawInput(p []byte) error {
 		}
 		i := -1
 		for n, b := range p {
-			if b == 0x1d || b == 0x11 || b == 0x10 {
+			if b == 0x1d || b == 0x11 || b == 0x10 || (b == 0x03 && func() bool { _, ok := isUrsusWS(t.s); return ok }()) {
 				i = n
 				break
 			}
@@ -300,6 +312,10 @@ func (t *uartTerm) writeRawInput(p []byte) error {
 		}
 		if ctrl == 0x10 {
 			t.togglePager()
+			continue
+		}
+		if ctrl == 0x03 {
+			t.sendCtrlC()
 			continue
 		}
 		if t.simple {
@@ -564,8 +580,7 @@ func (t *uartTerm) onKey(ev keyEvent) {
 	}
 	switch ev.kind {
 	case kCtrlC:
-		t.logSent("<Ctrl-C>")
-		_ = t.s.Write([]byte{0x03})
+		t.sendCtrlC()
 		return
 	case kCtrlZ:
 		t.logSent("<Ctrl-Z>")
@@ -619,8 +634,13 @@ func (t *uartTerm) menuChoice(prefetched byte) {
 	if !t.raw {
 		mode = L("сейчас: построчный", "now: line")
 	}
-	fmt.Print(L("\r\n[меню ("+mode+"): l=прозрачный/построчный, s=XMODEM отпр, r=XMODEM приём, g=лог, q=выход, Enter=назад] ",
-		"\r\n[menu ("+mode+"): l=raw/line, s=XMODEM send, r=XMODEM recv, g=log, q=quit, Enter=back] "))
+	if _, ok := isUrsusWS(t.s); ok {
+		fmt.Print(L("\r\n[меню ("+mode+"): s=файл в RAM · r=диагностика · n=пресеты · l=строки/RAW · g=лог · q=выход] ",
+			"\r\n[menu ("+mode+"): s=file to RAM · r=diagnostics · n=presets · l=line/RAW · g=log · q=quit] "))
+	} else {
+		fmt.Print(L("\r\n[меню ("+mode+"): l=прозрачный/построчный, s=XMODEM отпр, r=XMODEM приём, g=лог, q=выход, Enter=назад] ",
+			"\r\n[menu ("+mode+"): l=raw/line, s=XMODEM send, r=XMODEM recv, g=log, q=quit, Enter=back] "))
+	}
 	c := prefetched
 	if c == 0 {
 		c = t.readByte()
@@ -638,9 +658,21 @@ func (t *uartTerm) menuAction(c byte) {
 	t.mu.Unlock()
 	switch c {
 	case 's', 'S':
+		if w, ok := isUrsusWS(t.s); ok {
+			w.setAction('u')
+			t.quit = true
+			return
+		}
 		t.xmodemSendInteractive()
 	case 'r', 'R':
+		if w, ok := isUrsusWS(t.s); ok {
+			w.setAction('d')
+			t.quit = true
+			return
+		}
 		t.xmodemRecvInteractive()
+	case 'n', 'N':
+		t.wsPresetMenu()
 	case 'l', 'L':
 		t.raw = !t.raw
 		t.mu.Lock()
@@ -798,6 +830,7 @@ var fkeySeqs = []struct {
 	{"\x1bOQ", 's'}, {"\x1b[12~", 's'}, {"\x1b[[B", 's'}, // F2 XMODEM send
 	{"\x1bOR", 'r'}, {"\x1b[13~", 'r'}, {"\x1b[[C", 'r'}, // F3 XMODEM receive
 	{"\x1bOS", 'l'}, {"\x1b[14~", 'l'}, {"\x1b[[D", 'l'}, // F4 raw / line mode
+	{"\x1b[15~", 'n'}, // F5 network presets (UART forwards it)
 	{"\x1b[21~", 'q'}, // F10 leave
 }
 
