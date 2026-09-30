@@ -1232,6 +1232,62 @@ func goodSpans(off, size uint64, bad []uint64) [][2]uint64 {
 	return spans
 }
 
+type stockBBTSummary struct {
+	Total      int
+	Restore    int
+	SafeSkips  int
+	Outside    int
+	Critical   int
+}
+
+func summarizeStockBadBlocks(xs []uint64) stockBBTSummary {
+	s := stockBBTSummary{Total: len(xs)}
+	for _, x := range xs {
+		if x >= stockIBUSize {
+			s.Outside++
+			continue
+		}
+		s.Restore++
+		if x >= stockBadSafeUBIStart && x < stockBadSafeUBIEnd {
+			s.SafeSkips++
+		} else {
+			s.Critical++
+		}
+	}
+	return s
+}
+
+func countNewBadBlocks(before, after []uint64) int {
+	seen := make(map[uint64]struct{}, len(before))
+	for _, x := range before {
+		seen[x] = struct{}{}
+	}
+	n := 0
+	for _, x := range after {
+		if _, ok := seen[x]; !ok {
+			n++
+		}
+	}
+	return n
+}
+
+func (a *App) reportStockBBT(stage string, xs []uint64, newBad int) stockBBTSummary {
+	s := summarizeStockBadBlocks(xs)
+	level := app.LevelOK
+	if s.Critical > 0 {
+		level = app.LevelWarn
+	}
+	detail := fmt.Sprintf(L(
+		"%s: bad всего=%d · в восстанавливаемой IBU=%d · безопасно пропускаются=%d · вне области=%d · критичных=%d",
+		"%s: bad total=%d · inside restored IBU=%d · safely skipped=%d · outside span=%d · critical=%d"),
+		stage, s.Total, s.Restore, s.SafeSkips, s.Outside, s.Critical)
+	if newBad >= 0 {
+		detail += fmt.Sprintf(L(" · новых после erase=%d", " · new after erase=%d"), newBad)
+	}
+	a.status("BBT", detail, level)
+	return s
+}
+
 func (a *App) acquireRAMUBoot(preferred Profile) (Serial, Profile, []byte, error) {
 	s, e := a.openPort()
 	if e != nil {
@@ -2273,10 +2329,10 @@ func (a *App) stockRestoreWizard() error {
 	if e != nil {
 		return e
 	}
+	bbt := a.reportStockBBT(L("до erase", "before erase"), bad, -1)
 	if e = validateStockBadBlocks(bad); e != nil {
 		return e
 	}
-	a.notef(L("[INFO] bad-блоков в ubi: %d\n", "[INFO] bad blocks in ubi: %d\n"), len(bad))
 	local, e := a.networkIP()
 	if e != nil {
 		return e
@@ -2290,6 +2346,7 @@ func (a *App) stockRestoreWizard() error {
 	a.noteln(L("\nВНИМАНИЕ: будет полностью очищен OpenWrt UBI region, затем восстановлен stock mtd16; BL2 пишется ПОСЛЕДНИМ.", "\nWARNING: the OpenWrt UBI region will be erased completely, then stock mtd16 restored; BL2 is written LAST."))
 	if e = a.confirmOp(app.Erase, "RESTORE STOCK BACKUP", []string{
 		L("стирание области ubi (mtd erase ubi)", "erase the ubi region (mtd erase ubi)"),
+		fmt.Sprintf(L("BBT: %d bad-блоков в восстанавливаемой области будут пропущены; критичных 0", "BBT: %d bad blocks in the restored span will be skipped; critical 0"), bbt.SafeSkips),
 		fmt.Sprintf(L("запись %d частей заводской области с проверкой каждой", "write %d stock chunks, each read back"), len(prep.chunks)),
 		L("запись BL2 последним и его проверка", "write BL2 last and read it back"),
 	}); e != nil {
@@ -2306,6 +2363,8 @@ func (a *App) stockRestoreWizard() error {
 	if e != nil {
 		return e
 	}
+	newBad := countNewBadBlocks(bad, bad2)
+	a.reportStockBBT(L("после erase", "after erase"), bad2, newBad)
 	if e = validateStockBadBlocks(bad2); e != nil {
 		return e
 	}
@@ -2367,6 +2426,11 @@ func (a *App) stockRestoreWizard() error {
 	if fmt.Sprint(bad3) != fmt.Sprint(bad2) {
 		return errors.New(L("карта bad-блоков изменилась во время записи IBU; BL2 не тронут", "bad-block map changed during IBU write; BL2 remains untouched"))
 	}
+	finalBBT := summarizeStockBadBlocks(bad3)
+	a.status("BBT", fmt.Sprintf(L(
+		"после записи IBU: карта стабильна · bad=%d · пропущено=%d · критичных=0",
+		"after IBU write: map stable · bad=%d · skipped=%d · critical=0"),
+		finalBBT.Total, finalBBT.SafeSkips), app.LevelOK)
 	a.cancelAt(L("перед записью BL2", "before writing BL2"))
 	a.overall(len(prep.chunks), len(prep.chunks))
 	if e = a.loadChunkWithKnownLocal(s, prep.bl2, "stock-bl2.bin", local); e != nil {
