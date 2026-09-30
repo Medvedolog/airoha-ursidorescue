@@ -1233,11 +1233,11 @@ func goodSpans(off, size uint64, bad []uint64) [][2]uint64 {
 }
 
 type stockBBTSummary struct {
-	Total      int
-	Restore    int
-	SafeSkips  int
-	Outside    int
-	Critical   int
+	Total     int
+	Restore   int
+	SafeSkips int
+	Outside   int
+	Critical  int
 }
 
 func summarizeStockBadBlocks(xs []uint64) stockBBTSummary {
