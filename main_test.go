@@ -119,10 +119,10 @@ func TestGoodSpans(t *testing.T) {
 
 func TestStockBBTSummary(t *testing.T) {
 	xs := []uint64{
-		0x00020000,             // critical in restored span
-		stockBadSafeUBIStart,   // safe skip
+		0x00020000,                     // critical in restored span
+		stockBadSafeUBIStart,           // safe skip
 		stockBadSafeUBIEnd - eraseSize, // safe skip
-		stockIBUSize,           // outside restored span
+		stockIBUSize,                   // outside restored span
 	}
 	s := summarizeStockBadBlocks(xs)
 	if s.Total != 4 || s.Restore != 3 || s.SafeSkips != 2 || s.Outside != 1 || s.Critical != 1 {
