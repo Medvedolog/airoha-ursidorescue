@@ -116,6 +116,30 @@ func TestGoodSpans(t *testing.T) {
 		t.Fatalf("%v", s)
 	}
 }
+
+func TestStockBBTSummary(t *testing.T) {
+	xs := []uint64{
+		0x00020000,             // critical in restored span
+		stockBadSafeUBIStart,   // safe skip
+		stockBadSafeUBIEnd - eraseSize, // safe skip
+		stockIBUSize,           // outside restored span
+	}
+	s := summarizeStockBadBlocks(xs)
+	if s.Total != 4 || s.Restore != 3 || s.SafeSkips != 2 || s.Outside != 1 || s.Critical != 1 {
+		t.Fatalf("summary=%+v", s)
+	}
+}
+
+func TestCountNewBadBlocks(t *testing.T) {
+	before := []uint64{0x20000, 0x40000}
+	after := []uint64{0x20000, 0x40000, 0x80000}
+	if got := countNewBadBlocks(before, after); got != 1 {
+		t.Fatalf("new=%d", got)
+	}
+	if got := countNewBadBlocks(after, before); got != 0 {
+		t.Fatalf("removed blocks must not count as new: %d", got)
+	}
+}
 func TestVendorIsInformationalParser(t *testing.T) {
 	if identifyVendor([]byte("Fudan Micro FM25G02B")) != "Fudan Micro" {
 		t.Fatal("fudan")
