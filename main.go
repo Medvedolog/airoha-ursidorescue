@@ -29,7 +29,7 @@ import (
 
 const (
 	appName               = "UrsidoRescue"
-	appVersion            = "0.2.1-test.19-md-noread"
+	appVersion            = "0.2.1-test.21-md-bl2-rescue"
 	defaultRouterIP       = "192.168.1.1"
 	defaultLocalIP        = "192.168.1.254"
 	defaultTFTPPort       = 1069
@@ -2937,7 +2937,7 @@ func (a *App) makeSupportBundle() (string, error) {
 }
 
 func (a *App) selftest() error {
-	if appVersion != "0.2.1-test.19-md-noread" {
+	if appVersion != "0.2.1-test.21-md-bl2-rescue" {
 		return errors.New("version")
 	}
 	if _, e := probe.CheckUBoot("saveenv"); e == nil {
