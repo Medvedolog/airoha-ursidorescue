@@ -2432,7 +2432,7 @@ func (a *App) stockRestoreWizard() error {
 		return e
 	}
 	a.cancelAt(L("после стирания ubi", "after erasing ubi"))
-	if _, e = a.ubootCommand(s, "mtd erase ubi", 20*time.Minute); e != nil {
+	if e = a.ubootPersistentOnce(s, "mtd erase ubi", 20*time.Minute); e != nil {
 		return e
 	}
 	if e = a.checkpoint(L("после стирания ubi; BL2 не тронут", "after erasing ubi; BL2 untouched")); e != nil {
@@ -2481,14 +2481,12 @@ func (a *App) stockRestoreWizard() error {
 				return e
 			}
 			cmd := fmt.Sprintf("mtd write ubi 0x%x 0x%x 0x%x", ram, sp[0], sp[1])
-			out, e := a.ubootCommand(s, cmd, 10*time.Minute)
-			if e != nil {
+			if e := a.ubootPersistentOnce(s, cmd, 10*time.Minute); e != nil {
 				return e
 			}
-			low := strings.ToLower(string(out))
-			if strings.Contains(low, "skipping bad block") || strings.Contains(low, "new bad block") {
-				return errors.New(L("во время записи появился новый bad-блок; BL2 не тронут", "new bad block appeared during write; BL2 remains untouched"))
-			}
+			// Never replay a flash write just because the UART completion text
+			// was damaged. CRC readback is authoritative and the BBT is checked
+			// again after all spans, so a newly skipped bad block is caught.
 			if e = a.readbackCRC(s, "ubi", sp[0], sp[1], ram, expected); e != nil {
 				return fmt.Errorf(L("IBU-часть %d, участок %d: %w", "IBU chunk %d span %d: %w"), i, si, e)
 			}
@@ -2519,10 +2517,10 @@ func (a *App) stockRestoreWizard() error {
 		return e
 	}
 	a.cancelBlocked(L("BL2: стирание, запись и проверка", "BL2: erase, write and readback"))
-	if _, e = a.ubootCommand(s, "mtd erase bl2", 3*time.Minute); e != nil {
+	if e = a.ubootPersistentOnce(s, "mtd erase bl2", 3*time.Minute); e != nil {
 		return e
 	}
-	if _, e = a.ubootCommand(s, fmt.Sprintf("mtd write bl2 0x%x 0x0 0x%x", loadAddr, bl2Size), 3*time.Minute); e != nil {
+	if e = a.ubootPersistentOnce(s, fmt.Sprintf("mtd write bl2 0x%x 0x0 0x%x", loadAddr, bl2Size), 3*time.Minute); e != nil {
 		return e
 	}
 	crc, e := crcFile(prep.bl2)
@@ -2628,7 +2626,7 @@ func (a *App) physicalRestoreWizard() error {
 		return e
 	}
 	a.cancelAt(L("после стирания ubi", "after erasing ubi"))
-	if _, e = a.ubootCommand(s, "mtd erase ubi", 20*time.Minute); e != nil {
+	if e = a.ubootPersistentOnce(s, "mtd erase ubi", 20*time.Minute); e != nil {
 		return e
 	}
 	if e = a.checkpoint(L("после стирания ubi; BL2 не тронут", "after erasing ubi; BL2 untouched")); e != nil {
@@ -2645,7 +2643,7 @@ func (a *App) physicalRestoreWizard() error {
 		st, _ := os.Stat(ch)
 		off := uint64(i) * chunkSize
 		crc, _ := crcFile(ch)
-		if _, e = a.ubootCommand(s, fmt.Sprintf("mtd write ubi 0x%x 0x%x 0x%x", loadAddr, off, st.Size()), 10*time.Minute); e != nil {
+		if e = a.ubootPersistentOnce(s, fmt.Sprintf("mtd write ubi 0x%x 0x%x 0x%x", loadAddr, off, st.Size()), 10*time.Minute); e != nil {
 			return e
 		}
 		if e = a.readbackCRC(s, "ubi", off, uint64(st.Size()), loadAddr, crc); e != nil {
@@ -2665,10 +2663,10 @@ func (a *App) physicalRestoreWizard() error {
 		return e
 	}
 	a.cancelBlocked(L("BL2: стирание, запись и проверка", "BL2: erase, write and readback"))
-	if _, e = a.ubootCommand(s, "mtd erase bl2", 3*time.Minute); e != nil {
+	if e = a.ubootPersistentOnce(s, "mtd erase bl2", 3*time.Minute); e != nil {
 		return e
 	}
-	if _, e = a.ubootCommand(s, fmt.Sprintf("mtd write bl2 0x%x 0 0x%x", loadAddr, bl2Size), 3*time.Minute); e != nil {
+	if e = a.ubootPersistentOnce(s, fmt.Sprintf("mtd write bl2 0x%x 0 0x%x", loadAddr, bl2Size), 3*time.Minute); e != nil {
 		return e
 	}
 	crc, _ := crcFile(bl)
@@ -2848,7 +2846,7 @@ func (a *App) expertUBIVolume() error {
 		return e
 	}
 	a.cancelBlocked(L("запись тома и её проверка", "writing the volume and its readback"))
-	if _, e = a.ubootCommand(s, fmt.Sprintf("ubi write 0x%x %s 0x%x", loadAddr, name, st.Size()), 10*time.Minute); e != nil {
+	if e = a.ubootPersistentOnce(s, fmt.Sprintf("ubi write 0x%x %s 0x%x", loadAddr, name, st.Size()), 10*time.Minute); e != nil {
 		return e
 	}
 	if _, e = a.ubootCommand(s, fmt.Sprintf("ubi read 0x%x %s 0x%x", verifyAddr, name, st.Size()), 10*time.Minute); e != nil {
@@ -2919,7 +2917,7 @@ func (a *App) expertRawMTD() error {
 		return e
 	}
 	a.cancelBlocked(L("запись и её проверка", "the write and its readback"))
-	if _, e = a.ubootCommand(s, fmt.Sprintf("mtd write %s 0x%x 0x%x 0x%x", target, loadAddr, off, st.Size()), 10*time.Minute); e != nil {
+	if e = a.ubootPersistentOnce(s, fmt.Sprintf("mtd write %s 0x%x 0x%x 0x%x", target, loadAddr, off, st.Size()), 10*time.Minute); e != nil {
 		return e
 	}
 	crc, _ := crcFile(path)
