@@ -66,22 +66,24 @@ func (a *App) uartDump(s Serial, addr, size uint64, label string) ([]byte, error
 	for off := uint64(0); off < size; off += uartDumpChunk {
 		n := min(uint64(uartDumpChunk), size-off)
 		var last error
-		for attempt := 1; attempt <= 3; attempt++ {
+		for attempt := 1; attempt <= 8; attempt++ {
 			raw, err := a.ubootCommand(s, fmt.Sprintf("md.l 0x%x 0x%x", addr+off, n/4), 5*time.Minute)
-			if err != nil {
-				return nil, err
-			}
-			piece, err := parseMDL(raw, addr+off, n)
 			if err == nil {
-				err = a.deviceCRC(s, addr+off, n, crc32.ChecksumIEEE(piece))
-			}
-			if err == nil {
-				out = append(out, piece...)
-				last = nil
-				break
+				var piece []byte
+				piece, err = parseMDL(raw, addr+off, n)
+				if err == nil {
+					err = a.deviceCRC(s, addr+off, n, crc32.ChecksumIEEE(piece))
+				}
+				if err == nil {
+					out = append(out, piece...)
+					last = nil
+					break
+				}
 			}
 			last = err
-			a.event(fmt.Sprintf(L("Чтение по UART: повтор 0x%x (%d/3): %v", "UART read: retrying 0x%x (%d/3): %v"), addr+off, attempt, err))
+			a.event(fmt.Sprintf(L("Чтение по UART: повреждённый ответ, повтор 0x%x (%d/8): %v", "UART read: damaged response, retrying 0x%x (%d/8): %v"), addr+off, attempt, err))
+			a.waitQuiet(s, 250*time.Millisecond, 1500*time.Millisecond)
+			_ = s.ResetInput()
 		}
 		if last != nil {
 			return nil, last
@@ -342,10 +344,10 @@ func (a *App) installStockBootArea(s Serial, p Profile, payload []byte) error {
 		if i == 0 {
 			part, off = "bl2", 0
 		}
-		if _, e = a.ubootCommand(s, fmt.Sprintf("mtd erase %s 0x%x 0x%x", part, off, eraseSize), 3*time.Minute); e != nil {
+		if e = a.ubootPersistentOnce(s, fmt.Sprintf("mtd erase %s 0x%x 0x%x", part, off, eraseSize), 3*time.Minute); e != nil {
 			return e
 		}
-		if _, e = a.ubootCommand(s, fmt.Sprintf("mtd write %s 0x%x 0x%x 0x%x", part, loadAddr+uint64(i*eraseSize), off, eraseSize), 3*time.Minute); e != nil {
+		if e = a.ubootPersistentOnce(s, fmt.Sprintf("mtd write %s 0x%x 0x%x 0x%x", part, loadAddr+uint64(i*eraseSize), off, eraseSize), 3*time.Minute); e != nil {
 			return e
 		}
 		if e = a.readbackCRC(s, part, off, eraseSize, verifyAddr, crc32.ChecksumIEEE(block)); e != nil {
@@ -562,8 +564,10 @@ func (a *App) ubiWriteVerified(s Serial, vol string, size uint64, crc uint32) er
 }
 
 func (a *App) ubiWrite(s Serial, vol string, size uint64) error {
-	_, e := a.ubootCommand(s, fmt.Sprintf("ubi write 0x%x %s 0x%x", loadAddr, vol, size), 5*time.Minute)
-	return e
+	// Exactly once: if UART loses the completion text, ubiVerify() below is
+	// the authority. Re-sending a destructive write just because its ACK text
+	// was damaged is explicitly forbidden.
+	return a.ubootPersistentOnce(s, fmt.Sprintf("ubi write 0x%x %s 0x%x", loadAddr, vol, size), 5*time.Minute)
 }
 
 func (a *App) ubiVerify(s Serial, vol string, size uint64, crc uint32) error {
