@@ -200,6 +200,10 @@ func (a *App) ursusBootInstallWizard() error {
 		return e
 	}
 	defer func() { s.Close(); a.closeLog() }()
+	if p.ID == "md" {
+		a.event(L("TEST21 MD BL2 rescue: UBI/fip не трогаются; восстанавливается только AN7581 BL2", "TEST21 MD BL2 rescue: UBI/fip are untouched; only AN7581 BL2 is repaired"))
+		return a.installMDBL2Rescue(s, p)
+	}
 	payload, e := os.ReadFile(filepath.Join(a.root, filepath.FromSlash(p.BootRel)))
 	if e != nil {
 		return e
@@ -217,7 +221,11 @@ func (a *App) ursusBootInstallWizard() error {
 	if layout == "ubi" {
 		a.event(L("Разметка: UBI (OpenWrt/UrsusBoot) — обновляется только UBI-том fip, BL2 не трогается",
 			"Layout: UBI (OpenWrt/UrsusBoot); only the UBI volume fip is updated, BL2 is not touched"))
-		e = a.installUBIFIP(s, p, ursusBootImage(p, payload))
+		if p.ID == "md" {
+			e = a.installMDUBIFIPNoRead(s, p, payload)
+		} else {
+			e = a.installUBIFIP(s, p, ursusBootImage(p, payload))
+		}
 	} else {
 		a.event(L("Разметка: стоковая Nokia — FIP на 0x800 загрузочной области",
 			"Layout: stock Nokia; FIP at 0x800 of the boot area"))
@@ -380,6 +388,92 @@ func ursusBootImage(p Profile, payload []byte) fipImage {
 		return mfDeriveFIP(cur, payload)
 	}
 	return img
+}
+
+// installMDUBIFIPNoRead is an emergency MD/UBI path for a device whose
+// current fip volume cannot be dumped reliably over a damaged UART TX line.
+// The MD update FIP is a pinned complete image, so it does not depend on the
+// current volume contents. We still validate the UBI metadata, validate the
+// pinned FIP locally, transfer it to RAM, write only volume "fip", then verify
+// the written volume by device-side CRC32. BL2 is never touched.
+func (a *App) installMDUBIFIPNoRead(s Serial, p Profile, payload []byte) error {
+	layout, e := mdCheckFIP(payload)
+	if e != nil {
+		return fmt.Errorf("UrsusBoot MD FIP: %w", e)
+	}
+	if _, e = a.ubootCommand(s, "ubi part ubi", 3*time.Minute); e != nil {
+		return fmt.Errorf(L("не удалось подключить UBI: %w", "UBI attach failed: %w"), e)
+	}
+	out, e := a.ubootCommand(s, "ubi info layout", 60*time.Second)
+	if e != nil {
+		return e
+	}
+	var fip []ubiVol
+	for _, v := range parseUBIVolumes(out) {
+		if v.Name == "fip" {
+			fip = append(fip, v)
+		}
+	}
+	if len(fip) != 1 {
+		return fmt.Errorf(L("ожидался один UBI-том fip, найдено %d", "expected one UBI volume fip, found %d"), len(fip))
+	}
+	vol := fip[0]
+	if vol.Type != 4 {
+		return fmt.Errorf(L("UBI-том fip не static (vol_type=%d) — установка заблокирована", "UBI volume fip is not static (vol_type=%d); install blocked"), vol.Type)
+	}
+	if cap := vol.capacity(); cap != 0 && uint64(len(payload)) > cap {
+		return fmt.Errorf(L("новый FIP (%d) больше тома fip (%d)", "the new FIP (%d) is larger than the fip volume (%d)"), len(payload), cap)
+	}
+
+	a.installPhase(2, L("аварийный режим: чтение FIP пропущено", "rescue mode: current FIP read skipped"))
+	a.status(L("АВАРИЙНО", "RESCUE"), L(
+		"MD/UBI: текущий том fip намеренно НЕ читается по UART и НЕ резервируется; будет записан встроенный проверенный UrsusBoot FIP",
+		"MD/UBI: the current fip volume is intentionally NOT read over UART and is NOT backed up; the pinned verified UrsusBoot FIP will be written directly"),
+		app.LevelWarn)
+
+	a.installPhase(3, L("проверка встроенного FIP", "validating the pinned FIP"))
+	nt := layout.find(uuidNTFW)[0]
+	a.event(fmt.Sprintf(L(
+		"UrsusBoot MD FIP PASS: %d байт · entries=%d · NT_FW=0x%x+0x%x · SHA256=%s",
+		"UrsusBoot MD FIP PASS: %d bytes · entries=%d · NT_FW=0x%x+0x%x · SHA256=%s"),
+		len(payload), len(layout.Entries), nt.Off, nt.Size, shaHex(payload)))
+
+	target, e := a.saveInstallFile("fip-target.bin", L("Новый FIP:", "New FIP:"), payload)
+	if e != nil {
+		return e
+	}
+	a.installPhase(4, L("TFTP в RAM", "TFTP into RAM"))
+	if _, e = a.tftpLoad(s, target, "ursido-fip.bin", loadAddr); e != nil {
+		return e
+	}
+
+	a.noteln(L(
+		"\nАварийный MD/UBI режим: предварительное чтение повреждённого fip отключено. Будет перезаписан ТОЛЬКО UBI-том fip.",
+		"\nEmergency MD/UBI mode: the pre-read of the damaged fip is disabled. ONLY the UBI volume fip will be overwritten."))
+	if e = a.confirmOp(app.Write, "INSTALL URSUSBOOT", []string{
+		fmt.Sprintf(L("прямая запись UrsusBoot %s в UBI-том fip: %d байт", "directly write UrsusBoot %s into UBI volume fip: %d bytes"), p.BootVersion, len(payload)),
+		L("текущий fip НЕ читается и резервная копия НЕ создаётся", "the current fip is NOT read and NO backup is created"),
+		L("после записи том читается только устройством в RAM и сверяется CRC32; длинного md.l-дампа по UART нет", "after writing, the device reads the volume only into RAM and checks CRC32; there is no long md.l dump over UART"),
+		L("BL2 не трогается", "BL2 is not touched"),
+	}); e != nil {
+		return e
+	}
+
+	a.cancelBlocked(L("запись тома fip и её проверка", "writing the fip volume and its readback"))
+	a.installPhase(5, L("прямая запись тома fip", "direct fip volume write"))
+	if e = a.ubiWrite(s, "fip", uint64(len(payload))); e != nil {
+		return e
+	}
+	a.installPhase(6, L("CRC32 после записи", "post-write CRC32"))
+	if e = a.ubiVerify(s, "fip", uint64(len(payload)), crc32.ChecksumIEEE(payload)); e != nil {
+		return e
+	}
+	a.cancelNow()
+	a.event(fmt.Sprintf(L(
+		"UrsusBoot %s напрямую записан в том fip без предварительного UART-дампа, проверка PASS; SHA256=",
+		"UrsusBoot %s was written directly to fip without the preliminary UART dump, verification PASS; SHA256="),
+		p.BootVersion) + shaHex(payload))
+	return nil
 }
 
 func (a *App) installUBIFIP(s Serial, p Profile, img fipImage) error {
