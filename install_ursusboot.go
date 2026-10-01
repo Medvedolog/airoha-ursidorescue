@@ -200,10 +200,6 @@ func (a *App) ursusBootInstallWizard() error {
 		return e
 	}
 	defer func() { s.Close(); a.closeLog() }()
-	if p.ID == "md" {
-		a.event(L("TEST21 MD BL2 rescue: UBI/fip не трогаются; восстанавливается только AN7581 BL2", "TEST21 MD BL2 rescue: UBI/fip are untouched; only AN7581 BL2 is repaired"))
-		return a.installMDBL2Rescue(s, p)
-	}
 	payload, e := os.ReadFile(filepath.Join(a.root, filepath.FromSlash(p.BootRel)))
 	if e != nil {
 		return e
@@ -221,11 +217,7 @@ func (a *App) ursusBootInstallWizard() error {
 	if layout == "ubi" {
 		a.event(L("Разметка: UBI (OpenWrt/UrsusBoot) — обновляется только UBI-том fip, BL2 не трогается",
 			"Layout: UBI (OpenWrt/UrsusBoot); only the UBI volume fip is updated, BL2 is not touched"))
-		if p.ID == "md" {
-			e = a.installMDUBIFIPNoRead(s, p, payload)
-		} else {
-			e = a.installUBIFIP(s, p, ursusBootImage(p, payload))
-		}
+		e = a.installUBIFIP(s, p, ursusBootImage(p, payload))
 	} else {
 		a.event(L("Разметка: стоковая Nokia — FIP на 0x800 загрузочной области",
 			"Layout: stock Nokia; FIP at 0x800 of the boot area"))
