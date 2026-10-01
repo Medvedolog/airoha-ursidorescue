@@ -210,18 +210,28 @@ func (a *App) ursusBootInstallWizard() error {
 		}
 	}
 	a.event(fmt.Sprintf(L("UrsusBoot %s для %s: %s", "UrsusBoot %s for %s: %s"), p.BootVersion, p.Model, p.BootRel))
-	layout, e := a.bootLayout(s)
-	if e != nil {
-		return e
-	}
-	if layout == "ubi" {
-		a.event(L("Разметка: UBI (OpenWrt/UrsusBoot) — обновляется только UBI-том fip, BL2 не трогается",
-			"Layout: UBI (OpenWrt/UrsusBoot); only the UBI volume fip is updated, BL2 is not touched"))
-		e = a.installUBIFIP(s, p, ursusBootImage(p, payload))
+	if p.ID == "md" {
+		// This branch is an emergency MD/UBI recovery build. Do not run the
+		// normal bootLayout probe first: it needs clean UART TX for several
+		// command/prompt exchanges. installMDUBIFIPNoRead proves the UBI layout
+		// itself from repeated read-only layout queries and refuses anything else.
+		a.event(L("MD аварийный режим: обычное определение разметки по UART пропущено; проверяю UBI напрямую",
+			"MD rescue mode: skipping the normal UART layout probe; proving UBI directly"))
+		e = a.installMDUBIFIPNoRead(s, p, payload)
 	} else {
-		a.event(L("Разметка: стоковая Nokia — FIP на 0x800 загрузочной области",
-			"Layout: stock Nokia; FIP at 0x800 of the boot area"))
-		e = a.installStockBootArea(s, p, payload)
+		layout, le := a.bootLayout(s)
+		if le != nil {
+			return le
+		}
+		if layout == "ubi" {
+			a.event(L("Разметка: UBI (OpenWrt/UrsusBoot) — обновляется только UBI-том fip, BL2 не трогается",
+				"Layout: UBI (OpenWrt/UrsusBoot); only the UBI volume fip is updated, BL2 is not touched"))
+			e = a.installUBIFIP(s, p, ursusBootImage(p, payload))
+		} else {
+			a.event(L("Разметка: стоковая Nokia — FIP на 0x800 загрузочной области",
+				"Layout: stock Nokia; FIP at 0x800 of the boot area"))
+			e = a.installStockBootArea(s, p, payload)
+		}
 	}
 	if e != nil && !errors.Is(e, errAlreadyInstalled) {
 		return e
@@ -380,6 +390,201 @@ func ursusBootImage(p Profile, payload []byte) fipImage {
 		return mfDeriveFIP(cur, payload)
 	}
 	return img
+}
+
+// installMDUBIFIPNoRead is an emergency MD/UBI path for a device whose
+// current fip volume cannot be dumped reliably over a damaged UART TX line.
+// The MD update FIP is a pinned complete image, so it does not depend on the
+// current volume contents. We still validate the UBI metadata, validate the
+// pinned FIP locally, transfer it to RAM, write only volume "fip", then verify
+// the written volume by device-side CRC32. BL2 is never touched.
+func (a *App) rescueBlindCommand(s Serial, command string, settle time.Duration) error {
+	if e := a.stopBeforeCommand(command); e != nil {
+		return e
+	}
+	a.event("U-Boot(rescue/noisy): " + command)
+	_ = s.ResetInput()
+	if e := sendLine(s, command); e != nil {
+		return e
+	}
+	// In this emergency path stdout is evidence only when a later parser finds
+	// a complete marker. The command itself is not failed merely because the
+	// board TX produced damaged bytes or the prompt was lost.
+	time.Sleep(settle)
+	a.waitQuiet(s, 500*time.Millisecond, 2*time.Second)
+	return nil
+}
+
+func (a *App) rescueUBIFIPVolume(s Serial) (ubiVol, error) {
+	// Attach is safe/read-only with respect to flash contents. Its console
+	// output may be damaged, so prove success by obtaining a coherent fip
+	// record from repeated "ubi info layout" queries instead of requiring a
+	// clean prompt/return-code exchange.
+	if e := a.rescueBlindCommand(s, "ubi part ubi", 3*time.Second); e != nil {
+		return ubiVol{}, e
+	}
+	for attempt := 1; attempt <= 12; attempt++ {
+		a.event(fmt.Sprintf(L("Аварийное чтение UBI layout: попытка %d/12", "Rescue UBI layout read: attempt %d/12"), attempt))
+		_ = s.ResetInput()
+		if e := sendLine(s, "ubi info layout"); e != nil {
+			return ubiVol{}, e
+		}
+		out := a.waitQuiet(s, 900*time.Millisecond, 6*time.Second)
+		var fip []ubiVol
+		for _, v := range parseUBIVolumes(out) {
+			if v.Name == "fip" {
+				fip = append(fip, v)
+			}
+		}
+		if len(fip) == 1 && fip[0].Type == 4 && fip[0].ReservedPEBs != 0 && fip[0].UsableLEB != 0 {
+			a.status("UART", fmt.Sprintf(L("UBI fip распознан через шум с попытки %d", "UBI fip parsed through UART noise on attempt %d"), attempt), app.LevelOK)
+			return fip[0], nil
+		}
+		time.Sleep(400 * time.Millisecond)
+	}
+	return ubiVol{}, errors.New(L(
+		"не удалось получить достаточно целый UBI layout за 12 попыток; flash не записывалась",
+		"could not obtain a sufficiently intact UBI layout in 12 attempts; flash was not written"))
+}
+
+func (a *App) confirmMDRescueWrite(p Profile, size int) error {
+	title := fmt.Sprintf(L(
+		"\nАВАРИЙНАЯ ЗАПИСЬ: только UBI-том fip, UrsusBoot %s, %d байт. Текущий fip не читается и не резервируется; BL2 не трогается.",
+		"\nEMERGENCY WRITE: UBI volume fip only, UrsusBoot %s, %d bytes. The current fip is not read or backed up; BL2 is untouched."),
+		p.BootVersion, size)
+	v, e := a.ui.Ask(app.AskRequest{
+		Kind: app.AskText, Title: title,
+		Prompt: L("Продолжить? [y/N]: ", "Continue? [y/N]: "),
+		Quick: []app.Choice{{Key: "y", Label: L("Да", "Yes")}, {Key: "n", Label: L("Нет", "No")}},
+		Default: "n",
+	})
+	if e != nil {
+		return e
+	}
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "y", "yes", "д", "да":
+		a.event(L("Аварийная запись подтверждена одним y/N", "Emergency write confirmed with a single y/N"))
+		return nil
+	default:
+		return cancelledError{L("аварийная запись отменена пользователем", "emergency write cancelled by the user")}
+	}
+}
+
+func (a *App) rescueWriteUBIFIP(s Serial, size uint64) error {
+	cmd := fmt.Sprintf("ubi write 0x%x fip 0x%x", loadAddr, size)
+	// Do not parse the write's console output at all. A failed write cannot pass
+	// the independent CRC check below, while one burst of broken TX bytes must
+	// not abort the recovery.
+	settle := 12*time.Second + time.Duration(size/(32*1024))*time.Second
+	if settle > 45*time.Second {
+		settle = 45 * time.Second
+	}
+	if e := a.rescueBlindCommand(s, cmd, settle); e != nil {
+		return e
+	}
+	a.status("UART", L("вывод ubi write намеренно не разбирался; перехожу к независимой CRC-проверке", "ubi write output intentionally ignored; moving to independent CRC verification"), app.LevelWarn)
+	return nil
+}
+
+func (a *App) rescueVerifyUBIFIP(s Serial, size uint64, want uint32) error {
+	// Poison the verification RAM first. If "ubi read" did not actually run,
+	// the following CRC cannot accidentally validate stale data from an earlier
+	// transfer.
+	if e := a.rescueBlindCommand(s, fmt.Sprintf("mw.b 0x%x 0x00 0x%x", verifyAddr, size), 2*time.Second); e != nil {
+		return e
+	}
+	readSettle := 8*time.Second + time.Duration(size/(64*1024))*time.Second
+	if readSettle > 30*time.Second {
+		readSettle = 30 * time.Second
+	}
+	if e := a.rescueBlindCommand(s, fmt.Sprintf("ubi read 0x%x fip 0x%x", verifyAddr, size), readSettle); e != nil {
+		return e
+	}
+
+	// crc32 is read-only, so it is safe to repeat. We only accept the exact
+	// expected checksum, which cannot appear in the echoed command because the
+	// expected value is not part of that command. Random/broken UART bytes are
+	// therefore ignored rather than interpreted as failure.
+	wantRE := regexp.MustCompile(fmt.Sprintf(`(?i)(?:0x)?%08x`, want))
+	cmd := fmt.Sprintf("crc32 0x%x 0x%x", verifyAddr, size)
+	for attempt := 1; attempt <= 20; attempt++ {
+		a.event(fmt.Sprintf(L("CRC32 через шумный UART: попытка %d/20", "CRC32 over noisy UART: attempt %d/20"), attempt))
+		_ = s.ResetInput()
+		if e := sendLine(s, cmd); e != nil {
+			return e
+		}
+		out := a.waitQuiet(s, 700*time.Millisecond, 4*time.Second)
+		if wantRE.Match(out) {
+			a.status("OK", fmt.Sprintf(L("CRC32 FIP PASS: %08x (попытка %d)", "FIP CRC32 PASS: %08x (attempt %d)"), want, attempt), app.LevelOK)
+			return nil
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	return fmt.Errorf(L(
+		"за 20 попыток не удалось увидеть ожидаемый CRC32 %08x. Это НЕ доказательство плохой записи: UART слишком шумный, автоматическая проверка не подтверждена",
+		"expected CRC32 %08x was not observed in 20 attempts. This does NOT prove a bad write: UART is too noisy and automatic verification is inconclusive"), want)
+}
+
+// installMDUBIFIPNoRead is the emergency MD/UBI path for a device with a
+// damaged/intermittent UART TX. It never requires a clean prompt after the
+// destructive write: arbitrary console garbage is tolerated and success is
+// established only by a repeated device-side CRC32 of the written UBI volume.
+func (a *App) installMDUBIFIPNoRead(s Serial, p Profile, payload []byte) error {
+	layout, e := mdCheckFIP(payload)
+	if e != nil {
+		return fmt.Errorf("UrsusBoot MD FIP: %w", e)
+	}
+	vol, e := a.rescueUBIFIPVolume(s)
+	if e != nil {
+		return e
+	}
+	if cap := vol.capacity(); cap != 0 && uint64(len(payload)) > cap {
+		return fmt.Errorf(L("новый FIP (%d) больше тома fip (%d)", "the new FIP (%d) is larger than the fip volume (%d)"), len(payload), cap)
+	}
+	a.event(L("Разметка UBI подтверждена повторяемым чтением: обновляется только том fip, BL2 не трогается",
+		"UBI layout proved by repeated reads: only volume fip is updated; BL2 is untouched"))
+
+	a.installPhase(2, L("аварийный режим: чтение FIP пропущено", "rescue mode: current FIP read skipped"))
+	a.status(L("АВАРИЙНО", "RESCUE"), L(
+		"MD/UBI: текущий том fip намеренно НЕ читается по UART и НЕ резервируется; повреждённые байты консоли игнорируются",
+		"MD/UBI: the current fip volume is intentionally NOT read over UART and is NOT backed up; damaged console bytes are ignored"),
+		app.LevelWarn)
+
+	a.installPhase(3, L("проверка встроенного FIP", "validating the pinned FIP"))
+	nt := layout.find(uuidNTFW)[0]
+	a.event(fmt.Sprintf(L(
+		"UrsusBoot MD FIP PASS: %d байт · entries=%d · NT_FW=0x%x+0x%x · SHA256=%s",
+		"UrsusBoot MD FIP PASS: %d bytes · entries=%d · NT_FW=0x%x+0x%x · SHA256=%s"),
+		len(payload), len(layout.Entries), nt.Off, nt.Size, shaHex(payload)))
+
+	target, e := a.saveInstallFile("fip-target.bin", L("Новый FIP:", "New FIP:"), payload)
+	if e != nil {
+		return e
+	}
+	a.installPhase(4, L("TFTP в RAM", "TFTP into RAM"))
+	if _, e = a.tftpLoad(s, target, "ursido-fip.bin", loadAddr); e != nil {
+		return e
+	}
+
+	if e = a.confirmMDRescueWrite(p, len(payload)); e != nil {
+		return e
+	}
+
+	a.cancelBlocked(L("запись тома fip и её проверка", "writing the fip volume and its readback"))
+	a.installPhase(5, L("прямая запись тома fip; мусор UART игнорируется", "direct fip write; UART garbage ignored"))
+	if e = a.rescueWriteUBIFIP(s, uint64(len(payload))); e != nil {
+		return e
+	}
+	a.installPhase(6, L("повторяемая CRC32 после записи", "repeated post-write CRC32"))
+	if e = a.rescueVerifyUBIFIP(s, uint64(len(payload)), crc32.ChecksumIEEE(payload)); e != nil {
+		return e
+	}
+	a.cancelNow()
+	a.event(fmt.Sprintf(L(
+		"UrsusBoot %s напрямую записан в том fip; шум UART пережит, CRC32 PASS; SHA256=",
+		"UrsusBoot %s was written directly to fip; UART noise tolerated, CRC32 PASS; SHA256="),
+		p.BootVersion) + shaHex(payload))
+	return nil
 }
 
 func (a *App) installUBIFIP(s Serial, p Profile, img fipImage) error {
