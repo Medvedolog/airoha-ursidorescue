@@ -1214,6 +1214,28 @@ func (a *App) ubootCommand(s Serial, command string, timeout time.Duration) ([]b
 	return combined, last
 }
 
+// ubootPersistentOnce sends one persistent flash-changing command exactly once.
+// A clean non-zero RC is a real failure. A damaged/lost UART response is NOT
+// treated as permission to repeat the destructive command; callers use this
+// only when an independent readback/postcondition follows immediately.
+func (a *App) ubootPersistentOnce(s Serial, command string, timeout time.Duration) error {
+	out, rc, e := a.ubootCommandRaw(s, command, timeout)
+	_ = out
+	if e == nil {
+		if rc != 0 {
+			return fmt.Errorf("U-Boot rc=%d: %s", rc, command)
+		}
+		return nil
+	}
+	a.status("UART", fmt.Sprintf(L(
+		"ответ после destructive-команды потерян/повреждён: %s; команду НЕ повторяю, результат докажет readback (%v)",
+		"response after destructive command was lost/damaged: %s; NOT repeating it, readback will prove the result (%v)"),
+		command, e), app.LevelWarn)
+	a.waitQuiet(s, 350*time.Millisecond, 2*time.Second)
+	_ = s.ResetInput()
+	return nil
+}
+
 func requireGeometry(data []byte) error {
 	s := strings.ToLower(string(data))
 	checks := []string{"spi-nand0", "block size: 0x20000 bytes", "min i/o: 0x800 bytes", "0x000000000000-0x000000020000 : \"bl2\"", "0x000000020000-0x000010000000 : \"ubi\""}
