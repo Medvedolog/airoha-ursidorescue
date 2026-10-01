@@ -29,7 +29,7 @@ import (
 
 const (
 	appName               = "UrsidoRescue"
-	appVersion            = "0.2.1-test.18"
+	appVersion            = "0.2.1-test.23-uart-noise"
 	defaultRouterIP       = "192.168.1.1"
 	defaultLocalIP        = "192.168.1.254"
 	defaultTFTPPort       = 1069
@@ -590,7 +590,8 @@ func (a *App) waitReceiver(s Serial, timeout time.Duration, keepExisting bool, i
 	a.event(L("Ожидание BootROM Press x / CCC. Если устройство уже печатает C, НЕ перезагружайте его.", "Waiting for BootROM Press x / CCC. If the device already prints C, do NOT reboot it."))
 	deadline := time.Now().Add(timeout)
 	tail := make([]byte, 0, 65536)
-	cCount := 0
+	var cHits []time.Time
+	firstRx := time.Time{}
 	lastX := time.Time{}
 	press := false
 	buf := make([]byte, 4096)
@@ -612,29 +613,43 @@ func (a *App) waitReceiver(s Serial, timeout time.Duration, keepExisting bool, i
 		if strings.Contains(low, "press x") {
 			press = true
 		}
-		if press && time.Since(lastX) > 2*time.Second && cCount == 0 {
-			a.event(L("Press x обнаружен; отправляю x", "Press x seen; sending x"))
+		if firstRx.IsZero() {
+			firstRx = time.Now()
+		}
+		// The literal "Press x" line is often the first thing damaged by a
+		// marginal TX path. Once recovery UART traffic is clearly alive, an
+		// occasional x is harmless here and lets BootROM enter XMODEM even
+		// when that human-readable line was unreadable.
+		if (press || (!firstRx.IsZero() && time.Since(firstRx) > 1200*time.Millisecond)) &&
+			time.Since(lastX) > 2*time.Second && len(cHits) < 3 {
+			a.event(L("BootROM recovery: отправляю x (помехоустойчивый вход)", "BootROM recovery: sending x (noise-tolerant entry)"))
 			_ = s.Write([]byte("x"))
 			lastX = time.Now()
 		}
+		now := time.Now()
 		for _, b := range d {
 			if b == 'C' {
-				cCount++
-				if cCount >= 3 {
-					ph := phasePreloader
-					if strings.Contains(low, "press x to load bl31") || strings.Contains(low, "dram flow done") || strings.Contains(low, "load bl31 + u-boot fip") {
-						ph = phaseFIP
-					}
-					p, ok := inferProfile(tail)
-					if !ok {
-						p = Profile{ID: "auto"}
-					}
-					return ph, p, true
-				}
-			} else if b == 9 || b == 10 || b == 13 || b == 32 || b < 0x20 {
-			} else {
-				cCount = 0
+				cHits = append(cHits, now)
 			}
+		}
+		cut := now.Add(-3500 * time.Millisecond)
+		keep := cHits[:0]
+		for _, t := range cHits {
+			if t.After(cut) {
+				keep = append(keep, t)
+			}
+		}
+		cHits = keep
+		if len(cHits) >= 3 {
+			ph := phasePreloader
+			if strings.Contains(low, "press x to load bl31") || strings.Contains(low, "dram flow done") || strings.Contains(low, "load bl31 + u-boot fip") {
+				ph = phaseFIP
+			}
+			p, ok := inferProfile(tail)
+			if !ok {
+				p = Profile{ID: "auto"}
+			}
+			return ph, p, true
 		}
 		return phaseUnknown, Profile{}, false
 	}
@@ -797,11 +812,11 @@ func (a *App) xmodemSend(s Serial, path, label string) (xmodemResult, error) {
 		pkt = append(pkt, byte(c>>8), byte(c))
 
 		accepted := false
-		for attempt := 1; attempt <= 8 && !accepted; attempt++ {
+		for attempt := 1; attempt <= 16 && !accepted; attempt++ {
 			if e = s.Write(pkt); e != nil {
 				return result, e
 			}
-			deadline := time.Now().Add(2 * time.Second)
+			deadline := time.Now().Add(3 * time.Second)
 			retryNow := false
 			consecutiveCAN := 0
 			for time.Now().Before(deadline) {
@@ -830,12 +845,12 @@ func (a *App) xmodemSend(s Serial, path, label string) (xmodemResult, error) {
 				if retryNow {
 					reason = L("NAK/C — повтор немедленно", "NAK/C — immediate retry")
 				}
-				a.event(fmt.Sprintf(L("XMODEM повтор блока %d/%d, попытка %d/8 (%s)", "XMODEM retry block %d/%d attempt %d/8 (%s)"), idx+1, blocks, attempt, reason))
+				a.event(fmt.Sprintf(L("XMODEM повтор блока %d/%d, попытка %d/16 (%s)", "XMODEM retry block %d/%d attempt %d/16 (%s)"), idx+1, blocks, attempt, reason))
 				time.Sleep(80 * time.Millisecond)
 			}
 		}
 		if !accepted {
-			return result, fmt.Errorf(L("XMODEM блок %d не подтверждён после 8 попыток", "XMODEM block %d not ACKed after 8 attempts"), idx+1)
+			return result, fmt.Errorf(L("XMODEM блок %d не подтверждён после 16 попыток", "XMODEM block %d not ACKed after 16 attempts"), idx+1)
 		}
 		sent += int64(n)
 		seq++
@@ -1146,15 +1161,79 @@ func (a *App) ubootCommandExec(s Serial, command string, timeout time.Duration) 
 	rc, _ := strconv.Atoi(string(m[1]))
 	return append(out, status...), rc, nil
 }
+func ubootNoiseRetrySafe(command string) bool {
+	c := strings.TrimSpace(command)
+	// Automatically retry only commands whose repetition cannot alter
+	// persistent flash. Destructive erase/write/update commands are excluded:
+	// they are sent once and must be proved by an independent readback.
+	for _, p := range []string{
+		"version", "mtd list", "mtd bad ", "mtd read ",
+		"ubi info", "ubi check ", "ubi read ",
+		"crc32 ", "md.l ", "md.b ", "md.w ",
+		"printenv", "bdinfo", "help", "echo ", "itest ",
+		"mw.b ", "mw.w ", "mw.l ", "setenv ",
+	} {
+		if c == p || strings.HasPrefix(c, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) ubootCommand(s Serial, command string, timeout time.Duration) ([]byte, error) {
+	attempts := 1
+	if ubootNoiseRetrySafe(command) {
+		attempts = 6
+	}
+	var combined []byte
+	var last error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		out, rc, e := a.ubootCommandRaw(s, command, timeout)
+		combined = append(combined, out...)
+		if e == nil {
+			if rc != 0 {
+				// A complete random marker with a real non-zero status is
+				// stronger evidence than line noise. Do not hide a real
+				// command failure behind automatic retries.
+				return combined, fmt.Errorf("U-Boot rc=%d: %s", rc, command)
+			}
+			return combined, nil
+		}
+		last = e
+		if attempt == attempts {
+			break
+		}
+		a.event(fmt.Sprintf(L(
+			"UART: ответ на read-only/RAM команду повреждён или потерян; повтор %d/%d: %s (%v)",
+			"UART: read-only/RAM command response was damaged or lost; retry %d/%d: %s (%v)"),
+			attempt+1, attempts, command, e))
+		a.waitQuiet(s, 250*time.Millisecond, 1500*time.Millisecond)
+		_ = s.ResetInput()
+		time.Sleep(120 * time.Millisecond)
+	}
+	return combined, last
+}
+
+// ubootPersistentOnce sends one persistent flash-changing command exactly once.
+// A clean non-zero RC is a real failure. A damaged/lost UART response is NOT
+// treated as permission to repeat the destructive command; callers use this
+// only when an independent readback/postcondition follows immediately.
+func (a *App) ubootPersistentOnce(s Serial, command string, timeout time.Duration) error {
 	out, rc, e := a.ubootCommandRaw(s, command, timeout)
-	if e != nil {
-		return out, e
+	_ = out
+	if e == nil {
+		if rc != 0 {
+			return fmt.Errorf("U-Boot rc=%d: %s", rc, command)
+		}
+		return nil
 	}
-	if rc != 0 {
-		return out, fmt.Errorf("U-Boot rc=%d: %s", rc, command)
-	}
-	return out, nil
+	a.status("UART", fmt.Sprintf(L(
+		"ответ после destructive-команды потерян/повреждён: %s; команду НЕ повторяю, результат докажет readback (%v)",
+		"response after destructive command was lost/damaged: %s; NOT repeating it, readback will prove the result (%v)"),
+		command, e), app.LevelWarn)
+	a.waitQuiet(s, 350*time.Millisecond, 2*time.Second)
+	_ = s.ResetInput()
+	return nil
 }
 
 func requireGeometry(data []byte) error {
@@ -1903,9 +1982,9 @@ func (a *App) readbackCRC(s Serial, target string, off, size, ram uint64, expect
 	// A mismatch is read again before it counts: the check only reads, and a
 	// garbled UART exchange must not look like bad flash.
 	var last error
-	for attempt := 1; attempt <= 3; attempt++ {
+	for attempt := 1; attempt <= 8; attempt++ {
 		if attempt > 1 {
-			a.event(fmt.Sprintf(L("Проверка после записи: повтор чтения %d/3 (%v)", "Readback: reading again %d/3 (%v)"), attempt, last))
+			a.event(fmt.Sprintf(L("Проверка после записи: повтор чтения %d/8 (%v)", "Readback: reading again %d/8 (%v)"), attempt, last))
 			a.waitQuiet(s, 300*time.Millisecond, 2*time.Second)
 		}
 		if _, e := a.ubootCommand(s, fmt.Sprintf("mw.b 0x%x 0x00 0x%x", ram, size), 2*time.Minute); e != nil {
@@ -2353,7 +2432,7 @@ func (a *App) stockRestoreWizard() error {
 		return e
 	}
 	a.cancelAt(L("после стирания ubi", "after erasing ubi"))
-	if _, e = a.ubootCommand(s, "mtd erase ubi", 20*time.Minute); e != nil {
+	if e = a.ubootPersistentOnce(s, "mtd erase ubi", 20*time.Minute); e != nil {
 		return e
 	}
 	if e = a.checkpoint(L("после стирания ubi; BL2 не тронут", "after erasing ubi; BL2 untouched")); e != nil {
@@ -2402,14 +2481,12 @@ func (a *App) stockRestoreWizard() error {
 				return e
 			}
 			cmd := fmt.Sprintf("mtd write ubi 0x%x 0x%x 0x%x", ram, sp[0], sp[1])
-			out, e := a.ubootCommand(s, cmd, 10*time.Minute)
-			if e != nil {
+			if e := a.ubootPersistentOnce(s, cmd, 10*time.Minute); e != nil {
 				return e
 			}
-			low := strings.ToLower(string(out))
-			if strings.Contains(low, "skipping bad block") || strings.Contains(low, "new bad block") {
-				return errors.New(L("во время записи появился новый bad-блок; BL2 не тронут", "new bad block appeared during write; BL2 remains untouched"))
-			}
+			// Never replay a flash write just because the UART completion text
+			// was damaged. CRC readback is authoritative and the BBT is checked
+			// again after all spans, so a newly skipped bad block is caught.
 			if e = a.readbackCRC(s, "ubi", sp[0], sp[1], ram, expected); e != nil {
 				return fmt.Errorf(L("IBU-часть %d, участок %d: %w", "IBU chunk %d span %d: %w"), i, si, e)
 			}
@@ -2440,10 +2517,10 @@ func (a *App) stockRestoreWizard() error {
 		return e
 	}
 	a.cancelBlocked(L("BL2: стирание, запись и проверка", "BL2: erase, write and readback"))
-	if _, e = a.ubootCommand(s, "mtd erase bl2", 3*time.Minute); e != nil {
+	if e = a.ubootPersistentOnce(s, "mtd erase bl2", 3*time.Minute); e != nil {
 		return e
 	}
-	if _, e = a.ubootCommand(s, fmt.Sprintf("mtd write bl2 0x%x 0x0 0x%x", loadAddr, bl2Size), 3*time.Minute); e != nil {
+	if e = a.ubootPersistentOnce(s, fmt.Sprintf("mtd write bl2 0x%x 0x0 0x%x", loadAddr, bl2Size), 3*time.Minute); e != nil {
 		return e
 	}
 	crc, e := crcFile(prep.bl2)
@@ -2549,7 +2626,7 @@ func (a *App) physicalRestoreWizard() error {
 		return e
 	}
 	a.cancelAt(L("после стирания ubi", "after erasing ubi"))
-	if _, e = a.ubootCommand(s, "mtd erase ubi", 20*time.Minute); e != nil {
+	if e = a.ubootPersistentOnce(s, "mtd erase ubi", 20*time.Minute); e != nil {
 		return e
 	}
 	if e = a.checkpoint(L("после стирания ubi; BL2 не тронут", "after erasing ubi; BL2 untouched")); e != nil {
@@ -2566,7 +2643,7 @@ func (a *App) physicalRestoreWizard() error {
 		st, _ := os.Stat(ch)
 		off := uint64(i) * chunkSize
 		crc, _ := crcFile(ch)
-		if _, e = a.ubootCommand(s, fmt.Sprintf("mtd write ubi 0x%x 0x%x 0x%x", loadAddr, off, st.Size()), 10*time.Minute); e != nil {
+		if e = a.ubootPersistentOnce(s, fmt.Sprintf("mtd write ubi 0x%x 0x%x 0x%x", loadAddr, off, st.Size()), 10*time.Minute); e != nil {
 			return e
 		}
 		if e = a.readbackCRC(s, "ubi", off, uint64(st.Size()), loadAddr, crc); e != nil {
@@ -2586,10 +2663,10 @@ func (a *App) physicalRestoreWizard() error {
 		return e
 	}
 	a.cancelBlocked(L("BL2: стирание, запись и проверка", "BL2: erase, write and readback"))
-	if _, e = a.ubootCommand(s, "mtd erase bl2", 3*time.Minute); e != nil {
+	if e = a.ubootPersistentOnce(s, "mtd erase bl2", 3*time.Minute); e != nil {
 		return e
 	}
-	if _, e = a.ubootCommand(s, fmt.Sprintf("mtd write bl2 0x%x 0 0x%x", loadAddr, bl2Size), 3*time.Minute); e != nil {
+	if e = a.ubootPersistentOnce(s, fmt.Sprintf("mtd write bl2 0x%x 0 0x%x", loadAddr, bl2Size), 3*time.Minute); e != nil {
 		return e
 	}
 	crc, _ := crcFile(bl)
@@ -2686,11 +2763,13 @@ func (a *App) expertMenu() error {
 		fmt.Println(L("  7. Установка UrsusBoot (UART, MD/MF)", "  7. Install UrsusBoot (UART, MD/MF)"))
 		fmt.Println(L("  8. Возврат или обновление vanilla U-Boot (UART, UBI)", "  8. Return or update vanilla U-Boot (UART, UBI)"))
 		fmt.Println(L("  9. UrsusBoot Ethernet-консоль (WebSocket, F2/F3/F5)", "  9. UrsusBoot Ethernet console (WebSocket, F2/F3/F5)"))
+		fmt.Println(L(" 10. Аварийно: восстановить только BL2 (MD/MF)", " 10. Rescue: restore BL2 only (MD/MF)"))
+		fmt.Println(L(" 11. Аварийно: восстановить загрузочную цепочку BL2 + FIP (MD/MF)", " 11. Rescue: restore boot chain BL2 + FIP (MD/MF)"))
 		fmt.Println(L("  0. Назад", "  0. Back"))
 		v := a.ask(L("Выбор: ", "Choice: "))
-		ops := map[string]string{"1": "terminal", "2": "ram-uboot", "3": "ubi-volume", "4": "raw-mtd", "5": "diagnostics", "6": "shell", "7": "ursusboot-install", "8": "vanilla-uboot", "9": "ws-console"}
+		ops := map[string]string{"1": "terminal", "2": "ram-uboot", "3": "ubi-volume", "4": "raw-mtd", "5": "diagnostics", "6": "shell", "7": "ursusboot-install", "8": "vanilla-uboot", "9": "ws-console", "10": "bl2-rescue", "11": "bootchain-rescue"}
 		switch v {
-		case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		case "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11":
 			if e := a.RunOperation(ops[v]); e != nil {
 				return e
 			}
@@ -2767,7 +2846,7 @@ func (a *App) expertUBIVolume() error {
 		return e
 	}
 	a.cancelBlocked(L("запись тома и её проверка", "writing the volume and its readback"))
-	if _, e = a.ubootCommand(s, fmt.Sprintf("ubi write 0x%x %s 0x%x", loadAddr, name, st.Size()), 10*time.Minute); e != nil {
+	if e = a.ubootPersistentOnce(s, fmt.Sprintf("ubi write 0x%x %s 0x%x", loadAddr, name, st.Size()), 10*time.Minute); e != nil {
 		return e
 	}
 	if _, e = a.ubootCommand(s, fmt.Sprintf("ubi read 0x%x %s 0x%x", verifyAddr, name, st.Size()), 10*time.Minute); e != nil {
@@ -2838,7 +2917,7 @@ func (a *App) expertRawMTD() error {
 		return e
 	}
 	a.cancelBlocked(L("запись и её проверка", "the write and its readback"))
-	if _, e = a.ubootCommand(s, fmt.Sprintf("mtd write %s 0x%x 0x%x 0x%x", target, loadAddr, off, st.Size()), 10*time.Minute); e != nil {
+	if e = a.ubootPersistentOnce(s, fmt.Sprintf("mtd write %s 0x%x 0x%x 0x%x", target, loadAddr, off, st.Size()), 10*time.Minute); e != nil {
 		return e
 	}
 	crc, _ := crcFile(path)
@@ -2937,7 +3016,7 @@ func (a *App) makeSupportBundle() (string, error) {
 }
 
 func (a *App) selftest() error {
-	if appVersion != "0.2.1-test.18" {
+	if appVersion != "0.2.1-test.23-uart-noise" {
 		return errors.New("version")
 	}
 	if _, e := probe.CheckUBoot("saveenv"); e == nil {
@@ -2968,6 +3047,14 @@ func (a *App) selftest() error {
 	for _, p := range profiles {
 		if e := validatePinned(a.root, p); e != nil {
 			return e
+		}
+		bl2, _, _, e := a.rescueProfileBL2(p)
+		if e != nil || len(bl2) != bl2Size {
+			return fmt.Errorf("%s rescue BL2 candidate: size=%d err=%v", p.ID, len(bl2), e)
+		}
+		fipRescue, _, e := a.rescueProfileFIP(p)
+		if e != nil || len(fipRescue) == 0 {
+			return fmt.Errorf("%s rescue FIP candidate: size=%d err=%v", p.ID, len(fipRescue), e)
 		}
 		if e := validateFIP(filepath.Join(a.root, filepath.FromSlash(p.RAMFIPRel))); e != nil {
 			return fmt.Errorf("%s FIP: %w", p.ID, e)

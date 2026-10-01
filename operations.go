@@ -34,6 +34,8 @@ var operationCatalog = map[string]operation{
 	"raw-mtd":           {app.Write, (*App).expertRawMTD},
 	"ursusboot-install": {app.Write, (*App).ursusBootInstallWizard},
 	"vanilla-uboot":     {app.Write, (*App).vanillaUBootWizard},
+	"bl2-rescue":        {app.Erase, (*App).bl2RescueWizard},
+	"bootchain-rescue":  {app.Erase, (*App).bootChainRescueWizard},
 	"terminal":          {app.Manual, (*App).runTerminal},
 	"ws-console":        {app.Manual, (*App).runUrsusWSConsole},
 	"shell":             {app.Manual, (*App).uartShell},
@@ -305,6 +307,14 @@ var cancelNotes = map[string]func() string{
 	"ubi-volume": func() string {
 		return L("до записи — сразу; запись тома и её проверка не прерываются",
 			"before writing: at once; writing the volume and its readback are not interrupted")
+	},
+	"bl2-rescue": func() string {
+		return L("до стирания BL2 — сразу; от стирания BL2 до завершения проверки остановка недоступна",
+			"before erasing BL2: at once; from BL2 erase until verification completes, stopping is unavailable")
+	},
+	"bootchain-rescue": func() string {
+		return L("до записи FIP — сразу; после начала записи FIP цепочка доводится до проверки FIP и затем BL2 последним",
+			"before the FIP write: at once; after FIP writing starts, the chain is completed through FIP verification and BL2 last")
 	},
 	"raw-mtd": func() string {
 		return L("до записи — сразу; запись и её проверка не прерываются",
