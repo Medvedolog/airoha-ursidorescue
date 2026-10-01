@@ -590,7 +590,8 @@ func (a *App) waitReceiver(s Serial, timeout time.Duration, keepExisting bool, i
 	a.event(L("Ожидание BootROM Press x / CCC. Если устройство уже печатает C, НЕ перезагружайте его.", "Waiting for BootROM Press x / CCC. If the device already prints C, do NOT reboot it."))
 	deadline := time.Now().Add(timeout)
 	tail := make([]byte, 0, 65536)
-	cCount := 0
+	var cHits []time.Time
+	firstRx := time.Time{}
 	lastX := time.Time{}
 	press := false
 	buf := make([]byte, 4096)
@@ -612,29 +613,43 @@ func (a *App) waitReceiver(s Serial, timeout time.Duration, keepExisting bool, i
 		if strings.Contains(low, "press x") {
 			press = true
 		}
-		if press && time.Since(lastX) > 2*time.Second && cCount == 0 {
-			a.event(L("Press x обнаружен; отправляю x", "Press x seen; sending x"))
+		if firstRx.IsZero() {
+			firstRx = time.Now()
+		}
+		// The literal "Press x" line is often the first thing damaged by a
+		// marginal TX path. Once recovery UART traffic is clearly alive, an
+		// occasional x is harmless here and lets BootROM enter XMODEM even
+		// when that human-readable line was unreadable.
+		if (press || (!firstRx.IsZero() && time.Since(firstRx) > 1200*time.Millisecond)) &&
+			time.Since(lastX) > 2*time.Second && len(cHits) < 3 {
+			a.event(L("BootROM recovery: отправляю x (помехоустойчивый вход)", "BootROM recovery: sending x (noise-tolerant entry)"))
 			_ = s.Write([]byte("x"))
 			lastX = time.Now()
 		}
+		now := time.Now()
 		for _, b := range d {
 			if b == 'C' {
-				cCount++
-				if cCount >= 3 {
-					ph := phasePreloader
-					if strings.Contains(low, "press x to load bl31") || strings.Contains(low, "dram flow done") || strings.Contains(low, "load bl31 + u-boot fip") {
-						ph = phaseFIP
-					}
-					p, ok := inferProfile(tail)
-					if !ok {
-						p = Profile{ID: "auto"}
-					}
-					return ph, p, true
-				}
-			} else if b == 9 || b == 10 || b == 13 || b == 32 || b < 0x20 {
-			} else {
-				cCount = 0
+				cHits = append(cHits, now)
 			}
+		}
+		cut := now.Add(-3500 * time.Millisecond)
+		keep := cHits[:0]
+		for _, t := range cHits {
+			if t.After(cut) {
+				keep = append(keep, t)
+			}
+		}
+		cHits = keep
+		if len(cHits) >= 3 {
+			ph := phasePreloader
+			if strings.Contains(low, "press x to load bl31") || strings.Contains(low, "dram flow done") || strings.Contains(low, "load bl31 + u-boot fip") {
+				ph = phaseFIP
+			}
+			p, ok := inferProfile(tail)
+			if !ok {
+				p = Profile{ID: "auto"}
+			}
+			return ph, p, true
 		}
 		return phaseUnknown, Profile{}, false
 	}
@@ -797,11 +812,11 @@ func (a *App) xmodemSend(s Serial, path, label string) (xmodemResult, error) {
 		pkt = append(pkt, byte(c>>8), byte(c))
 
 		accepted := false
-		for attempt := 1; attempt <= 8 && !accepted; attempt++ {
+		for attempt := 1; attempt <= 16 && !accepted; attempt++ {
 			if e = s.Write(pkt); e != nil {
 				return result, e
 			}
-			deadline := time.Now().Add(2 * time.Second)
+			deadline := time.Now().Add(3 * time.Second)
 			retryNow := false
 			consecutiveCAN := 0
 			for time.Now().Before(deadline) {
@@ -830,12 +845,12 @@ func (a *App) xmodemSend(s Serial, path, label string) (xmodemResult, error) {
 				if retryNow {
 					reason = L("NAK/C — повтор немедленно", "NAK/C — immediate retry")
 				}
-				a.event(fmt.Sprintf(L("XMODEM повтор блока %d/%d, попытка %d/8 (%s)", "XMODEM retry block %d/%d attempt %d/8 (%s)"), idx+1, blocks, attempt, reason))
+				a.event(fmt.Sprintf(L("XMODEM повтор блока %d/%d, попытка %d/16 (%s)", "XMODEM retry block %d/%d attempt %d/16 (%s)"), idx+1, blocks, attempt, reason))
 				time.Sleep(80 * time.Millisecond)
 			}
 		}
 		if !accepted {
-			return result, fmt.Errorf(L("XMODEM блок %d не подтверждён после 8 попыток", "XMODEM block %d not ACKed after 8 attempts"), idx+1)
+			return result, fmt.Errorf(L("XMODEM блок %d не подтверждён после 16 попыток", "XMODEM block %d not ACKed after 16 attempts"), idx+1)
 		}
 		sent += int64(n)
 		seq++
@@ -1146,15 +1161,57 @@ func (a *App) ubootCommandExec(s Serial, command string, timeout time.Duration) 
 	rc, _ := strconv.Atoi(string(m[1]))
 	return append(out, status...), rc, nil
 }
+func ubootNoiseRetrySafe(command string) bool {
+	c := strings.TrimSpace(command)
+	// Automatically retry only commands whose repetition cannot alter
+	// persistent flash. Destructive erase/write/update commands are excluded:
+	// they are sent once and must be proved by an independent readback.
+	for _, p := range []string{
+		"version", "mtd list", "mtd bad ", "mtd read ",
+		"ubi info", "ubi check ", "ubi read ",
+		"crc32 ", "md.l ", "md.b ", "md.w ",
+		"printenv", "bdinfo", "help", "echo ", "itest ",
+		"mw.b ", "mw.w ", "mw.l ", "setenv ",
+	} {
+		if c == p || strings.HasPrefix(c, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) ubootCommand(s Serial, command string, timeout time.Duration) ([]byte, error) {
-	out, rc, e := a.ubootCommandRaw(s, command, timeout)
-	if e != nil {
-		return out, e
+	attempts := 1
+	if ubootNoiseRetrySafe(command) {
+		attempts = 6
 	}
-	if rc != 0 {
-		return out, fmt.Errorf("U-Boot rc=%d: %s", rc, command)
+	var combined []byte
+	var last error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		out, rc, e := a.ubootCommandRaw(s, command, timeout)
+		combined = append(combined, out...)
+		if e == nil {
+			if rc != 0 {
+				// A complete random marker with a real non-zero status is
+				// stronger evidence than line noise. Do not hide a real
+				// command failure behind automatic retries.
+				return combined, fmt.Errorf("U-Boot rc=%d: %s", rc, command)
+			}
+			return combined, nil
+		}
+		last = e
+		if attempt == attempts {
+			break
+		}
+		a.event(fmt.Sprintf(L(
+			"UART: ответ на read-only/RAM команду повреждён или потерян; повтор %d/%d: %s (%v)",
+			"UART: read-only/RAM command response was damaged or lost; retry %d/%d: %s (%v)"),
+			attempt+1, attempts, command, e))
+		a.waitQuiet(s, 250*time.Millisecond, 1500*time.Millisecond)
+		_ = s.ResetInput()
+		time.Sleep(120 * time.Millisecond)
 	}
-	return out, nil
+	return combined, last
 }
 
 func requireGeometry(data []byte) error {
@@ -1903,9 +1960,9 @@ func (a *App) readbackCRC(s Serial, target string, off, size, ram uint64, expect
 	// A mismatch is read again before it counts: the check only reads, and a
 	// garbled UART exchange must not look like bad flash.
 	var last error
-	for attempt := 1; attempt <= 3; attempt++ {
+	for attempt := 1; attempt <= 8; attempt++ {
 		if attempt > 1 {
-			a.event(fmt.Sprintf(L("Проверка после записи: повтор чтения %d/3 (%v)", "Readback: reading again %d/3 (%v)"), attempt, last))
+			a.event(fmt.Sprintf(L("Проверка после записи: повтор чтения %d/8 (%v)", "Readback: reading again %d/8 (%v)"), attempt, last))
 			a.waitQuiet(s, 300*time.Millisecond, 2*time.Second)
 		}
 		if _, e := a.ubootCommand(s, fmt.Sprintf("mw.b 0x%x 0x00 0x%x", ram, size), 2*time.Minute); e != nil {
