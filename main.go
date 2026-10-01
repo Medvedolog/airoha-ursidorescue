@@ -29,7 +29,7 @@ import (
 
 const (
 	appName               = "UrsidoRescue"
-	appVersion            = "0.2.1-test.21-md-bl2-rescue"
+	appVersion            = "0.2.1-test.22-bootchain-rescue"
 	defaultRouterIP       = "192.168.1.1"
 	defaultLocalIP        = "192.168.1.254"
 	defaultTFTPPort       = 1069
@@ -2939,7 +2939,7 @@ func (a *App) makeSupportBundle() (string, error) {
 }
 
 func (a *App) selftest() error {
-	if appVersion != "0.2.1-test.21-md-bl2-rescue" {
+	if appVersion != "0.2.1-test.22-bootchain-rescue" {
 		return errors.New("version")
 	}
 	if _, e := probe.CheckUBoot("saveenv"); e == nil {
@@ -2970,6 +2970,14 @@ func (a *App) selftest() error {
 	for _, p := range profiles {
 		if e := validatePinned(a.root, p); e != nil {
 			return e
+		}
+		bl2, _, _, e := a.rescueProfileBL2(p)
+		if e != nil || len(bl2) != bl2Size {
+			return fmt.Errorf("%s rescue BL2 candidate: size=%d err=%v", p.ID, len(bl2), e)
+		}
+		fipRescue, _, e := a.rescueProfileFIP(p)
+		if e != nil || len(fipRescue) == 0 {
+			return fmt.Errorf("%s rescue FIP candidate: size=%d err=%v", p.ID, len(fipRescue), e)
 		}
 		if e := validateFIP(filepath.Join(a.root, filepath.FromSlash(p.RAMFIPRel))); e != nil {
 			return fmt.Errorf("%s FIP: %w", p.ID, e)
