@@ -200,6 +200,10 @@ func (a *App) ursusBootInstallWizard() error {
 		return e
 	}
 	defer func() { s.Close(); a.closeLog() }()
+	if p.ID == "md" {
+		a.event(L("TEST21 MD BL2 rescue: UBI/fip не трогаются; восстанавливается только AN7581 BL2", "TEST21 MD BL2 rescue: UBI/fip are untouched; only AN7581 BL2 is repaired"))
+		return a.installMDBL2Rescue(s, p)
+	}
 	payload, e := os.ReadFile(filepath.Join(a.root, filepath.FromSlash(p.BootRel)))
 	if e != nil {
 		return e
