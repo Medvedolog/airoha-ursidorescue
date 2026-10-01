@@ -29,7 +29,7 @@ import (
 
 const (
 	appName               = "UrsidoRescue"
-	appVersion            = "0.2.1-test.18"
+	appVersion            = "0.2.1-test.22-bootchain-rescue"
 	defaultRouterIP       = "192.168.1.1"
 	defaultLocalIP        = "192.168.1.254"
 	defaultTFTPPort       = 1069
@@ -2686,11 +2686,13 @@ func (a *App) expertMenu() error {
 		fmt.Println(L("  7. Установка UrsusBoot (UART, MD/MF)", "  7. Install UrsusBoot (UART, MD/MF)"))
 		fmt.Println(L("  8. Возврат или обновление vanilla U-Boot (UART, UBI)", "  8. Return or update vanilla U-Boot (UART, UBI)"))
 		fmt.Println(L("  9. UrsusBoot Ethernet-консоль (WebSocket, F2/F3/F5)", "  9. UrsusBoot Ethernet console (WebSocket, F2/F3/F5)"))
+		fmt.Println(L(" 10. Аварийно: восстановить только BL2 (MD/MF)", " 10. Rescue: restore BL2 only (MD/MF)"))
+		fmt.Println(L(" 11. Аварийно: восстановить загрузочную цепочку BL2 + FIP (MD/MF)", " 11. Rescue: restore boot chain BL2 + FIP (MD/MF)"))
 		fmt.Println(L("  0. Назад", "  0. Back"))
 		v := a.ask(L("Выбор: ", "Choice: "))
-		ops := map[string]string{"1": "terminal", "2": "ram-uboot", "3": "ubi-volume", "4": "raw-mtd", "5": "diagnostics", "6": "shell", "7": "ursusboot-install", "8": "vanilla-uboot", "9": "ws-console"}
+		ops := map[string]string{"1": "terminal", "2": "ram-uboot", "3": "ubi-volume", "4": "raw-mtd", "5": "diagnostics", "6": "shell", "7": "ursusboot-install", "8": "vanilla-uboot", "9": "ws-console", "10": "bl2-rescue", "11": "bootchain-rescue"}
 		switch v {
-		case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		case "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11":
 			if e := a.RunOperation(ops[v]); e != nil {
 				return e
 			}
@@ -2937,7 +2939,7 @@ func (a *App) makeSupportBundle() (string, error) {
 }
 
 func (a *App) selftest() error {
-	if appVersion != "0.2.1-test.18" {
+	if appVersion != "0.2.1-test.22-bootchain-rescue" {
 		return errors.New("version")
 	}
 	if _, e := probe.CheckUBoot("saveenv"); e == nil {
@@ -2968,6 +2970,14 @@ func (a *App) selftest() error {
 	for _, p := range profiles {
 		if e := validatePinned(a.root, p); e != nil {
 			return e
+		}
+		bl2, _, _, e := a.rescueProfileBL2(p)
+		if e != nil || len(bl2) != bl2Size {
+			return fmt.Errorf("%s rescue BL2 candidate: size=%d err=%v", p.ID, len(bl2), e)
+		}
+		fipRescue, _, e := a.rescueProfileFIP(p)
+		if e != nil || len(fipRescue) == 0 {
+			return fmt.Errorf("%s rescue FIP candidate: size=%d err=%v", p.ID, len(fipRescue), e)
 		}
 		if e := validateFIP(filepath.Join(a.root, filepath.FromSlash(p.RAMFIPRel))); e != nil {
 			return fmt.Errorf("%s FIP: %w", p.ID, e)
