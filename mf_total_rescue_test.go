@@ -7,14 +7,14 @@ import (
 
 func TestParseUBIVolumeID(t *testing.T) {
 	out := []byte(`UBI: Volume information dump:
-UBI:  vol_id          4
-UBI:  reserved_pebs   9
-UBI:  alignment       1
-UBI:  data_pad        0
-UBI:  vol_type        4
-UBI:  usable_leb_size 126976
-UBI:  used_bytes      326231
-UBI:  name            fip
+ubi0: vol_id          4
+ubi0: reserved_pebs   9
+ubi0: alignment       1
+ubi0: data_pad        0
+ubi0: vol_type        4
+ubi0: usable_leb_size 126976
+ubi0: used_bytes      326231
+ubi0: name            fip
 `)
 	vols := parseUBIVolumes(out)
 	if len(vols) != 1 {
