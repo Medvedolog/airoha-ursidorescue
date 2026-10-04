@@ -181,19 +181,20 @@ func TestBootAreaReadback(t *testing.T) {
 	}
 }
 
-// A readback mismatch is read again before it fails the write.
+// A readback mismatch is retried through UART noise, but the write is not
+// accepted unless one of the eight independent reads matches the expected CRC.
 func TestReadbackCRCRetries(t *testing.T) {
 	a := &App{ui: (&app.Recorder{}).UI()}
 	part := bytes.Repeat([]byte{0x3c}, 0x1000)
 	want := crc32.ChecksumIEEE(part)
 	sim := newSim(nil, part)
-	sim.crcLie = 2
+	sim.crcLie = 7
 	if err := a.readbackCRC(sim, "ubi", 0, 0x1000, verifyAddr, want); err != nil {
-		t.Fatalf("two bad reads then a good one must pass: %v", err)
+		t.Fatalf("seven bad reads then a good eighth one must pass: %v", err)
 	}
 	sim = newSim(nil, part)
-	sim.crcLie = 3
+	sim.crcLie = 8
 	if err := a.readbackCRC(sim, "ubi", 0, 0x1000, verifyAddr, want); err == nil {
-		t.Fatal("three mismatches must fail")
+		t.Fatal("eight mismatches must fail")
 	}
 }
