@@ -321,4 +321,3 @@ func (a *App) mfTotalRescue(transport mfRescueTransport) error {
 	}
 	return nil
 }
-
