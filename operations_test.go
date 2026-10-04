@@ -21,6 +21,7 @@ func TestCatalogueRiskClasses(t *testing.T) {
 		"terminal": app.Manual, "shell": app.Manual, "ws-console": app.Manual,
 		"ursusboot-install": app.Write, "vanilla-uboot": app.Write,
 		"bl2-rescue": app.Erase, "bootchain-rescue": app.Erase,
+		"mf-total-rescue-uart": app.Erase, "mf-total-rescue-tftp": app.Erase,
 	}
 	for k, r := range want {
 		op, ok := operationCatalog[k]
