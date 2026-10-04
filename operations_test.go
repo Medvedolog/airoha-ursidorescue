@@ -53,7 +53,6 @@ func TestUARTNoiseRetryPolicy(t *testing.T) {
 	}
 }
 
-
 func readSessionMeta(t *testing.T, work string) (string, map[string]any) {
 	t.Helper()
 	dirs, _ := filepath.Glob(filepath.Join(app.SessionsDir(work), "*"))
