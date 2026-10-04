@@ -109,6 +109,7 @@ func (a *App) deviceCRC(s Serial, addr, size uint64, want uint32) error {
 
 // ubiVol is one volume of "ubi info layout" (U-Boot ubi_dump_vol_info).
 type ubiVol struct {
+	ID                      int // UBI volume ID; -1 when not present in the transcript
 	Name                    string
 	Type                    int // 3 dynamic, 4 static
 	UsedBytes               uint64
@@ -117,16 +118,18 @@ type ubiVol struct {
 
 func (v ubiVol) capacity() uint64 { return v.ReservedPEBs * v.UsableLEB }
 
-var ubiField = regexp.MustCompile(`(?m)^\s*(?:ubi\d*:\s*)?\s*(reserved_pebs|vol_type|usable_leb_size|used_bytes|name)\s+(\S+)`)
+var ubiField = regexp.MustCompile(`(?m)^\s*(?:ubi\d*:\s*)?\s*(vol_id|reserved_pebs|vol_type|usable_leb_size|used_bytes|name)\s+(\S+)`)
 
 func parseUBIVolumes(out []byte) []ubiVol {
 	var vols []ubiVol
 	for _, block := range strings.Split(string(out), "Volume information dump:")[1:] {
-		var v ubiVol
+		v := ubiVol{ID: -1}
 		seen := 0
 		for _, m := range ubiField.FindAllStringSubmatch(block, -1) {
 			n, _ := strconv.ParseUint(m[2], 10, 64)
 			switch m[1] {
+			case "vol_id":
+				v.ID = int(n)
 			case "reserved_pebs":
 				v.ReservedPEBs = n
 			case "vol_type":
