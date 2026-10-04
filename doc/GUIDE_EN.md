@@ -98,7 +98,7 @@ the program sees that the preloader is loaded and sends only the FIP.
 Router UART lines can be noisy, and the BootROM and the next boot stage do not behave like
 "textbook" XMODEM. So the rules are:
 
-- **Bounded retries.** Each 128-byte block waits up to 2 s for ACK, with **at most 8 attempts**.
+- **Bounded retries.** Each 128-byte block waits up to 3 s for ACK, with **at most 16 attempts**.
   NAK or `C` (CRC request) retries only that block at once. 80 ms between retries. After 8 failures:
   stop, "XMODEM block N not ACKed after 8 attempts".
 - **ACK beats noise.** If one UART read holds `C`/NAK litter and an ACK, the ACK counts.
