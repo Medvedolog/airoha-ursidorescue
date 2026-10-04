@@ -593,3 +593,22 @@ F-клавиши — команды самого терминала, пока н
 На Windows консоль работает через `ReadConsoleInputW`: Enter, стрелки, Home/End/Delete и
 Ctrl-комбинации переводятся явно; QuickEdit остаётся включённым, так что выделение мышью и
 вставка работают.
+
+## MF TOTAL rescue: UBI утрачена полностью
+
+В Expert доступны два варианта для **Nokia XG-040G-MF / AN7583**, когда обычный `bootchain-rescue` уже неприменим: `ubi part ubi` не видит старую разметку, том `fip` отсутствует или состояние UBI неизвестно.
+
+- **MF TOTAL rescue — только UART**: BootROM → RAM U-Boot, затем аварийные FIP и BL2 передаются через `loadx` / XMODEM. Ethernet/TFTP не используется.
+- **MF TOTAL rescue — TFTP**: BootROM и RAM U-Boot по UART/XMODEM, аварийные FIP и BL2 заранее загружаются в разные области RAM по TFTP.
+
+До единственного `y/N` программа проверяет профиль MF, закреплённые payload/SHA256, BBT `bl2` и `ubi`, собирает проверенный MF UrsusBoot FIP и загружает **оба** payload в RAM со сверкой. После подтверждения:
+
+1. весь MTD `ubi` стирается — прежние OpenWrt volumes, настройки и повреждённая UBI-разметка намеренно теряются;
+2. создаётся fresh UBI;
+3. создаётся static volume `fip`, **ID 4**, размер `0x100000`;
+4. UrsusBoot FIP записывается и проверяется readback CRC32;
+5. BL2 стирается/пишется **последним** и также проверяется readback CRC32.
+
+Destructive-команды при потерянном UART-ответе автоматически не повторяются. После начала `mtd erase ubi` операция доводится до проверки FIP и BL2. После PASS следует загрузиться в UrsusBoot Recovery и установить штатный MF UBI sysupgrade.
+
+Этот режим предназначен именно для полной аварии UBI. Если существующий `fip` читается, используйте менее разрушительный `bootchain-rescue`.
