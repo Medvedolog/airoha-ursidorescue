@@ -242,6 +242,39 @@ func TestVanillaImages(t *testing.T) {
 	}
 }
 
+func TestMFPinnedRescueFIP(t *testing.T) {
+	v, err := os.ReadFile(profiles["mf"].VanillaRel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(profiles["mf"].BootRel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fip, r, err := mfDerivePinnedFIP(v, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := parseFIP(fip, uint64(len(fip)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nts := l.find(uuidNTFW)
+	if len(nts) != 1 {
+		t.Fatalf("NT_FW count=%d", len(nts))
+	}
+	nt := nts[0]
+	if nt.Size != uint64(len(b)) || l.End != uint64(len(fip)) || r.TargetEnd != l.End {
+		t.Fatalf("NT size=0x%x end=0x%x report end=0x%x", nt.Size, l.End, r.TargetEnd)
+	}
+	if !bytes.Equal(fip[int(nt.Off):int(nt.end())], b) {
+		t.Fatal("pinned rescue BL33 was not placed exactly")
+	}
+	if r.SourceSHA != shaHex(v) || r.TargetSHA != shaHex(fip) {
+		t.Fatal("pinned rescue SHA report mismatch")
+	}
+}
+
 // On MF the UrsusBoot install over this vanilla refuses (unaligned FIP)
 // instead of guessing; the documentation says so.
 func TestMFUrsusBootOverVanillaRefuses(t *testing.T) {
