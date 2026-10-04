@@ -23,24 +23,24 @@ type operation struct {
 var unstoppable = map[string]bool{"terminal": true, "shell": true}
 
 var operationCatalog = map[string]operation{
-	"stock-restore":     {app.Erase, (*App).stockRestoreWizard},
-	"fip-repair":        {app.Write, (*App).fipRepairWizard},
-	"physical-restore":  {app.Erase, (*App).physicalRestoreWizard},
-	"itb-boot":          {app.NonPersistent, (*App).bootRecoveryWizard},
-	"diagnostics":       {app.ReadOnly, (*App).diagnosticsWizard},
-	"support-bundle":    {app.ReadOnly, (*App).supportBundleOperation},
-	"ram-uboot":         {app.NonPersistent, (*App).ramUBootShell},
-	"ubi-volume":        {app.Write, (*App).expertUBIVolume},
-	"raw-mtd":           {app.Write, (*App).expertRawMTD},
-	"ursusboot-install": {app.Write, (*App).ursusBootInstallWizard},
-	"vanilla-uboot":     {app.Write, (*App).vanillaUBootWizard},
+	"stock-restore":        {app.Erase, (*App).stockRestoreWizard},
+	"fip-repair":           {app.Write, (*App).fipRepairWizard},
+	"physical-restore":     {app.Erase, (*App).physicalRestoreWizard},
+	"itb-boot":             {app.NonPersistent, (*App).bootRecoveryWizard},
+	"diagnostics":          {app.ReadOnly, (*App).diagnosticsWizard},
+	"support-bundle":       {app.ReadOnly, (*App).supportBundleOperation},
+	"ram-uboot":            {app.NonPersistent, (*App).ramUBootShell},
+	"ubi-volume":           {app.Write, (*App).expertUBIVolume},
+	"raw-mtd":              {app.Write, (*App).expertRawMTD},
+	"ursusboot-install":    {app.Write, (*App).ursusBootInstallWizard},
+	"vanilla-uboot":        {app.Write, (*App).vanillaUBootWizard},
 	"bl2-rescue":           {app.Erase, (*App).bl2RescueWizard},
 	"bootchain-rescue":     {app.Erase, (*App).bootChainRescueWizard},
 	"mf-total-rescue-uart": {app.Erase, (*App).mfTotalRescueUART},
 	"mf-total-rescue-tftp": {app.Erase, (*App).mfTotalRescueTFTP},
-	"terminal":          {app.Manual, (*App).runTerminal},
-	"ws-console":        {app.Manual, (*App).runUrsusWSConsole},
-	"shell":             {app.Manual, (*App).uartShell},
+	"terminal":             {app.Manual, (*App).runTerminal},
+	"ws-console":           {app.Manual, (*App).runUrsusWSConsole},
+	"shell":                {app.Manual, (*App).uartShell},
 }
 
 // cancelledError is the operator's refusal to confirm, in the UI language.
