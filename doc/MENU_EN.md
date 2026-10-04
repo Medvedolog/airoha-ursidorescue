@@ -88,7 +88,7 @@ mode. **Nothing is written to flash.**
    (up to 180 s) and checks that the SoC did not change.
 7. XMODEM-CRC sends the RAM FIP (BL31 + RECOVERY_SAFE U-Boot). XMODEM rules (details in
    [GUIDE_EN.md](GUIDE_EN.md#xmodem)):
-   - 128-byte blocks, ACK wait up to 2 s, **at most 8 attempts** per block; NAK or `C` retries only
+   - 128-byte blocks, ACK wait up to 3 s, **at most 16 attempts** per block; NAK or `C` retries only
      that block at once;
    - a single `CAN` is line noise; a receiver abort needs **`CAN CAN`**;
    - after the last block is ACKed: EOT with a 0.9 s wait; retried only on an explicit NAK (up to
