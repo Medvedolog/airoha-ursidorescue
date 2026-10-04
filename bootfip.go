@@ -289,6 +289,104 @@ func mfDeriveFIP(cur, bl33 []byte) ([]byte, installReport, error) {
 	return fip, r, nil
 }
 
+// mfDerivePinnedFIP is the rescue-only MF builder. Unlike mfDeriveFIP it
+// never guesses an alignment for an arbitrary live FIP. It accepts only the
+// pinned vanilla FIP after its size/SHA were checked by the caller, preserves
+// every non-NT_FW entry byte-for-byte, preserves the exact trailing gap after
+// the final NT_FW payload, and changes only NT_FW size/payload plus the FIP
+// terminator end. The resulting FIP is parsed and re-proved before use.
+func mfDerivePinnedFIP(cur, bl33 []byte) ([]byte, installReport, error) {
+	var r installReport
+	if uint64(len(cur)) > bootFIPMax {
+		return nil, r, fmt.Errorf("pinned FIP is too large: %d", len(cur))
+	}
+	if len(bl33) < 13 || bl33[0] != 0x5D {
+		return nil, r, errors.New("MF BL33 is not an Airoha LZMA-Alone payload")
+	}
+	l, err := parseFIP(cur, uint64(len(cur)))
+	if err != nil {
+		return nil, r, err
+	}
+	if l.End != uint64(len(cur)) {
+		return nil, r, fmt.Errorf("pinned FIP declared end 0x%x != file size 0x%x", l.End, len(cur))
+	}
+	nts := l.find(uuidNTFW)
+	if len(nts) != 1 {
+		return nil, r, fmt.Errorf("expected exactly one NT_FW/BL33 entry, found %d", len(nts))
+	}
+	nt := nts[0]
+	for _, e := range l.Entries {
+		if e.Off > nt.Off {
+			return nil, r, errors.New("NT_FW/BL33 is not the final FIP payload")
+		}
+	}
+	if nt.end() > l.End {
+		return nil, r, errors.New("NT_FW/BL33 exceeds the pinned FIP end")
+	}
+
+	tailLen := l.End - nt.end()
+	pad := byte(0)
+	if tailLen != 0 {
+		tail := cur[int(nt.end()):int(l.End)]
+		pad = tail[0]
+		if bytes.Count(tail, []byte{pad}) != len(tail) {
+			return nil, r, errors.New("pinned FIP trailing gap is not uniform; refusing to move it")
+		}
+	}
+
+	newEnd := nt.Off + uint64(len(bl33)) + tailLen
+	if newEnd > bootFIPMax {
+		return nil, r, fmt.Errorf("BL33 does not fit before the environment: FIP end 0x%x, max 0x%x", newEnd, bootFIPMax)
+	}
+	out := make([]byte, int(newEnd))
+	copy(out, cur[:int(nt.Off)])
+	copy(out[int(nt.Off):], bl33)
+	for i := int(nt.Off) + len(bl33); i < len(out); i++ {
+		out[i] = pad
+	}
+	binary.LittleEndian.PutUint64(out[nt.TOC+24:], uint64(len(bl33)))
+	binary.LittleEndian.PutUint64(out[l.Term+16:], newEnd)
+
+	nl, err := parseFIP(out, newEnd)
+	if err != nil {
+		return nil, r, fmt.Errorf("rescue candidate does not parse: %w", err)
+	}
+	nnts := nl.find(uuidNTFW)
+	if len(nnts) != 1 || nnts[0].Off != nt.Off || nnts[0].Flags != nt.Flags || nnts[0].Size != uint64(len(bl33)) {
+		return nil, r, errors.New("NT_FW metadata changed beyond its size")
+	}
+	if nl.Serial != l.Serial || nl.Flags != l.Flags || len(nl.Entries) != len(l.Entries) || nl.End != newEnd {
+		return nil, r, errors.New("FIP header, entry count or end changed unexpectedly")
+	}
+	for i, e := range l.Entries {
+		if e.UUID == uuidNTFW {
+			continue
+		}
+		if nl.Entries[i] != e {
+			return nil, r, fmt.Errorf("FIP entry %x metadata changed", e.UUID)
+		}
+		if !bytes.Equal(cur[int(e.Off):int(e.end())], out[int(e.Off):int(e.end())]) {
+			return nil, r, fmt.Errorf("FIP entry %x payload changed", e.UUID)
+		}
+	}
+	if !bytes.Equal(out[int(nt.Off):int(nt.Off)+len(bl33)], bl33) {
+		return nil, r, errors.New("BL33 was not placed exactly")
+	}
+
+	r = installReport{
+		Method:       "mf-pinned-vanilla-derived-bl33",
+		SourceSHA:    shaHex(cur),
+		TargetSHA:    shaHex(out),
+		SourceNTSize: nt.Size,
+		TargetNTSize: uint64(len(bl33)),
+		NTOff:        nt.Off,
+		SourceEnd:    l.End,
+		TargetEnd:    nl.End,
+		Entries:      len(l.Entries),
+	}
+	return out, r, nil
+}
+
 // mdCheckFIP proves the pinned MD UrsusBoot FIP: TOC, a single NT_FW that ends
 // before the first certificate and the Airoha checksum record.
 func mdCheckFIP(fip []byte) (fipLayout, error) {
