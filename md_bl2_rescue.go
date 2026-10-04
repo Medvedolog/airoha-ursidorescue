@@ -202,7 +202,7 @@ func (a *App) rescueProfileFIP(p Profile) ([]byte, installReport, error) {
 	if int64(len(bl33)) != p.BootSize || !strings.EqualFold(shaHex(bl33), p.BootSHA) {
 		return nil, rep, errors.New("MF pinned UrsusBoot BL33 size/SHA mismatch")
 	}
-	fip, rep, e := mfDeriveFIP(van, bl33)
+	fip, rep, e := mfDerivePinnedFIP(van, bl33)
 	if e != nil {
 		return nil, rep, fmt.Errorf("MF rescue FIP build: %w", e)
 	}
