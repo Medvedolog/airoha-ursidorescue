@@ -2765,11 +2765,13 @@ func (a *App) expertMenu() error {
 		fmt.Println(L("  9. UrsusBoot Ethernet-консоль (WebSocket, F2/F3/F5)", "  9. UrsusBoot Ethernet console (WebSocket, F2/F3/F5)"))
 		fmt.Println(L(" 10. Аварийно: восстановить только BL2 (MD/MF)", " 10. Rescue: restore BL2 only (MD/MF)"))
 		fmt.Println(L(" 11. Аварийно: восстановить загрузочную цепочку BL2 + FIP (MD/MF)", " 11. Rescue: restore boot chain BL2 + FIP (MD/MF)"))
+		fmt.Println(L(" 12. MF TOTAL: стереть/создать UBI + FIP + BL2, только UART/XMODEM", " 12. MF TOTAL: erase/recreate UBI + FIP + BL2, UART/XMODEM only"))
+		fmt.Println(L(" 13. MF TOTAL: стереть/создать UBI + FIP + BL2, TFTP", " 13. MF TOTAL: erase/recreate UBI + FIP + BL2, TFTP"))
 		fmt.Println(L("  0. Назад", "  0. Back"))
 		v := a.ask(L("Выбор: ", "Choice: "))
-		ops := map[string]string{"1": "terminal", "2": "ram-uboot", "3": "ubi-volume", "4": "raw-mtd", "5": "diagnostics", "6": "shell", "7": "ursusboot-install", "8": "vanilla-uboot", "9": "ws-console", "10": "bl2-rescue", "11": "bootchain-rescue"}
+		ops := map[string]string{"1": "terminal", "2": "ram-uboot", "3": "ubi-volume", "4": "raw-mtd", "5": "diagnostics", "6": "shell", "7": "ursusboot-install", "8": "vanilla-uboot", "9": "ws-console", "10": "bl2-rescue", "11": "bootchain-rescue", "12": "mf-total-rescue-uart", "13": "mf-total-rescue-tftp"}
 		switch v {
-		case "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11":
+		case "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13":
 			if e := a.RunOperation(ops[v]); e != nil {
 				return e
 			}
