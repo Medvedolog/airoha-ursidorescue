@@ -594,3 +594,22 @@ purpose: they are XOFF and history search in the router's shell.
 
 On Windows the console is read with `ReadConsoleInputW`: Enter, arrows, Home/End/Delete and Ctrl
 combinations are translated explicitly; QuickEdit stays on, so mouse selection and paste work.
+
+## MF TOTAL rescue: UBI completely lost
+
+Expert mode has two variants for **Nokia XG-040G-MF / AN7583** when normal `bootchain-rescue` no longer applies: `ubi part ubi` cannot use the old layout, the `fip` volume is missing, or UBI state is unknown.
+
+- **MF TOTAL rescue — UART only**: BootROM → RAM U-Boot, then rescue FIP and BL2 through `loadx` / XMODEM. Ethernet/TFTP is not used.
+- **MF TOTAL rescue — TFTP**: BootROM and RAM U-Boot still use UART/XMODEM; rescue FIP and BL2 are preloaded into separate RAM ranges over TFTP.
+
+Before the single `y/N`, Ursido verifies the MF profile, pinned payloads/SHA256, the `bl2` and `ubi` BBTs, builds the proved MF UrsusBoot FIP, and loads **both** payloads into RAM with verification. After confirmation:
+
+1. the whole `ubi` MTD is erased, intentionally destroying old OpenWrt volumes, settings and broken UBI metadata;
+2. a fresh UBI is created;
+3. a static `fip` volume is created with **ID 4**, size `0x100000`;
+4. the UrsusBoot FIP is written and proved by CRC32 readback;
+5. BL2 is erased/written **last** and also proved by CRC32 readback.
+
+A destructive command is never automatically replayed merely because its UART completion text was lost. Once `mtd erase ubi` starts, the transaction runs through FIP and BL2 verification. After PASS, boot UrsusBoot Recovery and install the normal MF UBI sysupgrade.
+
+Use this only for a total UBI disaster. If an existing `fip` volume is still usable, prefer the less destructive `bootchain-rescue`.
