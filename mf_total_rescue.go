@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"hash/crc32"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"ursidorescue/app"
@@ -324,7 +322,3 @@ func (a *App) mfTotalRescue(transport mfRescueTransport) error {
 	return nil
 }
 
-// Keep filepath imported here intentionally: the rescue payloads are pinned
-// profile files and saveInstallFile materializes copies in the current session.
-var _ = filepath.Separator
-var _ = strings.Builder{}
