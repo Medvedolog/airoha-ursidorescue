@@ -370,3 +370,13 @@ stop no new write commands are sent.
 
 For a report: main menu → **6**, attach `UrsidoRescue-support-*.zip` and describe what you did.
 Review the logs for MACs/serials before publishing.
+
+## Total MF UBI disaster: UART-only or TFTP
+
+`0.2.1-test.24-mf-total-rescue` adds an MF/AN7583 path that does not depend on the old UBI layout. It is for cases where UBI metadata/FIP is damaged or unknown and the existing `fip` volume cannot be repaired.
+
+**UART-only** needs no Ethernet at all: BootROM, RAM U-Boot, FIP and BL2 all travel over UART/XMODEM. The **TFTP variant** uses the network only to preload FIP and BL2 into RAM; after UBI erasure begins, the network is no longer needed.
+
+Both variants verify the pinned payloads and their RAM copies first. One `y/N` then authorizes erasing the whole `ubi` MTD, creating a fresh UBI and static `fip` ID 4, writing/verifying the UrsusBoot FIP, and finally writing BL2 last. Old OpenWrt volumes and settings are intentionally destroyed. The final step is to boot UrsusBoot Recovery and install the MF UBI sysupgrade.
+
+If the current UBI still attaches and `fip` is present, do not use the total path; use normal boot-chain rescue so the other volumes remain intact.
