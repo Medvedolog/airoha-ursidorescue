@@ -1,6 +1,6 @@
 # UrsidoRescue 0.2.1-test.25-md-mf-total-rescue
 
-Status: **CI PASS / HW PARTIAL; MD/MF TOTAL HW PENDING.** Existing hardware evidence from test18 remains valid. Test25 generalizes the fresh-UBI TOTAL path from MF-only to one shared MD/MF engine; hardware acceptance is still pending for both profiles.
+Status: **RELEASE / CI PASS / HW PARTIAL; MD/MF TOTAL HW PENDING.** Test25 is the current regular GitHub Release. Existing hardware evidence from test18 remains valid; hardware acceptance for both TOTAL profiles is still pending.
 
 ## 0.2.1-test.25-md-mf-total-rescue
 
@@ -14,6 +14,7 @@ Status: **CI PASS / HW PARTIAL; MD/MF TOTAL HW PENDING.** Existing hardware evid
 - Old `mf-total-rescue-*` operation IDs are removed; there is one shared implementation to prevent MD/MF behaviour drift.
 - TOTAL rescue intentionally destroys all old volumes/settings under the ubi MTD. After PASS, boot UrsusBoot Recovery and install the matching MD or MF UBI sysupgrade.
 - Release-candidate CI PASS: formatting, vet/tests, Windows x64, Linux x86_64/arm64, selftest, package and artifact upload.
+- Release channel: regular GitHub Release (not a pre-release); binary assets are unchanged from the CI-proven test25 build.
 
 # UrsidoRescue 0.2.1-test.24-mf-total-rescue
 
