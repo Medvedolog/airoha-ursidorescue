@@ -46,8 +46,46 @@ Releases by CI.
 | 0.2.0-test16 | `8f72817` | yes | stock LAN assist: UART login and UID 0 |
 | 0.2.0-test17 | `6008769` | yes | Telnet-only passive plan, late credential refresh, auth hardening |
 | 0.2.1-test.18 | branch | not yet | application layer and STOP, TUI by default, UrsusBoot install over UART, UART frame, false CRC error fixed |
+| 0.2.1-test.19 | `3167b36` | no | MD rescue without reading broken UBI/FIP |
+| 0.2.1-test.21 | `7c4190d` | no | emergency BL2 restore on MD |
+| 0.2.1-test.22 | `77a2dfd` | no | separate BL2 and BL2+FIP rescue for MD/MF |
+| 0.2.1-test.23-uart-noise | `c1391a8` | no | global noisy-UART hardening; destructive commands are never replayed |
+| 0.2.1-test.24-mf-total-rescue | branch `dev/mf-total-ubi-rescue` | **yes** | MF TOTAL rescue: fresh UBI + fip ID4 + UrsusBoot FIP + BL2, UART-only or TFTP |
 
 ---
+
+## 0.2.1-test.24-mf-total-rescue — 2026-10-05
+
+Status: **CI PASS / HW PARTIAL; MF TOTAL HW PENDING**.
+
+This pre-release rolls the post-test18 development line into one release:
+
+- **MF TOTAL rescue for completely lost UBI**, with two separate Expert paths:
+  - **UART-only**: BootROM → RAM U-Boot → FIP/BL2 through `loadx` + XMODEM, no Ethernet/TFTP;
+  - **TFTP**: FIP and BL2 are preloaded into separate RAM ranges over Ethernet; no network is needed after erase starts.
+- Full destructive order for MF/AN7583: stable BBT → preload and verify both payloads →
+  one `y/N` → `mtd erase ubi` → fresh UBI → static `fip` **ID 4**, size `0x100000` →
+  write/CRC-readback UrsusBoot FIP → write **BL2 last** → CRC-readback BL2.
+- TOTAL mode does not read or trust the old UBI/FIP. It is specifically for a brick whose UBI
+  metadata/FIP is gone or unreliable.
+- **MD/MF rescue is split into explicit operations**: BL2-only restore and full BL2 + FIP boot-chain
+  restore. Normal UrsusBoot installation remains a separate operation.
+- **Global noisy-UART hardening**: read-only/RAM commands can be retried safely; flash-changing
+  commands are **never automatically replayed** after a lost or damaged completion response, and are
+  instead proved by independent readback.
+- XMODEM on noisy lines is hardened to 16 attempts per block, ACK wins over noise, receiver abort
+  requires `CAN CAN`, and EOT is not spammed after a fully ACKed payload.
+- **UrsusBoot Ethernet/WebSocket console**: native RFC6455 client with no external WS dependency,
+  F2 RAM upload, F3 diagnostics/RAM export through TFTP PUT, F5 read-only presets and a double-Ctrl-C
+  guard at an idle `UrsusBoot>`.
+- Stock restore now reports bad-block skips explicitly.
+- MF rescue FIP construction is pinned and deterministic, with no alignment guessing.
+- RU/EN docs, menus and operator guides are updated for test24.
+- Final release-branch CI passes formatting, vet/tests, Windows x64, Linux x86_64/arm64, selftest,
+  packaging and artifact upload.
+
+The new MF TOTAL path is not yet hardware-tested; previously proven test18 hardware results remain
+**HW PARTIAL**.
 
 ## 0.2.1-test.18 (2026-09-25, branch `claude/gracious-hypatia-ditksb`, no pre-release yet)
 
