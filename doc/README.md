@@ -1,6 +1,6 @@
 # UrsidoRescue — документация / documentation
 
-Версия: **0.2.1-test.24-mf-total-rescue** · статус: CI PASS / HW PARTIAL; MF TOTAL HW PENDING (см. [../STATUS.md](../STATUS.md))
+Версия: **0.2.1-test.25-md-mf-total-rescue** · статус: CI PENDING / HW PARTIAL; MD/MF TOTAL HW PENDING (см. [../STATUS.md](../STATUS.md))
 
 ## Русский
 
