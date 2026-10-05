@@ -336,7 +336,7 @@ func TestBootLogAndSoC(t *testing.T) {
 
 func TestPromptClassification(t *testing.T) {
 	cases := map[string]PromptKind{"AN7581>": PromptUBoot, "=>": PromptUBoot, "U-Boot>": PromptUBoot, "root@OpenWrt:/#": PromptLinuxShell,
-		"#": PromptLinuxShell, "$": PromptLinuxShell, "OpenWrt login:": PromptLogin, "Password:": PromptPassword, "bldr>": PromptOtherBootloader, "Hit any key": PromptNone}
+		"#": PromptLinuxShell, "$": PromptLinuxShell, "OpenWrt login:": PromptLogin, "Username:": PromptLogin, "User name:": PromptLogin, "user:": PromptLogin, "Last user: root": PromptNone, "Password:": PromptPassword, "bldr>": PromptOtherBootloader, "Hit any key": PromptNone}
 	for in, want := range cases {
 		if got := ClassifyPrompt(in); got != want {
 			t.Errorf("%q: %v want %v", in, got, want)

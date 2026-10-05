@@ -1,6 +1,6 @@
 # UrsidoRescue operator guide
 
-[Русская версия](GUIDE_RU.md) · [Contents](README.md) · version 0.2.0-test17
+[Русская версия](GUIDE_RU.md) · [Contents](README.md) · version 0.2.1-test.18
 
 ## 0. Before you start
 
@@ -31,13 +31,13 @@ Port settings (the program sets them): 115200, 8N1, no flow control.
 3. Contents:
 
 ```
-UrsidoRescue-0.2.0-test17/
+UrsidoRescue-0.2.1-test.18/
   UrsidoRescue.exe            Windows x64
   UrsidoRescue-linux-amd64    Linux x86_64
   UrsidoRescue-linux-arm64    Linux aarch64 (Raspberry Pi 4/5, ARM laptops)
   VERSION
-  payloads/md/…               preloader and RAM FIP for XG-040G-MD
-  payloads/mf/…               preloader and RAM FIP for XG-040G-MF
+  payloads/md/…               preloader, RAM FIP, UrsusBoot and vanilla t67 for MD
+  payloads/mf/…               preloader, RAM FIP, UrsusBoot and vanilla t67 for MF
   STATUS.md  PROBE.md  SHA256SUMS
 ```
 
@@ -98,7 +98,7 @@ the program sees that the preloader is loaded and sends only the FIP.
 Router UART lines can be noisy, and the BootROM and the next boot stage do not behave like
 "textbook" XMODEM. So the rules are:
 
-- **Bounded retries.** Each 128-byte block waits up to 2 s for ACK, with **at most 8 attempts**.
+- **Bounded retries.** Each 128-byte block waits up to 3 s for ACK, with **at most 16 attempts**.
   NAK or `C` (CRC request) retries only that block at once. 80 ms between retries. After 8 failures:
   stop, "XMODEM block N not ACKed after 8 attempts".
 - **ACK beats noise.** If one UART read holds `C`/NAK litter and an ACK, the ACK counts.
@@ -203,12 +203,84 @@ Windows:  double-click UrsidoRescue.exe   (or run it from cmd/PowerShell)
 Linux:    ./UrsidoRescue-linux-amd64
 ```
 
-The language is asked at start. Preset it with `--lang ru|en` (anywhere on the command line) or the
-`URSIDO_LANG=ru|en` environment variable. All menu items are described in [MENU_EN.md](MENU_EN.md).
+The full-screen interface (TUI) opens. The old text menu is `--console`; it also opens by itself when
+the TUI cannot run (input or output is not a terminal, `TERM=dumb`, a TUI error).
+
+The language follows the Windows display language (the locale on Linux); `l` switches it in the TUI.
+The `--console` text menu asks for it at start. Preset it with `--lang ru|en` (anywhere on the command
+line) or the `URSIDO_LANG=ru|en` environment variable. All menu items are described in [MENU_EN.md](MENU_EN.md).
 
 On an interactive terminal the program's messages are coloured (the UrsusBoot/UrsusFlasher
 palette). `NO_COLOR=1`, `TERM=dumb` or redirecting output to a file gives plain text. The router's own
 output and the UART logs are never coloured.
+
+**Full-screen mode (TUI)** is the default: a full-terminal interface: the same menus as the console
+(Main, Porting, Expert), the UART and event log always at the bottom, confirmations in their own
+window. Handy over SSH, on a Raspberry Pi and on other Linux systems without a desktop; the terminal
+must be at least 80×24.
+
+```
+./UrsidoRescue-linux-arm64
+UrsidoRescue.exe --lang en
+UrsidoRescue.exe --console      # the old text menu
+```
+
+Next to the menu the TUI explains what the selected item does, what it needs and its risk. Yes/no
+questions and short options are buttons (← → and Enter), lists (COM port, profile) use the arrows; typing
+an answer still works. The hotkeys also work with the Russian layout and through F-keys. The TUI's Expert section has no
+duplicate Diagnostics (it is in Main). While no operation runs the log may shrink to 3 rows so the item
+description fits at 80×24; during an operation it takes about a third of the screen again. After an
+operation the screen shows its result and session ID; the full path to the log directory is in the log.
+
+| key | action |
+|---|---|
+| ↑ ↓, ← → / Tab | pick an item and a section; in a dialog, pick an option |
+| Enter | run the item; answer a dialog |
+| F4, p | choose and connect the UART port (or disconnect). The port is remembered: closed between operations (the top bar shows "○ COM6 free", other programs may use it), the next operation opens it without asking |
+| s, Ctrl+C | the same STOP button (top right). When it acts is written in the operation panel: at once, after the current chunk (the current step is not cut) or unavailable now. A second Ctrl+C within 3 s forces exit |
+| PgUp / PgDn, End | scroll the log, jump to new lines |
+| F2, f | log filter: all / UART / events |
+| F3, m | large log |
+| F5, h | fold the log to its bar (the operation panel with steps and commands stays) / show it |
+| l | language: Russian / English |
+| F10, q | quit (when no operation runs) |
+
+The running log at the bottom shows no times, only events and UART output (the log bar and plain log
+text are dark lime; only statuses are coloured: errors bordeaux, PASS green, stage tags such as `[XMODEM]`
+amber). Times stay in the session log files
+and show in the operation panel as a faint column.
+
+During an operation the top bar shows its name and phase: `… · READ 37%` during a transfer or the
+wizard step (`2/6`). The hints at the bottom show the F-keys; the letters still work.
+
+The transparent UART console, the UART terminal + XMODEM and "RAM U-Boot and prompt" drive the real
+terminal (raw mode, ANSI, paste, XMODEM, as in the console) inside an UrsidoRescue frame: a header on
+top (port, 115200 8N1, RAW/LINE, log), keys and session at the bottom, the device output scrolling in
+between. In the UART terminal the commands also work without the menu: F2/F3 XMODEM send/receive, F4
+line/raw, F10 quit. On entry a plate says the port, that nothing is sent by itself and how to leave; an empty
+screen is normal while the device is silent. Without a port chosen yet, the TUI asks for it in its
+dialog first. When a fullscreen program runs on the router (`top`, `vi`, a bootmenu) the frame gives
+it the whole screen: `top`/`vi` (alternate screen) until they leave it, a bootmenu (hidden cursor + clear)
+until the cursor is shown again; Ctrl+] brings it back at any time. A plain shell `clear` keeps the frame. The TUI returns when you leave the
+console. `NO_COLOR` turns colours off.
+
+**UrsusBoot Ethernet console.** Expert has a separate mode for an already running UrsusBoot/WebFailsafe:
+no COM port is needed; the program connects to `http://192.168.1.1/ws/console` using the pinned
+`ursusboot-console-v1` WebSocket protocol and validates the UrsusBoot hello. Override the IP with
+`URSUSBOOT_IP` or `NOKIA_ROUTER_IP`. Hotkeys: **F2** sends a file to RAM (initramfs/firmware/FIP/preloader
+over HTTP, or an arbitrary file over XMODEM on the same WebSocket), **F3** saves HTTP diagnostics or exports
+a RAM range up to 64 MiB through `tftpput` with SHA256 before/after, **F4** toggles LINE/RAW, **F5** opens
+read-only presets (`version`, `bdinfo`, `mtd list`, `printenv`, bad-block queries), and **F10** returns.
+A single Ctrl-C at an idle `UrsusBoot>` is withheld; a second Ctrl-C within 2 s confirms it because the
+first one would stop WebFailsafe. This console mode itself does not erase or write NAND; F2 accepts data
+into RAM only.
+
+**File paths.** When a file is asked for, the program offers up to three paths already given for this
+operation in the current run (a number, or ↑↓ + Enter) and "Browse…" (`*`), the standard Windows file
+dialog; on Linux zenity or kdialog when a graphical session has one. For the stock backup there is also
+"Browse: a backup folder…" (`**`), the same Explorer window in folder mode : a backup
+folder that holds mtd16 (`mtd16.bin`, `.bin.gz`…); mtd0…mtd15 are optional, the program only
+shows how many of the 17 it found. A path is remembered as soon as it checks out, so after an error it need not be typed again. These paths are not written to disk.
 
 **Command line:**
 
@@ -298,3 +370,13 @@ stop no new write commands are sent.
 
 For a report: main menu → **6**, attach `UrsidoRescue-support-*.zip` and describe what you did.
 Review the logs for MACs/serials before publishing.
+
+## Total MF UBI disaster: UART-only or TFTP
+
+`0.2.1-test.24-mf-total-rescue` adds an MF/AN7583 path that does not depend on the old UBI layout. It is for cases where UBI metadata/FIP is damaged or unknown and the existing `fip` volume cannot be repaired.
+
+**UART-only** needs no Ethernet at all: BootROM, RAM U-Boot, FIP and BL2 all travel over UART/XMODEM. The **TFTP variant** uses the network only to preload FIP and BL2 into RAM; after UBI erasure begins, the network is no longer needed.
+
+Both variants verify the pinned payloads and their RAM copies first. One `y/N` then authorizes erasing the whole `ubi` MTD, creating a fresh UBI and static `fip` ID 4, writing/verifying the UrsusBoot FIP, and finally writing BL2 last. Old OpenWrt volumes and settings are intentionally destroyed. The final step is to boot UrsusBoot Recovery and install the MF UBI sysupgrade.
+
+If the current UBI still attaches and `fip` is present, do not use the total path; use normal boot-chain rescue so the other volumes remain intact.

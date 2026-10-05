@@ -1,0 +1,678 @@
+package main
+
+import (
+	"bytes"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"hash/crc32"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"ursidorescue/app"
+)
+
+// Expert → Install UrsusBoot (UART). The RAM U-Boot has no tftpput, so what
+// the device carries is read back to the PC as an md.l hex dump over the UART
+// and proved with the device's own crc32; the candidate is built on the PC
+// (bootfip.go) and goes back over TFTP like every other write.
+
+const uartDumpChunk = 0x10000 // one md.l command; its output stays well under the 1 MiB read cap
+
+var mdlLine = regexp.MustCompile(`(?m)^([0-9a-fA-F]{8,16}):((?: [0-9a-fA-F]{8}){1,4})`)
+
+// parseMDL turns U-Boot "md.l" output into bytes (little-endian words). The
+// lines must run contiguously from addr and cover size bytes.
+func parseMDL(out []byte, addr, size uint64) ([]byte, error) {
+	buf := make([]byte, 0, size)
+	for _, m := range mdlLine.FindAllSubmatch(out, -1) {
+		if uint64(len(buf)) >= size {
+			break
+		}
+		at, err := strconv.ParseUint(string(m[1]), 16, 64)
+		if err != nil {
+			return nil, err
+		}
+		if at != addr+uint64(len(buf)) {
+			return nil, fmt.Errorf("md.l: line at 0x%x, expected 0x%x", at, addr+uint64(len(buf)))
+		}
+		for _, w := range strings.Fields(string(m[2])) {
+			v, err := strconv.ParseUint(w, 16, 32)
+			if err != nil {
+				return nil, err
+			}
+			buf = binary.LittleEndian.AppendUint32(buf, uint32(v))
+		}
+	}
+	if uint64(len(buf)) < size {
+		return nil, fmt.Errorf("md.l: got %d of %d bytes", len(buf), size)
+	}
+	return buf[:size], nil
+}
+
+// uartDump reads size bytes of device RAM at addr over the UART. Each piece is
+// checked against the device's crc32 and read again on a mismatch.
+func (a *App) uartDump(s Serial, addr, size uint64, label string) ([]byte, error) {
+	if size%4 != 0 {
+		return nil, fmt.Errorf("dump size 0x%x is not a multiple of 4", size)
+	}
+	a.quietUART = true
+	defer func() { a.quietUART = false }()
+	out := make([]byte, 0, size)
+	for off := uint64(0); off < size; off += uartDumpChunk {
+		n := min(uint64(uartDumpChunk), size-off)
+		var last error
+		for attempt := 1; attempt <= 8; attempt++ {
+			raw, err := a.ubootCommand(s, fmt.Sprintf("md.l 0x%x 0x%x", addr+off, n/4), 5*time.Minute)
+			if err == nil {
+				var piece []byte
+				piece, err = parseMDL(raw, addr+off, n)
+				if err == nil {
+					err = a.deviceCRC(s, addr+off, n, crc32.ChecksumIEEE(piece))
+				}
+				if err == nil {
+					out = append(out, piece...)
+					last = nil
+					break
+				}
+			}
+			last = err
+			a.event(fmt.Sprintf(L("Чтение по UART: повреждённый ответ, повтор 0x%x (%d/8): %v", "UART read: damaged response, retrying 0x%x (%d/8): %v"), addr+off, attempt, err))
+			a.waitQuiet(s, 250*time.Millisecond, 1500*time.Millisecond)
+			_ = s.ResetInput()
+		}
+		if last != nil {
+			return nil, last
+		}
+		a.ui.Progress(app.Progress{Label: L("ЧТЕНИЕ", "READ"), Current: int64(off + n), Total: int64(size), Unit: "bytes",
+			Detail: fmt.Sprintf("%s: %d/%d bytes", label, off+n, size)})
+	}
+	a.ui.Progress(app.Progress{Label: L("ЧТЕНИЕ", "READ"), Done: true})
+	return out, nil
+}
+
+// deviceCRC runs crc32 on the device and requires the expected value.
+func (a *App) deviceCRC(s Serial, addr, size uint64, want uint32) error {
+	out, err := a.ubootCommand(s, fmt.Sprintf("crc32 0x%x 0x%x", addr, size), 2*time.Minute)
+	if err != nil {
+		return err
+	}
+	if !regexp.MustCompile(fmt.Sprintf(`(?i)(?:0x)?%08x`, want)).Match(out) {
+		return fmt.Errorf(L("CRC32 на устройстве не совпал с прочитанным (ожидался %08x)", "device CRC32 does not match the data read (expected %08x)"), want)
+	}
+	return nil
+}
+
+// ubiVol is one volume of "ubi info layout" (U-Boot ubi_dump_vol_info).
+type ubiVol struct {
+	ID                      int // UBI volume ID; -1 when not present in the transcript
+	Name                    string
+	Type                    int // 3 dynamic, 4 static
+	UsedBytes               uint64
+	ReservedPEBs, UsableLEB uint64
+}
+
+func (v ubiVol) capacity() uint64 { return v.ReservedPEBs * v.UsableLEB }
+
+var ubiField = regexp.MustCompile(`(?m)^\s*(?:ubi\d*:\s*)?\s*(vol_id|reserved_pebs|vol_type|usable_leb_size|used_bytes|name)\s+(\S+)`)
+
+func parseUBIVolumes(out []byte) []ubiVol {
+	var vols []ubiVol
+	for _, block := range strings.Split(string(out), "Volume information dump:")[1:] {
+		v := ubiVol{ID: -1}
+		seen := 0
+		for _, m := range ubiField.FindAllStringSubmatch(block, -1) {
+			n, _ := strconv.ParseUint(m[2], 10, 64)
+			switch m[1] {
+			case "vol_id":
+				v.ID = int(n)
+			case "reserved_pebs":
+				v.ReservedPEBs = n
+			case "vol_type":
+				v.Type = int(n)
+			case "usable_leb_size":
+				v.UsableLEB = n
+			case "used_bytes":
+				v.UsedBytes = n
+			case "name":
+				v.Name = m[2]
+			}
+			seen++
+		}
+		if seen > 0 {
+			vols = append(vols, v)
+		}
+	}
+	return vols
+}
+
+// bootLayout says what the first 0x80000 of the NAND carry.
+func (a *App) bootLayout(s Serial) (string, error) {
+	if _, err := a.ubootCommand(s, fmt.Sprintf("mtd read ubi 0x%x 0x0 0x800", loadAddr), 60*time.Second); err != nil {
+		return "", err
+	}
+	head, err := a.uartDump(s, loadAddr, 16, "ubi+0x0")
+	if err != nil {
+		return "", err
+	}
+	if bytes.HasPrefix(head, []byte("UBI#")) {
+		return "ubi", nil
+	}
+	if _, err = a.ubootCommand(s, fmt.Sprintf("mtd read bl2 0x%x 0x0 0x1000", loadAddr), 60*time.Second); err != nil {
+		return "", err
+	}
+	fip, err := a.uartDump(s, loadAddr+bootFIPOff, 16, "bl2+0x800")
+	if err != nil {
+		return "", err
+	}
+	if binary.LittleEndian.Uint32(fip) == fipMagic {
+		return "stock", nil
+	}
+	return "", errors.New(L("разметка не распознана: нет ни UBI с 0x20000, ни FIP на 0x800 — установка не применима",
+		"layout not recognised: neither UBI at 0x20000 nor a FIP at 0x800; the install does not apply"))
+}
+
+// installSteps is the wizard's overall progress (TUI top bar and panel).
+const installSteps = 6
+
+func (a *App) installPhase(n int, text string) {
+	a.ui.Progress(app.Progress{Label: L("ВСЕГО", "TOTAL"), Current: int64(n - 1), Total: installSteps, Unit: "steps", Overall: true,
+		Detail: fmt.Sprintf("%d/%d · %s", n, installSteps, text)})
+}
+
+// readPlan says what the long UART read is about to do, so minutes of md.l do
+// not look like a hang.
+func (a *App) readPlan(p Profile, layout string, size uint64) {
+	pieces := (size + uartDumpChunk - 1) / uartDumpChunk
+	a.status(L("ЧТЕНИЕ", "READ"), fmt.Sprintf(L("%s · %s · читаю %d КиБ по UART · %d × 64 КиБ со сверкой crc32 · запись ещё НЕ началась",
+		"%s · %s · reading %d KiB over the UART · %d × 64 KiB with crc32 checks · nothing written yet"),
+		strings.ToUpper(p.ID), layout, (size+1023)/1024, pieces), app.LevelInfo)
+}
+
+func (a *App) ursusBootInstallWizard() error {
+	a.showNetworkPrerequisites()
+	a.installPhase(1, L("RAM U-Boot и разметка", "RAM U-Boot and layout"))
+	pref, e := chooseProfileInteractive(a)
+	if e != nil {
+		return e
+	}
+	s, p, _, e := a.acquireRAMUBoot(pref)
+	if e != nil {
+		return e
+	}
+	defer func() { s.Close(); a.closeLog() }()
+	payload, e := os.ReadFile(filepath.Join(a.root, filepath.FromSlash(p.BootRel)))
+	if e != nil {
+		return e
+	}
+	if p.ID == "md" {
+		if _, e = mdCheckFIP(payload); e != nil {
+			return fmt.Errorf("UrsusBoot MD FIP: %w", e)
+		}
+	}
+	a.event(fmt.Sprintf(L("UrsusBoot %s для %s: %s", "UrsusBoot %s for %s: %s"), p.BootVersion, p.Model, p.BootRel))
+	layout, e := a.bootLayout(s)
+	if e != nil {
+		return e
+	}
+	if layout == "ubi" {
+		a.event(L("Разметка: UBI (OpenWrt/UrsusBoot) — обновляется только UBI-том fip, BL2 не трогается",
+			"Layout: UBI (OpenWrt/UrsusBoot); only the UBI volume fip is updated, BL2 is not touched"))
+		e = a.installUBIFIP(s, p, ursusBootImage(p, payload))
+	} else {
+		a.event(L("Разметка: стоковая Nokia — FIP на 0x800 загрузочной области",
+			"Layout: stock Nokia; FIP at 0x800 of the boot area"))
+		e = a.installStockBootArea(s, p, payload)
+	}
+	if e != nil && !errors.Is(e, errAlreadyInstalled) {
+		return e
+	}
+	a.ui.Progress(app.Progress{Label: L("ВСЕГО", "TOTAL"), Current: installSteps, Total: installSteps, Unit: "steps", Overall: true,
+		Detail: L("готово", "done")})
+	a.noteln(L("Можно выполнить reset. Нажмите Enter для reset или введите N чтобы оставить RAM U-Boot.", "Ready to reset. Press Enter to reset or type N to stay in RAM U-Boot."))
+	if a.askResetOrStay() {
+		_ = sendLine(s, "reset")
+	}
+	return nil
+}
+
+var errAlreadyInstalled = errors.New("already installed")
+
+// saveInstallFile keeps a before/target image in the session and reports it.
+func (a *App) saveInstallFile(name, label string, data []byte) (string, error) {
+	path := filepath.Join(a.sessionScratch("ursusboot"), name)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return "", err
+	}
+	a.ui.Artifact(app.Artifact{Kind: "ursusboot", Label: label, Path: path, SHA256: shaHex(data)})
+	return path, nil
+}
+
+func (a *App) reportInstall(r installReport) {
+	for _, l := range r.lines() {
+		a.noteln("  " + l)
+	}
+}
+
+func (a *App) installStockBootArea(s Serial, p Profile, payload []byte) error {
+	bad, e := a.mtdBad(s, "bl2", bl2Size)
+	if e != nil {
+		return e
+	}
+	if len(bad) > 0 {
+		return errors.New(L("bad-блок в bl2: установка заблокирована", "bad block in bl2: install blocked"))
+	}
+	if bad, e = a.mtdBad(s, "ubi", ubiSize); e != nil {
+		return e
+	}
+	for _, b := range bad {
+		if b < bootAreaSize-bl2Size {
+			return fmt.Errorf(L("bad-блок в загрузочной области ubi+0x%x: установка заблокирована", "bad block in the boot area ubi+0x%x: install blocked"), b)
+		}
+	}
+	if _, e = a.ubootCommand(s, fmt.Sprintf("mtd read bl2 0x%x 0x0 0x%x", loadAddr, bl2Size), 2*time.Minute); e != nil {
+		return e
+	}
+	if _, e = a.ubootCommand(s, fmt.Sprintf("mtd read ubi 0x%x 0x0 0x%x", loadAddr+bl2Size, bootAreaSize-bl2Size), 2*time.Minute); e != nil {
+		return e
+	}
+	a.installPhase(2, L("чтение загрузочной области", "reading the boot area"))
+	a.readPlan(p, L("сток", "stock"), bootAreaSize)
+	a.note(L("Читаю загрузочную область 512 КиБ по UART (около 3–4 минут)…", "Reading the 512 KiB boot area over the UART (about 3–4 minutes)…"))
+	live, e := a.uartDump(s, loadAddr, bootAreaSize, "boot area")
+	if e != nil {
+		return e
+	}
+	before, e := a.saveInstallFile("bootarea-before.bin", L("Бэкап загрузочной области:", "Boot area backup:"), live)
+	if e != nil {
+		return e
+	}
+	a.installPhase(3, L("проверка и сборка", "checks and build"))
+	var cand []byte
+	var rep installReport
+	if p.ID == "md" {
+		cand, rep, e = mdPlaceFIP(live, payload)
+	} else {
+		cand, rep, e = mfDeriveBootArea(live, payload)
+	}
+	if e != nil {
+		return fmt.Errorf(L("кандидат не собран: %w", "candidate not built: %w"), e)
+	}
+	a.reportInstall(rep)
+	if bytes.Equal(cand, live) {
+		a.status("OK", fmt.Sprintf(L("UrsusBoot %s уже установлен — запись не нужна", "UrsusBoot %s is already installed; nothing to write"), p.BootVersion), app.LevelOK)
+		return errAlreadyInstalled
+	}
+	var blocks []int
+	for i := 0; i < bootAreaSize/eraseSize; i++ {
+		if !bytes.Equal(cand[i*eraseSize:(i+1)*eraseSize], live[i*eraseSize:(i+1)*eraseSize]) {
+			blocks = append(blocks, i)
+		}
+	}
+	target, e := a.saveInstallFile("bootarea-target.bin", L("Новая загрузочная область:", "New boot area:"), cand)
+	if e != nil {
+		return e
+	}
+	a.installPhase(4, L("TFTP в RAM", "TFTP into RAM"))
+	if _, e = a.tftpLoad(s, target, "ursido-bootarea.bin", loadAddr); e != nil {
+		return e
+	}
+	var spans []string
+	for _, i := range blocks {
+		spans = append(spans, fmt.Sprintf("0x%05x", i*eraseSize))
+	}
+	a.noteln(L("\nВсе проверки чтения пройдены. Будут перезаписаны только изменённые блоки загрузочной области.", "\nAll read-only gates passed. Only the changed blocks of the boot area will be rewritten."))
+	if e = a.confirmOp(app.Write, "INSTALL URSUSBOOT", []string{
+		fmt.Sprintf(L("запись UrsusBoot %s в загрузочную область NAND: блоки %s (по 128 КиБ)", "write UrsusBoot %s into the NAND boot area: blocks %s (128 KiB each)"), p.BootVersion, strings.Join(spans, ", ")),
+		L("BootROM-префикс 0x0–0x7FF и stock env 0x7C000 остаются байт-в-байт", "the BootROM prefix 0x0–0x7FF and the stock env 0x7C000 stay byte-exact"),
+		L("сверка CRC32 каждого блока; блок BL2 (0x00000) — последним", "check every block's CRC32; the BL2 block (0x00000) last"),
+		L("бэкап: ", "backup: ") + before,
+	}); e != nil {
+		return e
+	}
+	a.cancelBlocked(L("запись загрузочной области и её проверка", "writing the boot area and its readback"))
+	a.installPhase(5, fmt.Sprintf(L("запись: %d блок(а), CRC после каждого", "writing: %d block(s), CRC after each"), len(blocks)))
+	// ubi blocks first, the bl2 block (the first stage) last.
+	order := append([]int(nil), blocks...)
+	if len(order) > 0 && order[0] == 0 {
+		order = append(order[1:], 0)
+	}
+	for _, i := range order {
+		block := cand[i*eraseSize : (i+1)*eraseSize]
+		part, off := "ubi", uint64(i*eraseSize-bl2Size)
+		if i == 0 {
+			part, off = "bl2", 0
+		}
+		if e = a.ubootPersistentOnce(s, fmt.Sprintf("mtd erase %s 0x%x 0x%x", part, off, eraseSize), 3*time.Minute); e != nil {
+			return e
+		}
+		if e = a.ubootPersistentOnce(s, fmt.Sprintf("mtd write %s 0x%x 0x%x 0x%x", part, loadAddr+uint64(i*eraseSize), off, eraseSize), 3*time.Minute); e != nil {
+			return e
+		}
+		if e = a.readbackCRC(s, part, off, eraseSize, verifyAddr, crc32.ChecksumIEEE(block)); e != nil {
+			return e
+		}
+		a.status("OK", fmt.Sprintf(L("блок 0x%05x записан и сверен", "block 0x%05x written and verified"), i*eraseSize), app.LevelOK)
+	}
+	a.installPhase(6, L("итоговая сверка всей области", "final readback of the whole area"))
+	if e = a.bootAreaReadback(s, crc32.ChecksumIEEE(cand)); e != nil {
+		return e
+	}
+	a.cancelNow()
+	a.event(L("UrsusBoot записан, проверка PASS; SHA256 области=", "UrsusBoot written, readback PASS; boot area SHA256=") + rep.TargetSHA)
+	return nil
+}
+
+// fipImage is what goes into the UBI volume fip: its name for the operator,
+// the typed confirmation, and how the candidate is built from the volume's
+// current content.
+type fipImage struct {
+	name   string // "UrsusBoot 0.1.0-alpha5-t67", "vanilla U-Boot …"
+	phrase string
+	build  func(cur []byte) ([]byte, installReport, error)
+}
+
+func ursusBootImage(p Profile, payload []byte) fipImage {
+	img := fipImage{name: "UrsusBoot " + p.BootVersion, phrase: "INSTALL URSUSBOOT"}
+	img.build = func(cur []byte) ([]byte, installReport, error) {
+		if p.ID == "md" {
+			return mdUBIFIP(cur, payload)
+		}
+		return mfDeriveFIP(cur, payload)
+	}
+	return img
+}
+
+// installMDUBIFIPNoRead is an emergency MD/UBI path for a device whose
+// current fip volume cannot be dumped reliably over a damaged UART TX line.
+// The MD update FIP is a pinned complete image, so it does not depend on the
+// current volume contents. We still validate the UBI metadata, validate the
+// pinned FIP locally, transfer it to RAM, write only volume "fip", then verify
+// the written volume by device-side CRC32. BL2 is never touched.
+func (a *App) installMDUBIFIPNoRead(s Serial, p Profile, payload []byte) error {
+	layout, e := mdCheckFIP(payload)
+	if e != nil {
+		return fmt.Errorf("UrsusBoot MD FIP: %w", e)
+	}
+	if _, e = a.ubootCommand(s, "ubi part ubi", 3*time.Minute); e != nil {
+		return fmt.Errorf(L("не удалось подключить UBI: %w", "UBI attach failed: %w"), e)
+	}
+	out, e := a.ubootCommand(s, "ubi info layout", 60*time.Second)
+	if e != nil {
+		return e
+	}
+	var fip []ubiVol
+	for _, v := range parseUBIVolumes(out) {
+		if v.Name == "fip" {
+			fip = append(fip, v)
+		}
+	}
+	if len(fip) != 1 {
+		return fmt.Errorf(L("ожидался один UBI-том fip, найдено %d", "expected one UBI volume fip, found %d"), len(fip))
+	}
+	vol := fip[0]
+	if vol.Type != 4 {
+		return fmt.Errorf(L("UBI-том fip не static (vol_type=%d) — установка заблокирована", "UBI volume fip is not static (vol_type=%d); install blocked"), vol.Type)
+	}
+	if cap := vol.capacity(); cap != 0 && uint64(len(payload)) > cap {
+		return fmt.Errorf(L("новый FIP (%d) больше тома fip (%d)", "the new FIP (%d) is larger than the fip volume (%d)"), len(payload), cap)
+	}
+
+	a.installPhase(2, L("аварийный режим: чтение FIP пропущено", "rescue mode: current FIP read skipped"))
+	a.status(L("АВАРИЙНО", "RESCUE"), L(
+		"MD/UBI: текущий том fip намеренно НЕ читается по UART и НЕ резервируется; будет записан встроенный проверенный UrsusBoot FIP",
+		"MD/UBI: the current fip volume is intentionally NOT read over UART and is NOT backed up; the pinned verified UrsusBoot FIP will be written directly"),
+		app.LevelWarn)
+
+	a.installPhase(3, L("проверка встроенного FIP", "validating the pinned FIP"))
+	nt := layout.find(uuidNTFW)[0]
+	a.event(fmt.Sprintf(L(
+		"UrsusBoot MD FIP PASS: %d байт · entries=%d · NT_FW=0x%x+0x%x · SHA256=%s",
+		"UrsusBoot MD FIP PASS: %d bytes · entries=%d · NT_FW=0x%x+0x%x · SHA256=%s"),
+		len(payload), len(layout.Entries), nt.Off, nt.Size, shaHex(payload)))
+
+	target, e := a.saveInstallFile("fip-target.bin", L("Новый FIP:", "New FIP:"), payload)
+	if e != nil {
+		return e
+	}
+	a.installPhase(4, L("TFTP в RAM", "TFTP into RAM"))
+	if _, e = a.tftpLoad(s, target, "ursido-fip.bin", loadAddr); e != nil {
+		return e
+	}
+
+	a.noteln(L(
+		"\nАварийный MD/UBI режим: предварительное чтение повреждённого fip отключено. Будет перезаписан ТОЛЬКО UBI-том fip.",
+		"\nEmergency MD/UBI mode: the pre-read of the damaged fip is disabled. ONLY the UBI volume fip will be overwritten."))
+	if e = a.confirmOp(app.Write, "INSTALL URSUSBOOT", []string{
+		fmt.Sprintf(L("прямая запись UrsusBoot %s в UBI-том fip: %d байт", "directly write UrsusBoot %s into UBI volume fip: %d bytes"), p.BootVersion, len(payload)),
+		L("текущий fip НЕ читается и резервная копия НЕ создаётся", "the current fip is NOT read and NO backup is created"),
+		L("после записи том читается только устройством в RAM и сверяется CRC32; длинного md.l-дампа по UART нет", "after writing, the device reads the volume only into RAM and checks CRC32; there is no long md.l dump over UART"),
+		L("BL2 не трогается", "BL2 is not touched"),
+	}); e != nil {
+		return e
+	}
+
+	a.cancelBlocked(L("запись тома fip и её проверка", "writing the fip volume and its readback"))
+	a.installPhase(5, L("прямая запись тома fip", "direct fip volume write"))
+	if e = a.ubiWrite(s, "fip", uint64(len(payload))); e != nil {
+		return e
+	}
+	a.installPhase(6, L("CRC32 после записи", "post-write CRC32"))
+	if e = a.ubiVerify(s, "fip", uint64(len(payload)), crc32.ChecksumIEEE(payload)); e != nil {
+		return e
+	}
+	a.cancelNow()
+	a.event(fmt.Sprintf(L(
+		"UrsusBoot %s напрямую записан в том fip без предварительного UART-дампа, проверка PASS; SHA256=",
+		"UrsusBoot %s was written directly to fip without the preliminary UART dump, verification PASS; SHA256="),
+		p.BootVersion) + shaHex(payload))
+	return nil
+}
+
+func (a *App) installUBIFIP(s Serial, p Profile, img fipImage) error {
+	if _, e := a.ubootCommand(s, "ubi part ubi", 3*time.Minute); e != nil {
+		return fmt.Errorf(L("не удалось подключить UBI: %w", "UBI attach failed: %w"), e)
+	}
+	out, e := a.ubootCommand(s, "ubi info layout", 60*time.Second)
+	if e != nil {
+		return e
+	}
+	var fip []ubiVol
+	for _, v := range parseUBIVolumes(out) {
+		if v.Name == "fip" {
+			fip = append(fip, v)
+		}
+	}
+	if len(fip) != 1 {
+		return fmt.Errorf(L("ожидался один UBI-том fip, найдено %d", "expected one UBI volume fip, found %d"), len(fip))
+	}
+	vol := fip[0]
+	if vol.Type != 4 {
+		return fmt.Errorf(L("UBI-том fip не static (vol_type=%d) — установка заблокирована", "UBI volume fip is not static (vol_type=%d); install blocked"), vol.Type)
+	}
+	if vol.UsedBytes == 0 || vol.UsedBytes > bootFIPMax {
+		return fmt.Errorf(L("UBI-том fip: недопустимый размер данных %d", "UBI volume fip: invalid data size %d"), vol.UsedBytes)
+	}
+	if _, e = a.ubootCommand(s, fmt.Sprintf("ubi read 0x%x fip 0x%x", loadAddr, vol.UsedBytes), 5*time.Minute); e != nil {
+		return e
+	}
+	a.installPhase(2, L("чтение текущего FIP", "reading the current FIP"))
+	a.readPlan(p, "UBI fip", (vol.UsedBytes+3)&^3)
+	a.note(L("Читаю текущий том fip по UART (несколько минут)…", "Reading the current fip volume over the UART (a few minutes)…"))
+	cur, e := a.uartDump(s, loadAddr, (vol.UsedBytes+3)&^3, "fip")
+	if e != nil {
+		return e
+	}
+	cur = cur[:vol.UsedBytes]
+	before, e := a.saveInstallFile("fip-before.bin", L("Бэкап тома fip:", "fip volume backup:"), cur)
+	if e != nil {
+		return e
+	}
+	a.installPhase(3, L("проверка и сборка", "checks and build"))
+	var cand []byte
+	var rep installReport
+	cand, rep, e = img.build(cur)
+	if e != nil {
+		return fmt.Errorf(L("кандидат не собран: %w", "candidate not built: %w"), e)
+	}
+	a.reportInstall(rep)
+	if bytes.Equal(cand, cur) {
+		a.status("OK", fmt.Sprintf(L("%s уже установлен — запись не нужна", "%s is already installed; nothing to write"), img.name), app.LevelOK)
+		return errAlreadyInstalled
+	}
+	if c := vol.capacity(); c != 0 && uint64(len(cand)) > c {
+		return fmt.Errorf(L("новый FIP (%d) больше тома fip (%d)", "the new FIP (%d) is larger than the fip volume (%d)"), len(cand), c)
+	}
+	target, e := a.saveInstallFile("fip-target.bin", L("Новый FIP:", "New FIP:"), cand)
+	if e != nil {
+		return e
+	}
+	a.installPhase(4, L("TFTP в RAM", "TFTP into RAM"))
+	if _, e = a.tftpLoad(s, target, "ursido-fip.bin", loadAddr); e != nil {
+		return e
+	}
+	a.noteln(L("\nВсе проверки чтения пройдены. Будет перезаписан ТОЛЬКО UBI-том fip.", "\nAll read-only gates passed. ONLY the UBI volume fip will be overwritten."))
+	if e = a.confirmOp(app.Write, img.phrase, []string{
+		fmt.Sprintf(L("перезапись UBI-тома fip: %s, %d байт", "overwrite the UBI volume fip: %s, %d bytes"), img.name, len(cand)),
+		L("чтение тома обратно и сверка CRC32; BL2 не трогается", "read the volume back and compare CRC32; BL2 is not touched"),
+		L("бэкап: ", "backup: ") + before,
+	}); e != nil {
+		return e
+	}
+	a.cancelBlocked(L("запись тома fip и её проверка", "writing the fip volume and its readback"))
+	a.installPhase(5, L("запись тома fip", "writing the fip volume"))
+	if e = a.ubiWrite(s, "fip", uint64(len(cand))); e != nil {
+		return e
+	}
+	a.installPhase(6, L("чтение тома обратно и CRC32", "volume readback and CRC32"))
+	if e = a.ubiVerify(s, "fip", uint64(len(cand)), crc32.ChecksumIEEE(cand)); e != nil {
+		return e
+	}
+	a.cancelNow()
+	a.event(fmt.Sprintf(L("%s записан в том fip, проверка PASS; SHA256=", "%s written to the fip volume, readback PASS; SHA256="), img.name) + rep.TargetSHA)
+	return nil
+}
+
+// ubiWriteVerified writes size bytes at loadAddr into a UBI volume, reads it
+// back to verifyAddr and requires the CRC32.
+func (a *App) ubiWriteVerified(s Serial, vol string, size uint64, crc uint32) error {
+	if e := a.ubiWrite(s, vol, size); e != nil {
+		return e
+	}
+	return a.ubiVerify(s, vol, size, crc)
+}
+
+func (a *App) ubiWrite(s Serial, vol string, size uint64) error {
+	// Exactly once: if UART loses the completion text, ubiVerify() below is
+	// the authority. Re-sending a destructive write just because its ACK text
+	// was damaged is explicitly forbidden.
+	return a.ubootPersistentOnce(s, fmt.Sprintf("ubi write 0x%x %s 0x%x", loadAddr, vol, size), 5*time.Minute)
+}
+
+func (a *App) ubiVerify(s Serial, vol string, size uint64, crc uint32) error {
+	if _, e := a.ubootCommand(s, fmt.Sprintf("ubi read 0x%x %s 0x%x", verifyAddr, vol, size), 5*time.Minute); e != nil {
+		return e
+	}
+	out, e := a.ubootCommand(s, fmt.Sprintf("crc32 0x%x 0x%x", verifyAddr, size), 60*time.Second)
+	if e != nil {
+		return e
+	}
+	if !regexp.MustCompile(fmt.Sprintf(`(?i)(?:0x)?%08x`, crc)).Match(out) {
+		return errors.New(L("CRC32 FIP после записи не совпал", "FIP readback CRC32 mismatch"))
+	}
+	return nil
+}
+
+// bootAreaReadback reads the whole 0x80000 boot area back from the NAND and
+// requires the candidate's CRC32: the blocks were checked one by one, this
+// proves the area as the BootROM will see it.
+func (a *App) bootAreaReadback(s Serial, crc uint32) error {
+	if _, e := a.ubootCommand(s, fmt.Sprintf("mw.b 0x%x 0x00 0x%x", verifyAddr, bootAreaSize), 2*time.Minute); e != nil {
+		return e
+	}
+	if _, e := a.ubootCommand(s, fmt.Sprintf("mtd read bl2 0x%x 0x0 0x%x", verifyAddr, bl2Size), 2*time.Minute); e != nil {
+		return e
+	}
+	if _, e := a.ubootCommand(s, fmt.Sprintf("mtd read ubi 0x%x 0x0 0x%x", verifyAddr+bl2Size, bootAreaSize-bl2Size), 2*time.Minute); e != nil {
+		return e
+	}
+	return a.deviceCRC(s, verifyAddr, bootAreaSize, crc)
+}
+
+// vanillaImage is the pinned vanilla OpenWrt U-Boot FIP of the UrsusBoot
+// release (the one UrsusFlasher swaps UrsusBoot for), written as is.
+func vanillaImage(p Profile, fip []byte) fipImage {
+	img := fipImage{name: "vanilla U-Boot " + p.BootVersion, phrase: "INSTALL VANILLA UBOOT"}
+	img.build = func(cur []byte) ([]byte, installReport, error) {
+		l, err := parseFIP(fip, uint64(len(fip)))
+		if err != nil {
+			return nil, installReport{}, fmt.Errorf("vanilla FIP: %w", err)
+		}
+		if len(fip) > bootFIPMax || len(l.find(uuidNTFW)) != 1 {
+			return nil, installReport{}, errors.New("vanilla FIP: no single NT_FW or too large")
+		}
+		r := installReport{Method: "vanilla-pinned-ubi", SourceSHA: shaHex(cur), TargetSHA: shaHex(fip),
+			Entries: len(l.Entries), TargetEnd: l.End}
+		nt := l.find(uuidNTFW)[0]
+		r.NTOff, r.TargetNTSize = nt.Off, nt.Size
+		if cl, err := parseFIP(cur, uint64(len(cur))); err == nil {
+			r.SourceEnd = cl.End
+			if nts := cl.find(uuidNTFW); len(nts) == 1 {
+				r.SourceNTSize = nts[0].Size
+			}
+		}
+		return append([]byte(nil), fip...), r, nil
+	}
+	return img
+}
+
+// vanillaUBootWizard puts the pinned vanilla OpenWrt U-Boot back into the UBI
+// volume fip over the UART (return from UrsusBoot, or update an older
+// vanilla). Vanilla U-Boot lives only on the OpenWrt UBI layout; the stock
+// layout is refused.
+func (a *App) vanillaUBootWizard() error {
+	a.showNetworkPrerequisites()
+	a.installPhase(1, L("RAM U-Boot и разметка", "RAM U-Boot and layout"))
+	pref, e := chooseProfileInteractive(a)
+	if e != nil {
+		return e
+	}
+	s, p, _, e := a.acquireRAMUBoot(pref)
+	if e != nil {
+		return e
+	}
+	defer func() { s.Close(); a.closeLog() }()
+	fip, e := os.ReadFile(filepath.Join(a.root, filepath.FromSlash(p.VanillaRel)))
+	if e != nil {
+		return e
+	}
+	img := vanillaImage(p, fip)
+	a.event(fmt.Sprintf(L("%s для %s: %s", "%s for %s: %s"), img.name, p.Model, p.VanillaRel))
+	layout, e := a.bootLayout(s)
+	if e != nil {
+		return e
+	}
+	if layout != "ubi" {
+		return errors.New(L("разметка стоковая Nokia: vanilla U-Boot работает только в UBI-разметке OpenWrt (preloader BL2 + UBI-том fip). "+
+			"Со стока — «Установить UrsusBoot (UART)» или переход на OpenWrt UBI через UrsusFlasher; во flash ничего не записано",
+			"the layout is stock Nokia: vanilla U-Boot runs only on the OpenWrt UBI layout (preloader BL2 + UBI volume fip). "+
+				"From stock use Install UrsusBoot (UART) or move to OpenWrt UBI with UrsusFlasher; nothing was written"))
+	}
+	a.event(L("Разметка: UBI — обновляется только UBI-том fip, BL2 не трогается",
+		"Layout: UBI; only the UBI volume fip is updated, BL2 is not touched"))
+	e = a.installUBIFIP(s, p, img)
+	if e != nil && !errors.Is(e, errAlreadyInstalled) {
+		return e
+	}
+	a.ui.Progress(app.Progress{Label: L("ВСЕГО", "TOTAL"), Current: installSteps, Total: installSteps, Unit: "steps", Overall: true,
+		Detail: L("готово", "done")})
+	a.noteln(L("Можно выполнить reset. Нажмите Enter для reset или введите N чтобы оставить RAM U-Boot.", "Ready to reset. Press Enter to reset or type N to stay in RAM U-Boot."))
+	if a.askResetOrStay() {
+		_ = sendLine(s, "reset")
+	}
+	return nil
+}

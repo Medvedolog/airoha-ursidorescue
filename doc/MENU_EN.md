@@ -1,6 +1,6 @@
 # UrsidoRescue menus: every item in detail
 
-[Русская версия](MENU_RU.md) · [Contents](README.md) · version 0.2.0-test17
+[Русская версия](MENU_RU.md) · [Contents](README.md) · version 0.2.1-test.18
 
 This page explains what every menu item does, in which order, which commands reach the router and
 where the program stops by itself. Wiring and network setup are in [GUIDE_EN.md](GUIDE_EN.md).
@@ -17,10 +17,10 @@ Contents:
   - [Confirmation phrases](#confirmation-phrases)
 - [Main menu](#main-menu)
   - [1. Restore stock Nokia firmware from mtd16/all_flash](#1-restore-stock-nokia-firmware-from-an-mtd16all_flash-backup)
-  - [2. Repair OpenWrt boot / replace the FIP](#2-repair-openwrt-boot--replace-the-fip)
+  - [2. Restore the FIP if UBI is intact](#2-restore-the-fip-if-ubi-is-intact)
   - [3. Restore a full physical NAND image](#3-restore-a-full-physical-nand-image-256-mib)
   - [4. Boot an OpenWrt recovery ITB from RAM](#4-boot-an-openwrt-recovery-itb-from-ram)
-  - [5. NAND / UBI / U-Boot diagnostics](#5-nand--ubi--u-boot-diagnostics)
+  - [5. NAND / MTD / U-Boot diagnostics](#5-nand--mtd--u-boot-diagnostics)
   - [6. Build a log bundle for a report](#6-build-a-log-bundle-for-a-report)
   - [7. Porting / hardware discovery](#7-porting--hardware-discovery)
   - [8. Expert mode](#8-expert-mode)
@@ -64,6 +64,11 @@ The program lists the ports it finds:
 Enter a list number, a name (`COM6`, `/dev/ttyUSB0`), or on Windows just `6` → `COM6`. With one port,
 Enter picks it. Settings are always 115200 8N1, no flow control.
 
+A port held by another program (PuTTY, Arduino IDE, another terminal or a second UrsidoRescue) is not
+an error: the program says so, asks you to close that program and offers retry, another port or cancel.
+On Linux a busy port shows up through its exclusive lock (`flock`), which terminals such as picocom
+also take.
+
 ### Getting a RAM U-Boot through the BootROM
 
 The common procedure for main menu items 1–5, expert items 2–5 and the Porting Collector RAM U-Boot
@@ -83,7 +88,7 @@ mode. **Nothing is written to flash.**
    (up to 180 s) and checks that the SoC did not change.
 7. XMODEM-CRC sends the RAM FIP (BL31 + RECOVERY_SAFE U-Boot). XMODEM rules (details in
    [GUIDE_EN.md](GUIDE_EN.md#xmodem)):
-   - 128-byte blocks, ACK wait up to 2 s, **at most 8 attempts** per block; NAK or `C` retries only
+   - 128-byte blocks, ACK wait up to 3 s, **at most 16 attempts** per block; NAK or `C` retries only
      that block at once;
    - a single `CAN` is line noise; a receiver abort needs **`CAN CAN`**;
    - after the last block is ACKed: EOT with a 0.9 s wait; retried only on an explicit NAK (up to
@@ -180,7 +185,7 @@ While an operation runs, **Ctrl+C is the STOP button**, and the core decides:
 
 A second Ctrl+C within 3 seconds forces the program to exit (in an unavailable phase the device may
 be left unbootable). Outside an operation Ctrl+C ends the program as before. In the UART terminal
-and UART Shell Ctrl+C still goes to the router. Every press is recorded in the session's
+and the transparent UART console Ctrl+C still goes to the router. Every press is recorded in the session's
 `operations.jsonl` (`stop_requested` / `stop_refused`).
 
 ---
@@ -190,10 +195,10 @@ and UART Shell Ctrl+C still goes to the router. Every press is recorded in the s
 ```
 Main menu
   1. Restore stock Nokia firmware from an mtd16/all_flash backup
-  2. Repair OpenWrt boot / replace the FIP
+  2. Restore the FIP if UBI is intact
   3. Restore a full physical NAND image (256 MiB)
   4. Boot an OpenWrt recovery ITB from RAM
-  5. NAND / UBI / U-Boot diagnostics
+  5. NAND / MTD / U-Boot diagnostics
   6. Build a log bundle for a report
   7. PORTING / HARDWARE DISCOVERY (read-only probe of new Airoha devices)
   8. Expert mode
@@ -241,7 +246,7 @@ the whole stock area), UART, an Ethernet cable.
 **Why BL2 last:** while the old BL2 is in place, a half-written stock area does not stop you from
 entering the BootROM again and repeating. A broken BL2 on top of a half-written rest is the worst case.
 
-### 2. Repair OpenWrt boot / replace the FIP
+### 2. Restore the FIP if UBI is intact
 
 **Why:** OpenWrt in UBI is intact but does not boot because the loader in the `fip` UBI volume
 (BL31 + U-Boot) is damaged or wrong.
@@ -271,7 +276,7 @@ entering the BootROM again and repeating. A broken BL2 on top of a half-written 
 
 1. Path to the image; the size must be **exactly** `0x10000000` (256 MiB). The SHA256 is printed.
 2. Profile → RAM U-Boot.
-3. `mtd bad bl2` and `mtd bad ubi`: in 0.2.0-test17 **any** bad block → stop. A raw image carries
+3. `mtd bad bl2` and `mtd bad ubi`: in 0.2.1-test.18 **any** bad block → stop. A raw image carries
    another chip's bad-block layout; writing it over a NAND with bad blocks without understanding
    the format is unsafe.
 4. Network; the image is split in `physical-<time>/` inside the session into `bl2.bin` and 8 MiB `ubi-NN.bin`.
@@ -294,7 +299,7 @@ touching flash, e.g. to take a backup or sysupgrade from there.
 5. For 60 seconds the UART output is shown and logged, then back to the menu. Ctrl+C on the PC is
    **not** forwarded to the router here. Continue through the terminal (Expert → 1) or the network.
 
-### 5. NAND / UBI / U-Boot diagnostics
+### 5. NAND / MTD / U-Boot diagnostics
 
 **Why:** see the NAND state before a repair or for a report.
 
@@ -409,25 +414,51 @@ A probe ends with a result code (also the command-line exit code):
 
 ```
 Expert mode
-  1. UART terminal (↑/↓ history, manual XMODEM, logging)
+  1. UART terminal + XMODEM (↑/↓ history, line input, logging)
   2. Start RAM U-Boot and leave the prompt
   3. Write an existing UBI volume from a file
   4. Write a raw range into MTD bl2/ubi
   5. Diagnostics
-  6. UART Shell (transparent passthrough, sends nothing by itself)
+  6. Transparent UART console (sends nothing by itself)
+  7. Install UrsusBoot (UART, MD/MF)
+  8. Return or update vanilla U-Boot (UART, UBI)
+  9. UrsusBoot Ethernet console (WebSocket, F2/F3/F5)
   0. Back
 ```
 
 An error in any expert item returns to the **main** menu.
 
-#### Expert 1. UART terminal
+In the TUI the same items are ordered by risk: the transparent UART console, the UART terminal +
+XMODEM, the RAM U-Boot, then the UrsusBoot install, the UBI volume write and, last, the raw MTD write.
+The risk shows right under each item: `MANUAL`, `RAM only`, `WRITE`, `RAW WRITE` (`ERASE` in Main).
+The text console keeps its numbers.
+
+#### Expert 9. UrsusBoot Ethernet console
+
+For an already running UrsusBoot/WebFailsafe; no UART is needed. The client connects to `/ws/console`
+and validates `Sec-WebSocket-Accept`, subprotocol `ursusboot-console-v1`, and the
+`product=UrsusBoot` hello. It defaults to `192.168.1.1`; override with
+`URSUSBOOT_IP`/`NOKIA_ROUTER_IP`.
+
+- **F2 ↑ file**: initramfs/firmware/FIP/preloader over HTTP into RAM; option 6 sends an arbitrary
+  file through `loadx` + XMODEM on the same WebSocket and verifies the RAM SHA256.
+- **F3 ↓ file**: save HTTP diagnostics or export an arbitrary RAM range up to 64 MiB through
+  `tftpput`; UrsidoRescue's built-in TFTP receiver saves it and verifies SHA256 before/after.
+- **F4** toggles line/raw; **F5** opens read-only presets (`version`, `bdinfo`, `mtd list`,
+  `printenv`, `mtd bad bl2/ubi`, `help`); **F10** exits.
+- Ctrl-C at an idle `UrsusBoot>` needs a second press within 2 s because one Ctrl-C would stop WebFailsafe.
+
+This mode itself never starts boot/write/erase. HTTP uploads stop in RAM; UrsusFlasher's destructive
+NAND presets are intentionally not duplicated here as a second write engine.
+
+#### Expert 1. UART terminal + XMODEM
 
 Port choice → the session's `uart.log` → the full terminal (see
 [below](#uart-terminal-keys-and-menu)). It sends nothing by itself and holds no passwords.
 
 #### Expert 2. Start RAM U-Boot and leave the prompt
 
-Profile → the standard RAM U-Boot procedure (including the geometry check) → a UART Shell opens on
+Profile → the standard RAM U-Boot procedure (including the geometry check) → the transparent UART console opens on
 the same port. From there you work in U-Boot by hand; Ctrl+] or Ctrl+Q returns to the menu. Useful
 when you need a command no wizard offers.
 
@@ -457,13 +488,75 @@ item does not check the bad-block map.
 
 #### Expert 5. Diagnostics
 
-Same as [main menu item 5](#5-nand--ubi--u-boot-diagnostics).
+Same as [main menu item 5](#5-nand--mtd--u-boot-diagnostics).
 
-#### Expert 6. UART Shell
+#### Expert 6. Transparent UART console
 
 Port choice → the session's `uart.log` → a simplified terminal: the same low-latency raw
 mode but without the Ctrl+] menu (Ctrl+] and Ctrl+Q exit). No automatic `x`/Enter/Ctrl-C is sent,
 handy for simply "watching what the router says".
+
+#### Expert 7. Install UrsusBoot (UART, MD/MF)
+
+A persistent UrsusBoot 0.1.0-alpha5-t67 install over the UART and the RAM U-Boot only: no Web, no
+Telnet, no UrsusFlasher. The new boot area is built **from what this device carries now**; no
+static image (install-mtd0) is written.
+
+1. Profile → RAM U-Boot (as in item 1).
+2. Layout: `UBI#` at the start of `ubi` (NAND 0x20000) means **UBI** (OpenWrt / UrsusBoot); a FIP
+   header at `bl2+0x800` means **stock Nokia**; anything else is refused.
+3. The RAM U-Boot has no `tftpput`, so the current content is read to the PC over the UART with
+   `md.l` in 64 KiB pieces; each piece is checked against the device's own `crc32` (and read again
+   on a mismatch). 512 KiB take about 3–4 minutes. The data is kept in the session as a backup
+   (`ursusboot/bootarea-before.bin` or `fip-before.bin`).
+4. The candidate:
+   - **MD**: the pinned `ursusboot-md-0.1.0-alpha5-t67-update.fip` (its TOC, NT_FW ending before the
+     first certificate `0x77800` and the Airoha checksum are proved) goes to physical `0x800`; on
+     stock the live FIP must carry one BL2 (Trusted Boot Firmware) and the stock env CRC must hold;
+   - **MF**: **only** the final NT_FW (BL33) payload of the live FIP is replaced with the pinned
+     `u-boot.runtime.lzma`; the NT_FW size and the FIP end in the TOC are updated, the alignment
+     comes from the FIP itself; every other entry, BL31, the prefix and the env stay byte-exact (a
+     port of UrsusFlasher 0.2.67 `mf_persistent`).
+   The BootROM prefix `0x0–0x7FF` and the stock env `0x7C000–0x7FFFF` never change. If the
+   candidate equals what was read, it reports "already installed" and writes nothing.
+5. **Stock:** no bad blocks in `bl2` or the first `0x60000` of `ubi`. The candidate over TFTP →
+   RAM check → typed `INSTALL URSUSBOOT` → **only the changed** 128 KiB blocks are erased and
+   written, each checked by CRC32, the BL2 block (`0x00000`) last; then the whole `0x80000` area is
+   read back and CRC32-checked as one.
+   **UBI:** `ubi part ubi` → exactly one **static** `fip` volume → the candidate over TFTP →
+   `INSTALL URSUSBOOT` → `ubi write` + `ubi read` + CRC32. BL2 is not touched.
+6. Reset or stay in the RAM U-Boot.
+
+In the TUI the overall progress runs through 6 steps: RAM U-Boot and layout → read → checks and
+build → TFTP → write → final readback; before the read it says what is read and that nothing was
+written yet.
+
+STOP before the write (the UART read included) acts at once; the write and its readback are not
+interrupted.
+
+On hardware: on MF the same method (UrsusFlasher 0.2.67 over telnet, stock Nokia) booted and
+survived the move to UBI; the UrsidoRescue UART path itself is not hardware-tested yet.
+
+#### Expert 8. Return or update vanilla U-Boot (UART, UBI)
+
+Writes the pinned vanilla OpenWrt U-Boot from the UrsusFlasher 0.2.67 kit, of the same UrsusBoot t67
+release (`vanilla-u-boot-md|mf-0.1.0-alpha5-t67.fip`, SHA256 pinned in the profiles and equal to the
+UrsusBoot provenance), into the UBI volume `fip`. It is the UART path for what UrsusFlasher does as
+its last step: replace UrsusBoot with vanilla, or update an older vanilla.
+
+1. Profile → RAM U-Boot → layout detection, as in item 7.
+2. **OpenWrt UBI layout only** (preloader BL2 + the `fip` volume). The stock layout is refused and
+   nothing is written: vanilla U-Boot would not boot there; from stock use item 7 or move to UBI
+   with UrsusFlasher.
+3. `ubi part ubi` → exactly one **static** `fip` volume → its content is read over the UART (`md.l` +
+   `crc32`) and kept in the session (`ursusboot/fip-before.bin`).
+4. If the volume already holds exactly this vanilla: "already installed", nothing to write.
+5. The image over TFTP → RAM check → typed `INSTALL VANILLA UBOOT` → `ubi write` → `ubi read` +
+   CRC32. BL2 is not touched. Progress: the same 6 steps as item 7.
+
+Putting UrsusBoot back: on MD with item 7 (it writes the pinned FIP whole). On MF item 7 refuses over
+this vanilla with nothing written: the MF UrsusBoot is built by replacing BL33 in the current FIP, and
+the vanilla FIP entries are not aligned (like UrsusFlasher, the wizard requires 16-byte alignment).
 
 ---
 
@@ -477,9 +570,16 @@ U-Boot). 115200 8N1. Everything received and sent is logged.
 |---|---|
 | **Ctrl+]** | local menu (not sent to the router) |
 | **Ctrl+Q** | quick exit (not sent to the router) |
+| **F2 / F3** | XMODEM send / receive without the menu (the same as `s` / `r` in the Ctrl+] menu) |
+| **F4** | raw / line mode (the same as `l`) |
+| **F10** | quit (the same as `q`) |
 | **Ctrl+P** | toggle the local pager: output pauses per window height, Enter shows the next page. The UART keeps being read and logged meanwhile (up to 4 MiB queued). Fullscreen programs (`top`, `vi`, `less`) are detected from ANSI sequences; the pager switches itself off and hands them the screen |
 | **Ctrl+C / Ctrl+Z** | forwarded to the router as `0x03` / `0x1A` (interrupt / suspend) |
 | characters ≥ 0x80 | blocked locally with a keyboard-layout warning (Cyrillic in a command is almost always a mistake). XMODEM is unaffected |
+
+The F-keys are the terminal's own commands while no fullscreen program runs on the router; while one
+does (`mc`, `vi`, `top` in the alternate screen), the F-keys go to it. Ctrl+S and Ctrl+R are left free on
+purpose: they are XOFF and history search in the router's shell.
 
 **Ctrl+] menu:**
 
@@ -494,3 +594,22 @@ U-Boot). 115200 8N1. Everything received and sent is logged.
 
 On Windows the console is read with `ReadConsoleInputW`: Enter, arrows, Home/End/Delete and Ctrl
 combinations are translated explicitly; QuickEdit stays on, so mouse selection and paste work.
+
+## MF TOTAL rescue: UBI completely lost
+
+Expert mode has two variants for **Nokia XG-040G-MF / AN7583** when normal `bootchain-rescue` no longer applies: `ubi part ubi` cannot use the old layout, the `fip` volume is missing, or UBI state is unknown.
+
+- **MF TOTAL rescue — UART only**: BootROM → RAM U-Boot, then rescue FIP and BL2 through `loadx` / XMODEM. Ethernet/TFTP is not used.
+- **MF TOTAL rescue — TFTP**: BootROM and RAM U-Boot still use UART/XMODEM; rescue FIP and BL2 are preloaded into separate RAM ranges over TFTP.
+
+Before the single `y/N`, Ursido verifies the MF profile, pinned payloads/SHA256, the `bl2` and `ubi` BBTs, builds the proved MF UrsusBoot FIP, and loads **both** payloads into RAM with verification. After confirmation:
+
+1. the whole `ubi` MTD is erased, intentionally destroying old OpenWrt volumes, settings and broken UBI metadata;
+2. a fresh UBI is created;
+3. a static `fip` volume is created with **ID 4**, size `0x100000`;
+4. the UrsusBoot FIP is written and proved by CRC32 readback;
+5. BL2 is erased/written **last** and also proved by CRC32 readback.
+
+A destructive command is never automatically replayed merely because its UART completion text was lost. Once `mtd erase ubi` starts, the transaction runs through FIP and BL2 verification. After PASS, boot UrsusBoot Recovery and install the normal MF UBI sysupgrade.
+
+Use this only for a total UBI disaster. If an existing `fip` volume is still usable, prefer the less destructive `bootchain-rescue`.

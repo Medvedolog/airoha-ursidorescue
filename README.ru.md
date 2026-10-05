@@ -10,7 +10,7 @@
 
 [![Pre-release](https://img.shields.io/github/v/release/Medvedolog/airoha-ursidorescue?include_prereleases&label=pre-release&color=c8873a)](https://github.com/Medvedolog/airoha-ursidorescue/releases)
 [![Build](https://img.shields.io/github/actions/workflow/status/Medvedolog/airoha-ursidorescue/build.yml?branch=main&label=build)](https://github.com/Medvedolog/airoha-ursidorescue/actions/workflows/build.yml)
-![Go](https://img.shields.io/badge/Go-1.23%20·%20без%20зависимостей-00add8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.24%20·%20без%20зависимостей-00add8?logo=go&logoColor=white)
 ![Платформы](https://img.shields.io/badge/Windows%20·%20Linux%20x64%20·%20arm64-один%20бинарник-6f4b2f)
 ![SoC](https://img.shields.io/badge/Airoha-AN7581%20·%20AN7583-b36b32)
 ![UI](https://img.shields.io/badge/интерфейс-RU%20·%20EN-555)
@@ -38,13 +38,20 @@ UrsidoRescue сделан именно для этого момента. Он д
 Вторая его работа — **разведка**. На Airoha-устройстве, которое ещё никто не портировал, он строго
 в режиме чтения собирает всё, что нужно для нового порта UrsusBoot, и упаковывает в один архив.
 
+## Крайний pre-release
+
+**0.2.1-test.24-mf-total-rescue** добавляет аварийный путь для худшего случая на MF, когда старой UBI-разметке и тому `fip` уже нельзя доверять. В этот же релиз входят отдельные BL2/boot-chain rescue для MD/MF, глобальная устойчивость к шумному UART и Ethernet/WebSocket-консоль UrsusBoot. CI проходит на Windows x64 и Linux x86_64/arm64; новый MF TOTAL flash-path пока имеет статус **HW PENDING**.
+
 ## Что умеет медвежонок-спасатель
 
 | | |
 |---|---|
 | 🧸 **Оживить «кирпич»** | BootROM → preloader → RAM U-Boot по XMODEM, во flash при этом ничего не пишется |
 | 🏭 **Вернуть сток** | Восстановить заводскую прошивку Nokia из бэкапа `mtd16` / MedveFlasher, BL2 — последним |
-| 🔧 **Починить загрузку** | Заменить UBI-том `fip` OpenWrt, когда система цела, но не стартует |
+| 🔧 **Восстановить FIP** | Заменить UBI-том `fip` OpenWrt, когда UBI цел, но система не стартует |
+| 🧯 **Восстановить boot chain** | Починить только BL2 или BL2 + FIP на MD/MF: FIP проверяется первым, BL2 пишется последним |
+| 🚨 **Полностью поднять MF с потерянной UBI** | Создать UBI с нуля, static `fip` ID 4, записать UrsusBoot FIP и затем BL2; на выбор UART-only или TFTP |
+| 🌐 **Консоль UrsusBoot по Ethernet** | Нативный WebSocket-терминал, загрузка/выгрузка RAM и диагностика без UART, если UrsusBoot уже запущен |
 | 💾 **Залить весь NAND** | Записать полный сырой образ 256 МиБ с проверкой каждой части |
 | 🚀 **Загрузить из RAM** | Запустить OpenWrt initramfs / recovery ITB, не трогая flash |
 | 🩺 **Продиагностировать** | Bad-блоки, разметка MTD и окружение — полностью только чтение |
@@ -118,4 +125,4 @@ Porting Collector работает и с другими устройствами
 ./build.sh    # vet, тесты, Windows x64 + Linux x86_64/arm64 в dist/, selftest
 ```
 
-Нужен только Go ≥ 1.23. Подробности — в [архитектуре](doc/ARCHITECTURE_RU.md#сборка).
+Нужен только Go ≥ 1.24. Подробности — в [архитектуре](doc/ARCHITECTURE_RU.md#сборка).

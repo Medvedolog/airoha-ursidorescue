@@ -1,6 +1,6 @@
 # UrsidoRescue architecture
 
-[Русская версия](ARCHITECTURE_RU.md) · [Contents](README.md) · version 0.2.0-test17
+[Русская версия](ARCHITECTURE_RU.md) · [Contents](README.md) · version 0.2.1-test.18
 
 ## Overview
 
@@ -20,7 +20,9 @@
                   (serial port, 115200 8N1)   (raw console, input, window size)
 ```
 
-One Go module, `ursidorescue` (Go 1.23), with **no external dependencies**: standard library only.
+One Go module, `ursidorescue` (Go 1.24). The core uses the standard library only; the only external
+dependencies are the pure-Go Bubble Tea / Lip Gloss / Bubbles for the TUI (`tui*.go`), pinned in
+`go.mod` / `go.sum` (a deliberate exception, UI spec §5.3).
 Platform differences live in `_linux.go` / `_windows.go` files (file-name build constraints);
 everything else is shared.
 
@@ -37,7 +39,10 @@ everything else is shared.
 | `term_run.go` | ~640 | The running terminal: UART read loop, raw/line mode, ASCII gate, pager with fullscreen-TUI bypass, Ctrl+] menu, XMODEM send/receive |
 | `serial.go` | 8 | `Serial` = `app.Port`: `Name`, `Read(buf, timeout)`, `Write`, `ResetInput`, `Close` |
 | `operations.go` | ~210 | Operation catalogue (spec §10 scenarios with risk classes), `RunOperation`, operation sessions and the probe session, `openPort` — a lease from `PortOwner` |
-| `console_frontend.go` | ~130 | Console implementation of `app.UI`: renders events, progress, questions and confirmations exactly as the console did before the application layer |
+| `tui.go` | ~230 | TUI (`--tui`): starts Bubble Tea; `tuiUI` implements `app.UI` with messages and answer channels; operations that own the terminal (UART terminal, Shell, RAM U-Boot) get the real console through `tea.Exec`, and their events are kept and shown on return |
+| `tui_menu.go` | ~90 | TUI menu items with descriptions (what it does, what it needs, its risk): the same operations as the console menus |
+| `tui_model.go` | ~1030 | The TUI screen: the console's menus (Main / Porting / Expert), an operation panel with progress, the UART and event log (≈35 %, filter, scroll, wrapping), Ask / Confirm dialogs per §13 and the port chooser, the STOP label from `CancelState`; the layout is tested at 80×24 |
+| `console_frontend.go` | ~200 | Console implementation of `app.UI`: renders events, progress, questions and confirmations exactly as the console did before the application layer |
 | `serial_linux.go` | ~110 | termios via `ioctl(TCGETS/TCSETS)`: raw 115200 8N1, `CLOCAL`, no flow control; lists `/dev/ttyUSB*`, `ttyACM*`, `ttyAMA*`, `ttyS*` |
 | `serial_windows.go` | ~170 | `kernel32.dll` via `syscall`: `CreateFileW`, `SetCommState`, `SetCommTimeouts`, `PurgeComm`, `ReadFile`/`WriteFile`; lists existing `COMn` via `QueryDosDeviceW` |
 | `udp_windows.go`, `udp_other.go` | 18 / 5 | `isExpectedUDPNoise`: on Windows, UDP `WSAECONNRESET` (10054) / `WSAECONNABORTED` (10053) errors from a stale peer are noise for the TFTP server; always `false` elsewhere |
@@ -134,6 +139,14 @@ a profile update means the program refuses to work. File provenance:
 | `payloads/md/an7581-fudan-capable-ram.fip` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-md/recovery-safe-u-boot.fip` |
 | `payloads/mf/an7583-preloader.bin` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/ursusboot-uart-preloader.bin` |
 | `payloads/mf/an7583-recovery-ram.fip` | airoha-ursusboot v0.1.0-alpha5-t66 `xg040-mf/recovery-safe-u-boot.fip` |
+| `payloads/md/ursusboot-md-0.1.0-alpha5-t67-update.fip` | airoha-ursusboot `8c2567ab` (t67) `xg040-md/ursusboot-update.fip`, from UrsusFlasher 0.2.67; for Expert → Install UrsusBoot |
+| `payloads/md/vanilla-u-boot-md-0.1.0-alpha5-t67.fip`, `payloads/mf/vanilla-u-boot-mf-0.1.0-alpha5-t67.fip` | UrsusFlasher 0.2.67 `data/payloads/{md,mf}/vanilla/`; = UrsusBoot `8c2567ab` (t67) `vanilla-u-boot.fip`, SHA256 from the provenance; for Expert → Return/update vanilla U-Boot |
+| `payloads/mf/ursusboot-mf-0.1.0-alpha5-t67-u-boot.runtime.lzma` | airoha-ursusboot `8c2567ab` (t67) `xg040-mf/u-boot.runtime.lzma`, from UrsusFlasher 0.2.67; for Expert → Install UrsusBoot |
+
+The UrsusBoot t67 provenance (commit, hashes of every build file) is in `payloads/provenance/`.
+The installer (`bootfip.go`, `install_ursusboot.go`) ports UrsusFlasher 0.2.67
+`ursusboot_install.build_candidate` (MD) and `mf_persistent.build_stock_derived_candidate` (MF): the
+candidate is always built from the device's current content, read over the UART (`md.l` + `crc32`).
 
 The RAM FIPs are built by the UrsusBoot pipeline but contain a vanilla OpenWrt U-Boot (`3d1645ee` + PR 24025)
 under the RECOVERY_SAFE RC18 contract, with no UrsusBoot code (see [ABOUT](ABOUT_EN.md)).
@@ -217,7 +230,7 @@ under the RECOVERY_SAFE RC18 contract, with no UrsusBoot code (see [ABOUT](ABOUT
 5. writes `SHA256SUMS` for all files;
 6. on x86_64 runs the built binary with `--selftest`.
 
-Only Go ≥ 1.23 is needed. No MinGW, windres, Python or ImageMagick.
+Only Go ≥ 1.24 is needed (the Charm modules are fetched through the Go proxy on the first build). No MinGW, windres, Python or ImageMagick.
 
 ## CI and releases
 
@@ -240,6 +253,10 @@ messages (physical restore, expert 3/4).
 
 `go test ./...`: about 50 tests, ~15 s, no hardware needed.
 
+- **TUI (`tui_test.go`):** every screen (menu, operation, confirmation, port chooser, large log) is
+  exactly 80×24 with no overflowing line; confirmation and choices through the `tuiUI` bridge (right and
+  wrong phrase, Esc, arrow choice); STOP labels from `CancelState`; an operation started from the TUI
+  stops on `s`; events during the terminal are held and replayed; ANSI and `\r` cleanup of device output.
 - **Main package:** XMODEM CRC16, prompt detection, bad blocks and good spans, language choice, ANSI
   decoder, line editor and history, Windows key translation, ASCII gate (including Cyrillic from
   Windows), fullscreen-ANSI detection (including across reads), pager, batched escape sequences,

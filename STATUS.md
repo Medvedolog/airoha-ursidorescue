@@ -1,3 +1,48 @@
+# UrsidoRescue 0.2.1-test.24-mf-total-rescue
+
+Status: **CI PASS / HW PARTIAL; MF TOTAL HW PENDING.** Existing hardware evidence from test18 remains valid. The new MF TOTAL fresh-UBI recovery path has passed CI, unit tests, cross-builds and selftest but has not yet been executed end-to-end on a real MF.
+
+## 0.2.1-test.24-mf-total-rescue
+
+- Adds two MF/AN7583 total-disaster recovery modes for a router whose old UBI metadata/FIP cannot be trusted:
+  - UART-only: BootROM and all rescue payloads over UART/XMODEM, no Ethernet dependency;
+  - TFTP: FIP and BL2 are preloaded into separate RAM ranges before any destructive command.
+- Transaction order is fixed and verified: stable BBT -> preload/verify FIP+BL2 -> one y/N -> erase ubi -> fresh UBI -> static fip volume ID 4 (0x100000) -> write/readback FIP -> write/readback BL2 last.
+- The total path deliberately destroys all previous volumes under the ubi MTD. After PASS, boot UrsusBoot Recovery and install the normal MF UBI sysupgrade.
+- Adds explicit BL2-only and BL2+FIP boot-chain rescue operations for MD/MF.
+- Adds global noisy-UART tolerance: safe read/RAM commands may retry, but persistent flash-changing commands are never automatically replayed after a lost/damaged reply.
+- Hardened XMODEM: 16 attempts per block, ACK precedence over noise, CAN CAN for receiver cancel, no redundant EOT after acknowledged payload handoff.
+- Adds the UrsusBoot Ethernet/WebSocket console with native RFC6455 transport, RAM upload/export, diagnostics and read-only presets.
+- Stock restore reports BBT skips explicitly; MF rescue FIP construction is pinned and deterministic.
+- Release-branch CI PASS: formatting, vet/tests, Windows x64, Linux x86_64/arm64, selftest, package and artifact upload.
+
+# UrsidoRescue 0.2.1-test.18
+
+Status: **CI PASS / HW PARTIAL.** A stock restore on MD (AN7581) through the new TUI on Windows
+passed on hardware (30/30 IBU chunks and BL2 written and verified, stock booted). The UrsusBoot UART
+install, the UART console frame and the file/folder dialogs are not hardware-tested yet; see
+`doc/HW_SMOKE_STAGE2_RU.md`.
+
+## 0.2.1-test.18
+
+- Application layer (UI spec stage 1): one UI contract for every front end, sessions under
+  `work/sessions/<id>/` with operation IDs and `operations.jsonl`, the port leased by `PortOwner`,
+  STOP decided by the core (at once, at a checkpoint, or refused with a reason). Hardware smoke
+  PASS (`doc/HW_SMOKE_STAGE1_RU.md`).
+- Full-screen TUI (Bubble Tea) is the default; `--console` keeps the text menu, which is also the
+  fallback. Coloured log, a time column, busy COM port retry, port remembered between operations,
+  overall progress, result banners, F-keys, hideable log, risk shown under every item.
+- UART consoles keep an UrsidoRescue frame (header and key bar over an ANSI scroll region) around
+  the raw stream; it steps aside for alternate-screen programs and bootmenus.
+- Expert → Install UrsusBoot (UART): persistent UrsusBoot 0.1.0-alpha5-t67 on MD and MF, stock or
+  UBI layout, built from the device's own boot area read over the UART; pinned payloads.
+- Expert → Return/update vanilla U-Boot (UART): the pinned vanilla OpenWrt U-Boot t67 from the
+  UrsusFlasher kit into the UBI volume fip, the same UART path as the UrsusBoot install on UBI.
+- Recent paths per operation and Browse (Windows file/folder dialogs, zenity/kdialog on Linux).
+- Fixed a false "readback CRC mismatch": the U-Boot prompt detector took the "=>" of crc32's
+  "==>" for a prompt when a UART read ended right after it; readback mismatches are also re-read
+  twice before failing.
+
 # UrsidoRescue 0.2.0-test17
 
 Status: **simulation candidate / HW PARTIAL.** test16's stock-LAN-assisted UART login remains

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // uartTerm is one interactive terminal session on a serial port.
@@ -22,6 +23,10 @@ type uartTerm struct {
 	quit      bool
 	shownW    int  // rune width of the input line currently on screen (line mode)
 	lineShown bool // an input line is drawn and needs erasing before device output
+	// devLine is the device's unfinished screen line (its prompt, as
+	// plain text). Line mode draws the input after it instead of over it.
+	devLine   string
+	drawnPref string // the prefix the input line was drawn with
 
 	pagerEnabled    bool
 	pagerWaiting    bool
@@ -29,6 +34,9 @@ type uartTerm struct {
 	pagerPending    []byte
 	pagerANSIProbe  []byte
 	lastASCIINotice time.Time
+	ctrlCAt         time.Time // WebSocket idle-prompt Ctrl-C guard
+
+	chrome *termChrome // UrsidoRescue bars around the stream (TUI only); nil in the text console
 }
 
 // runTerminal opens the port and runs the interactive terminal.
@@ -54,26 +62,53 @@ func (a *App) runTerminalOnMode(s Serial, simple bool) error {
 	// is clean and copyable, and the device's own line editing/history works.
 	t := &uartTerm{a: a, s: s, prompt: "] ", raw: true, simple: simple}
 	t.ed.hidx = 0
-	if simple {
-		fmt.Printf(L("\nUART Shell %s — 115200 8N1, no flow\n", "\nUART Shell %s — 115200 8N1, no flow\n"), s.Name())
+	title := L("UART-терминал + XMODEM", "UART terminal + XMODEM")
+	if _, ok := isUrsusWS(s); ok {
+		title = L("UrsusBoot Ethernet-консоль", "UrsusBoot Ethernet console")
+	} else if simple {
+		title = L("Прозрачная UART-консоль", "Transparent UART console")
+	}
+	if a.frontEnd == "tui" {
+		t.chrome = &termChrome{title: strings.ToUpper(title)}
+	} else if _, ok := isUrsusWS(s); ok {
+		fmt.Printf(L("\nUrsusBoot Ethernet-консоль %s — WebSocket /ws/console\n", "\nUrsusBoot Ethernet console %s — WebSocket /ws/console\n"), s.Name())
+		fmt.Println(L("F2 — файл в RAM по HTTP · F3 — диагностика на ПК · F4 — строки/RAW · F5 — read-only пресеты · F10 — выход.",
+			"F2 file to RAM over HTTP · F3 diagnostics to PC · F4 line/raw · F5 read-only presets · F10 quit."))
+	} else if simple {
+		fmt.Printf(L("\nПрозрачная UART-консоль %s — 115200 8N1, без flow control\n", "\nTransparent UART console %s — 115200 8N1, no flow\n"), s.Name())
 		fmt.Println(L("Ctrl+] / Ctrl+Q — выход, Ctrl+P — pager для обычного текста; полноэкранные TUI обходят его автоматически.",
 			"Ctrl+] / Ctrl+Q — exit, Ctrl+P — text pager; fullscreen TUIs bypass it automatically."))
 		fmt.Println(L("Никаких автоматических x/Enter/Ctrl-C не отправляется.", "No automatic x/Enter/Ctrl-C is sent."))
 	} else {
-		fmt.Println(L("\nUART-терминал 115200 8N1 — прозрачный режим (вывод как есть, копируется).",
-			"\nUART terminal 115200 8N1 — raw passthrough (verbatim output, copyable)."))
+		fmt.Println(L("\nUART-терминал + XMODEM, 115200 8N1 — прозрачный режим (вывод как есть, копируется).",
+			"\nUART terminal + XMODEM, 115200 8N1 — raw passthrough (verbatim output, copyable)."))
 		fmt.Println(L("Ctrl+] — меню: l — построчный ввод с историей ↑/↓, s/r — XMODEM отправка/приём, g — лог, q — выход.",
 			"Ctrl+] — menu: l line-input with ↑/↓ history, s/r XMODEM send/receive, g log, q quit."))
+		fmt.Println(L("Без меню: F2/F3 — XMODEM отправка/приём, F4 — построчный/прозрачный, F10 — выход.",
+			"Without the menu: F2/F3 XMODEM send/receive, F4 line/raw, F10 quit."))
 		fmt.Println(L("Ctrl+Q — быстрый выход, Ctrl+P — pager для обычного текстового вывода. top/vi и другие TUI отключают pager автоматически.",
 			"Ctrl+Q — quick exit, Ctrl+P — pager for normal text output. top/vi and other TUIs disable it automatically."))
 	}
-	fmt.Println(L("В Windows QuickEdit/clipboard остаётся включён. Всё пишется в лог.",
-		"On Windows QuickEdit/clipboard stays enabled. Everything is logged."))
+	if t.chrome == nil {
+		fmt.Println(L("В Windows QuickEdit/clipboard остаётся включён. Всё пишется в лог.",
+			"On Windows QuickEdit/clipboard stays enabled. Everything is logged."))
+	}
 	state, e := consoleRaw()
 	if e != nil {
 		return fmt.Errorf(L("raw-консоль: %w", "raw console: %w"), e)
 	}
 	defer consoleRestore(state)
+	if t.chrome != nil {
+		t.mu.Lock()
+		t.chromeStartLocked(false)
+		os.Stdout.WriteString(chromePlate(max(40, t.chrome.cols), title, t.chromeInfoLocked()))
+		t.mu.Unlock()
+		defer func() {
+			t.mu.Lock()
+			t.chromeStopLocked()
+			t.mu.Unlock()
+		}()
+	}
 
 	rxErr := make(chan error, 1)
 	go t.readLoop(rxErr)
@@ -90,40 +125,69 @@ func (a *App) runTerminalOnMode(s Serial, simple bool) error {
 		if err != nil {
 			return err
 		}
-		if t.raw {
-			// Forward whole console chunks, not one UART write per byte. This keeps
-			// ANSI arrow/history sequences together and makes pasted text fast.
-			if err := t.writeRawInput(ib[:n]); err != nil {
+		// F2/F3/F4/F10 are the terminal's own keys (XMODEM, mode, exit),
+		// unless a fullscreen program on the device owns the screen.
+		chunk := ib[:n]
+		for len(chunk) > 0 && !t.quit {
+			i, size, act := -1, 0, byte(0)
+			if t.fkeysLocal() {
+				i, size, act = findFKey(chunk)
+				if act == 'n' {
+					if _, ok := isUrsusWS(t.s); !ok { // F5 belongs to the UART device outside the network console
+						i, size, act = -1, 0, 0
+					}
+				}
+			}
+			part := chunk
+			if i >= 0 {
+				part = chunk[:i]
+			}
+			if err := t.handleInput(part); err != nil {
 				return err
 			}
-			if t.quit {
-				return nil
+			if i < 0 || t.quit {
+				break
 			}
+			t.menuAction(act)
+			chunk = chunk[i+size:]
+		}
+	}
+	return nil
+}
+
+// handleInput passes keyboard bytes on: whole chunks in raw mode, through
+// the line editor in line mode.
+func (t *uartTerm) handleInput(in []byte) error {
+	if len(in) == 0 {
+		return nil
+	}
+	if t.raw {
+		// Forward whole console chunks, not one UART write per byte. This keeps
+		// ANSI arrow/history sequences together and makes pasted text fast.
+		return t.writeRawInput(in)
+	}
+	for _, b := range in {
+		if b >= 0x80 {
+			t.warnNonASCII()
 			continue
 		}
-		for _, b := range ib[:n] {
-			if b >= 0x80 {
-				t.warnNonASCII()
-				continue
-			}
-			if b == 0x11 { // Ctrl+Q is always local; never send it to the router.
-				t.quit = true
-				fmt.Print(L("\r\n[выход из UART-терминала: Ctrl+Q]\r\n", "\r\n[UART terminal exit: Ctrl+Q]\r\n"))
+		if b == 0x11 { // Ctrl+Q is always local; never send it to the router.
+			t.quit = true
+			fmt.Print(L("\r\n[выход из UART-терминала: Ctrl+Q]\r\n", "\r\n[UART terminal exit: Ctrl+Q]\r\n"))
+			return nil
+		}
+		if b == 0x10 {
+			t.togglePager()
+			continue
+		}
+		if t.pagerIsWaiting() && (b == '\r' || b == '\n') {
+			t.pagerContinue()
+			continue
+		}
+		for _, ev := range t.dec.push(b) {
+			t.onKey(ev)
+			if t.quit {
 				return nil
-			}
-			if b == 0x10 {
-				t.togglePager()
-				continue
-			}
-			if t.pagerIsWaiting() && (b == '\r' || b == '\n') {
-				t.pagerContinue()
-				continue
-			}
-			for _, ev := range t.dec.push(b) {
-				t.onKey(ev)
-				if t.quit {
-					return nil
-				}
 			}
 		}
 	}
@@ -225,8 +289,9 @@ func (t *uartTerm) writeRawInput(p []byte) error {
 			continue
 		}
 		i := -1
+		_, network := isUrsusWS(t.s)
 		for n, b := range p {
-			if b == 0x1d || b == 0x11 || b == 0x10 {
+			if b == 0x1d || b == 0x11 || b == 0x10 || (b == 0x03 && network) {
 				i = n
 				break
 			}
@@ -250,9 +315,13 @@ func (t *uartTerm) writeRawInput(p []byte) error {
 			t.togglePager()
 			continue
 		}
+		if ctrl == 0x03 {
+			t.sendCtrlC()
+			continue
+		}
 		if t.simple {
 			t.quit = true
-			fmt.Print(L("\r\n[выход из UART Shell]\r\n", "\r\n[UART Shell exit]\r\n"))
+			fmt.Print(L("\r\n[выход из прозрачной UART-консоли]\r\n", "\r\n[transparent UART console exit]\r\n"))
 			return nil
 		}
 		var choice byte
@@ -307,6 +376,9 @@ func (t *uartTerm) pagerIsWaiting() bool {
 }
 
 func (t *uartTerm) pageSizeLocked() int {
+	if r := t.chromeRowsLocked(); r > 2 {
+		return r - 1
+	}
 	r := consoleRows()
 	if r < 8 {
 		return 20
@@ -320,6 +392,7 @@ func (t *uartTerm) togglePager() {
 	t.pagerEnabled = !t.pagerEnabled
 	t.pagerWaiting = false
 	t.pagerLines = 0
+	t.chromeRefreshLocked()
 	if !t.pagerEnabled {
 		if len(t.pagerPending) > 0 {
 			os.Stdout.Write(t.pagerPending)
@@ -364,7 +437,23 @@ func (t *uartTerm) flushPagerLocked() {
 func (t *uartTerm) deviceOutput(d []byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	c := t.chrome
+	if c == nil {
+		t.outputLocked(d)
+		return
+	}
+	t.chromeSizeCheckLocked()
+	// Device bytes and chrome actions in stream order: a program's exit
+	// sequence is followed by the resume, then by whatever it printed next.
+	for _, pc := range c.parser.feed(d, c.on && !c.suspended) {
+		if len(pc.data) > 0 {
+			t.outputLocked(pc.data)
+		}
+		t.chromeApplyLocked(pc.act)
+	}
+}
 
+func (t *uartTerm) outputLocked(d []byte) {
 	// Probe across read boundaries: a CSI sequence is only a few bytes, but a
 	// serial read may split it anywhere.
 	probe := make([]byte, 0, len(t.pagerANSIProbe)+len(d))
@@ -396,12 +485,14 @@ func (t *uartTerm) deviceOutput(d []byte) {
 		if !t.raw && t.lineShown {
 			t.eraseLineLocked()
 		}
+		t.trackDeviceLine(d)
 		os.Stdout.Write(d)
 		if !t.raw {
 			t.drawLineLocked(0)
 		}
 		return
 	}
+	t.trackDeviceLine(d)
 	t.pagerPending = append(t.pagerPending, d...)
 	if len(t.pagerPending) > 4<<20 {
 		fmt.Print(L("\r\n[pager: буфер >4 MiB, пауза отключена]\r\n", "\r\n[pager: buffer >4 MiB, disabling pause]\r\n"))
@@ -417,10 +508,45 @@ func (t *uartTerm) deviceOutput(d []byte) {
 // eraseLineLocked clears the current input line using only CR and spaces.
 func (t *uartTerm) eraseLineLocked() {
 	if t.shownW > 0 {
+		// Blank the drawn line, then put the device's own prompt back, so
+		// what the device prints next continues right after it.
+		pw := 0
+		if t.drawnPref == t.devLine {
+			pw = len([]rune(t.devLine))
+		}
 		fmt.Print("\r" + strings.Repeat(" ", t.shownW) + "\r")
+		if pw > 0 {
+			fmt.Print(t.devLine)
+		}
 	}
 	t.shownW = 0
 	t.lineShown = false
+}
+
+// trackDeviceLine follows the text after the device's last line break.
+func (t *uartTerm) trackDeviceLine(d []byte) {
+	line := []rune(t.devLine)
+	for i := 0; i < len(d); i++ {
+		switch c := d[i]; {
+		case c == '\n', c == '\r':
+			line = line[:0]
+		case c == 0x08:
+			if len(line) > 0 {
+				line = line[:len(line)-1]
+			}
+		case c == 0x1b:
+			i = skipEscape(string(d), i)
+		case c < 0x20 || c == 0x7f:
+		default:
+			r, n := utf8.DecodeRune(d[i:])
+			line = append(line, r)
+			i += n - 1
+		}
+	}
+	if len(line) > 200 {
+		line = line[len(line)-200:]
+	}
+	t.devLine = string(line)
 }
 
 // drawLineLocked (re)draws the prompt and buffer; prevW is the width already on
@@ -429,7 +555,14 @@ func (t *uartTerm) drawLineLocked(prevW int) {
 	if t.raw {
 		return
 	}
-	seq, w := t.ed.render(t.prompt, prevW)
+	// After the device's prompt when there is one; our "] " only on an
+	// empty line.
+	pref := t.prompt
+	if t.devLine != "" {
+		pref = t.devLine
+	}
+	t.drawnPref = pref
+	seq, w := t.ed.render(pref, prevW)
 	fmt.Print(seq)
 	t.shownW = w
 	t.lineShown = true
@@ -448,8 +581,7 @@ func (t *uartTerm) onKey(ev keyEvent) {
 	}
 	switch ev.kind {
 	case kCtrlC:
-		t.logSent("<Ctrl-C>")
-		_ = t.s.Write([]byte{0x03})
+		t.sendCtrlC()
 		return
 	case kCtrlZ:
 		t.logSent("<Ctrl-Z>")
@@ -462,8 +594,13 @@ func (t *uartTerm) onKey(ev keyEvent) {
 	t.mu.Lock()
 	prev := t.shownW
 	if send {
+		// The device echoes the line after its prompt; a local copy would
+		// show it twice. Without a device prompt the line is shown as sent.
+		hadPrompt := t.devLine != ""
 		t.eraseLineLocked()
-		fmt.Print(t.prompt + line + "\r\n")
+		if !hadPrompt {
+			fmt.Print(t.prompt + line + "\r\n")
+		}
 	} else {
 		t.drawLineLocked(prev)
 	}
@@ -492,25 +629,56 @@ func (t *uartTerm) menuChoice(prefetched byte) {
 	if !t.raw && t.lineShown {
 		t.eraseLineLocked()
 	}
+	t.chromeResumeLocked()
 	t.mu.Unlock()
 	mode := L("сейчас: прозрачный", "now: raw")
 	if !t.raw {
 		mode = L("сейчас: построчный", "now: line")
 	}
-	fmt.Print(L("\r\n[меню ("+mode+"): l=прозрачный/построчный, s=XMODEM отпр, r=XMODEM приём, g=лог, q=выход, Enter=назад] ",
-		"\r\n[menu ("+mode+"): l=raw/line, s=XMODEM send, r=XMODEM recv, g=log, q=quit, Enter=back] "))
+	if _, ok := isUrsusWS(t.s); ok {
+		fmt.Print(L("\r\n[меню ("+mode+"): s=файл в RAM · r=диагностика · n=пресеты · l=строки/RAW · g=лог · q=выход] ",
+			"\r\n[menu ("+mode+"): s=file to RAM · r=diagnostics · n=presets · l=line/RAW · g=log · q=quit] "))
+	} else {
+		fmt.Print(L("\r\n[меню ("+mode+"): l=прозрачный/построчный, s=XMODEM отпр, r=XMODEM приём, g=лог, q=выход, Enter=назад] ",
+			"\r\n[menu ("+mode+"): l=raw/line, s=XMODEM send, r=XMODEM recv, g=log, q=quit, Enter=back] "))
+	}
 	c := prefetched
 	if c == 0 {
 		c = t.readByte()
 	}
 	fmt.Print("\r\n")
+	t.menuAction(c)
+}
+
+// menuAction runs one terminal command: from the Ctrl+] menu or its F-key.
+func (t *uartTerm) menuAction(c byte) {
+	t.mu.Lock()
+	if !t.raw && t.lineShown {
+		t.eraseLineLocked()
+	}
+	t.mu.Unlock()
 	switch c {
 	case 's', 'S':
+		if w, ok := isUrsusWS(t.s); ok {
+			w.setAction('u')
+			t.quit = true
+			return
+		}
 		t.xmodemSendInteractive()
 	case 'r', 'R':
+		if w, ok := isUrsusWS(t.s); ok {
+			w.setAction('d')
+			t.quit = true
+			return
+		}
 		t.xmodemRecvInteractive()
+	case 'n', 'N':
+		t.wsPresetMenu()
 	case 'l', 'L':
 		t.raw = !t.raw
+		t.mu.Lock()
+		t.chromeRefreshLocked()
+		t.mu.Unlock()
 		if t.raw {
 			fmt.Print(L("[прозрачный режим: вывод как есть, копируется; история — стрелками устройства]\r\n",
 				"[raw mode: verbatim output, copyable; history via the device's own arrows]\r\n"))
@@ -640,4 +808,41 @@ func (t *uartTerm) xmodemRecvInteractive() {
 	}
 	sha, _ := shaFile(abs)
 	fmt.Printf(L("\r\nXMODEM приём завершён: %d байт, SHA256=%s\r\n", "\r\nXMODEM receive complete: %d bytes, SHA256=%s\r\n"), len(data), sha)
+}
+
+// fkeysLocal says whether F2/F3/F4/F10 are the terminal's own keys: in the
+// terminal (the transparent console has no commands) while no fullscreen
+// device program owns the screen.
+func (t *uartTerm) fkeysLocal() bool {
+	if t.simple {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.chrome == nil || !t.chrome.suspended
+}
+
+// fkeySeqs are the F-key sequences of xterm, the Linux console and rxvt
+// (Windows keys are translated to the xterm ones) and the command each runs.
+var fkeySeqs = []struct {
+	seq string
+	act byte
+}{
+	{"\x1bOQ", 's'}, {"\x1b[12~", 's'}, {"\x1b[[B", 's'}, // F2 XMODEM send
+	{"\x1bOR", 'r'}, {"\x1b[13~", 'r'}, {"\x1b[[C", 'r'}, // F3 XMODEM receive
+	{"\x1bOS", 'l'}, {"\x1b[14~", 'l'}, {"\x1b[[D", 'l'}, // F4 raw / line mode
+	{"\x1b[15~", 'n'}, // F5 network presets (UART forwards it)
+	{"\x1b[21~", 'q'}, // F10 leave
+}
+
+// findFKey returns the first terminal F-key in p: its index, length and
+// command, or -1.
+func findFKey(p []byte) (int, int, byte) {
+	best, size, act := -1, 0, byte(0)
+	for _, f := range fkeySeqs {
+		if i := strings.Index(string(p), f.seq); i >= 0 && (best < 0 || i < best) {
+			best, size, act = i, len(f.seq), f.act
+		}
+	}
+	return best, size, act
 }

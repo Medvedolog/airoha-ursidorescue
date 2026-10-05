@@ -69,6 +69,11 @@ func openSerial(name string) (Serial, error) {
 	p, _ := syscall.UTF16PtrFromString(dev)
 	r, _, e := pCreateFileW.Call(uintptr(unsafe.Pointer(p)), genericRead|genericWrite, 0, 0, openExisting, 0, 0)
 	if r == uintptr(syscall.InvalidHandle) {
+		// COM ports open exclusively: access denied or a sharing violation
+		// means another program holds it.
+		if e == syscall.ERROR_ACCESS_DENIED || e == syscall.Errno(32) {
+			return nil, portInUse(name)
+		}
 		return nil, e
 	}
 	s := &windowsSerial{h: syscall.Handle(r), name: name}

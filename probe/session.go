@@ -94,7 +94,7 @@ var lineMarkers = []markerDef{
 	{"linux", regexp.MustCompile(`Booting Linux on physical CPU|Linux version \d`)},
 	{"openwrt", regexp.MustCompile(`OpenWrt`)},
 	{"console_activate", regexp.MustCompile(`(?i)please press enter to activate this console`)},
-	{"login", regexp.MustCompile(`(?i)\blogin:\s*$`)},
+	{"login", regexp.MustCompile(`(?i)(?:\blogin|\buser(?:\s?name)?)\s*:\s*$`)},
 	{"kernel_panic", regexp.MustCompile(`(?i)kernel panic`)},
 	{"destructive_autoboot", regexp.MustCompile(`(?i)mtd erase|erasing 0x|nand erase|writing to nand`)},
 }

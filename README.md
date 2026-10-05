@@ -10,7 +10,7 @@
 
 [![Pre-release](https://img.shields.io/github/v/release/Medvedolog/airoha-ursidorescue?include_prereleases&label=pre-release&color=c8873a)](https://github.com/Medvedolog/airoha-ursidorescue/releases)
 [![Build](https://img.shields.io/github/actions/workflow/status/Medvedolog/airoha-ursidorescue/build.yml?branch=main&label=build)](https://github.com/Medvedolog/airoha-ursidorescue/actions/workflows/build.yml)
-![Go](https://img.shields.io/badge/Go-1.23%20·%20zero%20deps-00add8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.24%20·%20zero%20deps-00add8?logo=go&logoColor=white)
 ![Platforms](https://img.shields.io/badge/Windows%20·%20Linux%20x64%20·%20arm64-single%20binary-6f4b2f)
 ![SoC](https://img.shields.io/badge/Airoha-AN7581%20·%20AN7583-b36b32)
 ![UI](https://img.shields.io/badge/UI-RU%20·%20EN-555)
@@ -37,13 +37,20 @@ longer reach the router, the bear cub still can.
 Its second job is **exploration**. On an Airoha device nobody has ported yet, it collects everything
 a new UrsusBoot port needs, strictly read-only, and packs it into one bundle.
 
+## Latest pre-release
+
+**0.2.1-test.24-mf-total-rescue** adds the worst-case MF recovery path for a router whose UBI metadata and `fip` volume can no longer be trusted. It also includes the MD/MF BL2 and boot-chain rescue tools, global noisy-UART hardening, and the UrsusBoot Ethernet/WebSocket console. CI passes on Windows x64 and Linux x86_64/arm64; the new MF TOTAL flash path is still **HW PENDING**.
+
 ## What the rescue bear can do
 
 | | |
 |---|---|
 | 🧸 **Revive a brick** | BootROM → preloader → RAM U-Boot over XMODEM, with nothing written to flash |
 | 🏭 **Return to stock** | Restore factory Nokia firmware from an `mtd16` / MedveFlasher backup, BL2 written last |
-| 🔧 **Repair the boot** | Replace the OpenWrt `fip` UBI volume when the system is intact but will not start |
+| 🔧 **Restore the FIP** | Replace the OpenWrt `fip` UBI volume when UBI is intact but the system will not start |
+| 🧯 **Recover the boot chain** | Repair BL2 only or BL2 + FIP on MD/MF, with FIP verified first and BL2 written last |
+| 🚨 **MF total disaster recovery** | Recreate a lost UBI from scratch, create static `fip` ID 4, write UrsusBoot FIP, then BL2 last; UART-only or TFTP |
+| 🌐 **UrsusBoot Ethernet console** | Native WebSocket terminal with RAM upload/export and diagnostics, no UART required when UrsusBoot is already running |
 | 💾 **Restore all of NAND** | Write a full 256 MiB raw image with readback of every chunk |
 | 🚀 **Boot from RAM** | Start an OpenWrt initramfs / recovery ITB without touching flash |
 | 🩺 **Diagnose** | Bad blocks, MTD layout and environment, fully read-only |
@@ -116,4 +123,4 @@ Everything else, step by step, is in the [operator guide](doc/GUIDE_EN.md) and t
 ./build.sh    # vet, tests, Windows x64 + Linux x86_64/arm64 into dist/, selftest
 ```
 
-Only Go ≥ 1.23 is required. Details: [architecture](doc/ARCHITECTURE_EN.md#build).
+Only Go ≥ 1.24 is required. Details: [architecture](doc/ARCHITECTURE_EN.md#build).

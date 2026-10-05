@@ -45,10 +45,49 @@ Releases by CI.
 | 0.2.0-test15 | `115c87c` | yes | network once per session, LAN prerequisites, colour, EOT |
 | 0.2.0-test16 | `8f72817` | yes | stock LAN assist: UART login and UID 0 |
 | 0.2.0-test17 | `6008769` | yes | Telnet-only passive plan, late credential refresh, auth hardening |
+| 0.2.1-test.18 | branch | not yet | application layer and STOP, TUI by default, UrsusBoot install over UART, UART frame, false CRC error fixed |
+| 0.2.1-test.19 | `3167b36` | no | MD rescue without reading broken UBI/FIP |
+| 0.2.1-test.21 | `7c4190d` | no | emergency BL2 restore on MD |
+| 0.2.1-test.22 | `77a2dfd` | no | separate BL2 and BL2+FIP rescue for MD/MF |
+| 0.2.1-test.23-uart-noise | `c1391a8` | no | global noisy-UART hardening; destructive commands are never replayed |
+| 0.2.1-test.24-mf-total-rescue | branch `dev/mf-total-ubi-rescue` | **yes** | MF TOTAL rescue: fresh UBI + fip ID4 + UrsusBoot FIP + BL2, UART-only or TFTP |
 
 ---
 
-## Unreleased
+## 0.2.1-test.24-mf-total-rescue — 2026-10-05
+
+Status: **CI PASS / HW PARTIAL; MF TOTAL HW PENDING**.
+
+This pre-release rolls the post-test18 development line into one release:
+
+- **MF TOTAL rescue for completely lost UBI**, with two separate Expert paths:
+  - **UART-only**: BootROM → RAM U-Boot → FIP/BL2 through `loadx` + XMODEM, no Ethernet/TFTP;
+  - **TFTP**: FIP and BL2 are preloaded into separate RAM ranges over Ethernet; no network is needed after erase starts.
+- Full destructive order for MF/AN7583: stable BBT → preload and verify both payloads →
+  one `y/N` → `mtd erase ubi` → fresh UBI → static `fip` **ID 4**, size `0x100000` →
+  write/CRC-readback UrsusBoot FIP → write **BL2 last** → CRC-readback BL2.
+- TOTAL mode does not read or trust the old UBI/FIP. It is specifically for a brick whose UBI
+  metadata/FIP is gone or unreliable.
+- **MD/MF rescue is split into explicit operations**: BL2-only restore and full BL2 + FIP boot-chain
+  restore. Normal UrsusBoot installation remains a separate operation.
+- **Global noisy-UART hardening**: read-only/RAM commands can be retried safely; flash-changing
+  commands are **never automatically replayed** after a lost or damaged completion response, and are
+  instead proved by independent readback.
+- XMODEM on noisy lines is hardened to 16 attempts per block, ACK wins over noise, receiver abort
+  requires `CAN CAN`, and EOT is not spammed after a fully ACKed payload.
+- **UrsusBoot Ethernet/WebSocket console**: native RFC6455 client with no external WS dependency,
+  F2 RAM upload, F3 diagnostics/RAM export through TFTP PUT, F5 read-only presets and a double-Ctrl-C
+  guard at an idle `UrsusBoot>`.
+- Stock restore now reports bad-block skips explicitly.
+- MF rescue FIP construction is pinned and deterministic, with no alignment guessing.
+- RU/EN docs, menus and operator guides are updated for test24.
+- Final release-branch CI passes formatting, vet/tests, Windows x64, Linux x86_64/arm64, selftest,
+  packaging and artifact upload.
+
+The new MF TOTAL path is not yet hardware-tested; previously proven test18 hardware results remain
+**HW PARTIAL**.
+
+## 0.2.1-test.18 (2026-09-25, branch `claude/gracious-hypatia-ditksb`, no pre-release yet)
 
 - Added `doc/` with Russian and English documentation: about the project and the Ursus family,
   operator guide, every menu in detail, architecture, and this complete changelog.
@@ -76,6 +115,75 @@ Releases by CI.
   refused, not queued. The confirmation shows the risk class, the ordered actions and the stop boundary.
 - In the console Ctrl+C during an operation is STOP (a second Ctrl+C within 3 s forces exit);
   outside an operation and in the UART terminal nothing changed.
+- **Spec stage 2: TUI** (`--tui`, Bubble Tea + Lip Gloss): the console's menus; the UART and event log
+  always on screen (≈35 %, filter, scroll, wrapping); §13 confirmation dialogs with the risk class,
+  actions and stop boundary; port choice and connection; STOP with `s` / Ctrl+C labelled by the core;
+  the UART terminal and Shell full screen with a return to the TUI; the 80×24 layout is covered by tests.
+  Without `--tui` the old console menu starts.
+- TUI after first feedback: screen zones are separated (top and bottom bars, titled rules, a log bar, a
+  gutter on log lines); every menu item has a description (what it does, what it needs, its risk); yes/no
+  questions and short options (`bl2/ubi`, reset / stay) are buttons, lists use highlighted arrows with the
+  `[1]` default preselected; hotkeys work with the Russian layout and through F2/F3/F4/F10; long lines wrap
+  at words. `AskRequest` gained `Quick` and `Default` for this; the console does not show them.
+- TUI, after the branch review:
+  - the port chooser (`p`) with no detected ports is no longer empty: it says no ports were found and
+    accepts a typed name, like the console;
+  - a probe with a non-zero code (no UART, no BootROM/U-Boot/Linux, an incomplete profile) is no longer a
+    green "Done": the result says INCOMPLETE with the code and reason, and the session is recorded as
+    failed; the console output is unchanged;
+  - a long confirmation is never cut: the answer line (phrase and input, or buttons) is pinned at the
+    bottom and the text above scrolls with ↑/↓ and a "lines N–M of K" indicator.
+- **The TUI is the default.** Without flags the TUI opens; the old text menu is `--console` and the
+  automatic fallback when the TUI cannot run (not a terminal, `TERM=dumb`, an error). The language follows
+  the Windows display language (the locale on Linux); `l` switches it in the TUI.
+- TUI, after feedback from Windows: log events are coloured like the console and UrsusFlasher (stage tags
+  amber, PASS green, errors bordeaux), router output in dark lime; the running log shows no times (they
+  stay in the log files), the operation panel shows them as a faint column so text does not jump; the top
+  bar no longer shows "op …xxxx", which looked like a stray checksum.
+- PC address for TFTP: any 192.168.1.2–.254 fits, not only .254. Without one the program waits up to 20 s
+  for a link (Windows hides a static address on a NIC without link until the router brings its port up),
+  then says what to set and offers Search again / Type an address / Cancel; a typed address is checked
+  (subnet, not .1, on a NIC of this PC) and a wrong one asks again instead of ending the operation.
+- TUI: the overall progress of stock and full-NAND writes ("chunk N of M, then BL2") as a wide line above
+  the current transfer; the console skips it, as it prints every chunk as its own line.
+- TUI: statuses stand out in the log: success bold bright green with ✓, warning with !, error bold bordeaux
+  with ✗; program steps light, notes and router output dark lime. The top bar is filled up to STOP.
+- Busy COM port: the dialog says which port is busy, what may hold it and what to do, with Retry / Another
+  port / Cancel buttons (Cancel was wrongly labelled No); the console letters `(r)` and `[1]` are not shown in
+  the TUI, which has buttons and a list instead.
+- A COM port held by another program is not an error: "held by another program, close it" with retry /
+  another port / cancel (console and TUI). On Linux a busy port is detected through `flock`.
+- TUI and menu texts, after the second review:
+  - after an incomplete probe the result states what actually happened ("no flash write commands were
+    sent", "ubi part was run: UBI may have changed its metadata", "FTP was enabled on the stock firmware",
+    "the RAM U-Boot was loaded into RAM only"), from the real outcome rather than one sentence for all;
+  - "NAND / UBI / U-Boot diagnostics" is now "NAND / MTD / U-Boot diagnostics" (console, TUI, MENU): it does
+    not attach UBI or list volumes, and the description says where to go for volumes;
+  - main menu item 2 is "Restore the FIP if UBI is intact" (was "Repair OpenWrt boot / replace the FIP");
+  - the full probe description: writes no flash, enabling FTP is asked separately;
+  - the TUI has no duplicate Diagnostics under Expert (console item numbers are unchanged);
+  - the result screen shows the session and operation IDs, the full log path is in the log;
+  - at 80×24 the item description always fits: while idle the log shrinks to 3 rows and the bear only
+    takes free space.
+- TUI: a blank row sets the tabs apart from the list; the navigation hints moved under the menu list (when
+  they fit; the bottom help bar always has the same keys); the help bar is dark lime like the log frame.
+- TUI: the logo is a teddy-bear head with a wink and a smile (big 8 rows, small 5), captioned "Ursus family ·
+  Bearborn utility"; on a big screen menu items are spaced, bold, with their hint below; the log bar and
+  plain log text are dark lime, only statuses are coloured.
+- Restore stock: instead of "MedveFlasher backup" it says which backups are accepted: an mtd16 or all_flash
+  file (.bin or .bin.gz) or a directory with mtd16.bin(.gz); the path question and the found-files message
+  say the same.
+- TUI: the logo is a sitting, winking teddy bear in half-blocks `▀▄█` (after an ASCII-art picture): ears,
+  an open and a winking eye, nose, arms, feet with pads; big (12 rows) and small (6 rows) for 80×24.
+- TUI: the logo is a winking ASCII bear with the UrsidoRescue name and version: big in the top-left
+  corner when the height allows, otherwise small in a free corner of the menu; it never pushes the menu or
+  the description off the screen.
+- Porting Collector: a `Username:` / `User:` prompt is recognised as a login (previously only `login:`);
+  when the last line is not a known prompt the probe says so instead of waiting silently for the timeout.
+- The Porting menu items report through the application layer; the console prints the same as before,
+  and the literal `\n` in the UBI attach text is now a line break.
+- Go 1.24 (required by the Charm modules); `probe`: `Info` calls no longer use a non-constant format
+  (a `go vet` requirement).
 - Stage 1 (application layer, STOP, Ctrl+C) passed the hardware check in `doc/HW_SMOKE_STAGE1_RU.md`:
   **HW smoke PASS**.
 - UI spec v3.1 and mockup: STOP states, port chooser, IDs on screen, Porting banners, BootROM wait
@@ -86,7 +194,82 @@ Releases by CI.
   UrsusBoot pipeline, with no UrsusBoot code.
 - Documentation and `PROBE.md` updated to test17: network and LAN prerequisites, coloured output,
   EOT, stock LAN assist, `--stock-lan-assist`, the Telnet-only passive plan and late credential refresh.
+- **Expert 7 / TUI Expert → Install UrsusBoot (UART)**: a persistent UrsusBoot 0.1.0-alpha5-t67
+  install on MD and MF over the UART and the RAM U-Boot only, for the stock and the UBI layout.
+  The candidate is built from the device's current content: it is read over the UART (`md.l` in
+  64 KiB pieces, each checked against the device's `crc32`; the RAM U-Boot has no `tftpput`) and
+  kept in the session as a backup. MD: the pinned t67 update.fip at `0x800` of the live boot area;
+  MF: only BL33 replaced in the live FIP (a port of UrsusFlasher 0.2.67). The BootROM prefix and
+  the stock env stay byte-exact; only changed blocks are written, BL2 last; on UBI only the
+  (static) `fip` volume. Typed phrase `INSTALL URSUSBOOT`. The new pinned payloads and their
+  provenance are in `payloads/`; `--selftest` checks them too. The fip-volume write of Restore FIP
+  moved into a shared helper (same commands).
 
+- TUI, after a reviewer's analysis: the UART consoles no longer drop into a black screen. The raw
+  backend (`tea.Exec`, `consoleRaw`, XMODEM, the fullscreen-ANSI detector) is unchanged; the new
+  `term_chrome.go` draws an UrsidoRescue header and key bar around it through an ANSI scroll region,
+  shows an entry plate, gives the screen to `top`/`vi`/a bootmenu and comes back after them. The
+  consoles' port is chosen in the TUI dialog first. `--console` prints as before.
+- Names: "UART Shell" → "Transparent UART console", "UART terminal" → "UART terminal + XMODEM" (both
+  front ends). The TUI Expert tab is ordered by risk, and the risk (`MANUAL` / `RAM only` / `WRITE` /
+  `RAW WRITE` / `ERASE`) shows under each item. The help bar shows the F-keys; during an operation
+  the top bar shows its name and phase (`READ 37%`, `2/6`).
+- UrsusBoot install: overall progress in 6 steps (RAM U-Boot and layout → read → checks and build →
+  TFTP → write → final readback); before the read it says what is read and that nothing was written
+  yet; on stock, after the block writes the whole 0x80000 area is read back and CRC32-checked.
+- The small bear's caption no longer shifts the divider at 80 columns.
+- The UART console frame, after the be131bf review: its own streaming reader of control sequences
+  (the pager keeps the old detector). The alternate screen suspends the frame only until its matching
+  exit; a bootmenu, hidden cursor + clear, until the cursor is shown; a bare `ESC[H`, `ESC[2J` or
+  `ESC[?25h` no longer suspends it (a shell `clear` keeps the cursor in the output area and the bars are
+  redrawn). An exit sequence split between reads no longer wipes the next prompt; the frame follows a
+  width-only resize too.
+- A new TUI operation starts without the previous one's overall progress.
+- File paths: up to three recent paths per operation in the run (a number or ↑↓), and "Browse…", the
+  Windows file dialog (comdlg32, no cgo) or zenity/kdialog on Linux. A path is remembered as soon as it
+  checks out. The stock backup can also be a folder: the Explorer window in folder mode
+  (IFileOpenDialog, FOS_PICKFOLDERS, over COM without cgo); on Linux `zenity --directory` / kdialog.
+- Hardware check protocol `doc/HW_SMOKE_STAGE2_RU.md` (Russian): the UART frame, alternate screen,
+  bootmenu, window width, Browse for a file and a folder, recent paths, then the UrsusBoot install.
+  Build `404b3b5`: CI PASS / HW PENDING. The guide now says a backup folder needs mtd16; mtd0…mtd15
+  are optional.
+- **False "readback CRC mismatch" during a stock restore (found on hardware).** The device computed the
+  right CRC (`==> 15f1f21c` = the expected one), but the program checked the output before it arrived:
+  `promptPresent` took the `=>` at the end of `crc32 … ==>` for the U-Boot prompt when a UART read ended
+  right after the arrow. A prompt now counts only at a line start (or after ANSI), with a regression test
+  for that cut. Besides, a readback mismatch is read again twice (read-only) before it is an error.
+- TUI after the Windows run: the log bar is filled to the right edge; F5 / h folds the log to its bar;
+  the top bar shows the operation's whole name or only its step, never a cut name; STOP is one button
+  ("■ STOP: s / Ctrl+C") and when it acts is said in the operation panel; the chosen port is remembered
+  and shown as "○ COM6 free" between operations (a vanished port is asked again); status marks √ and ×
+  instead of ✓ and ✗, which Windows console fonts lack; both bears are redrawn mirror-symmetric without the wink
+  (the small one: half-cell eyes, a nose, a short smile; a test keeps them symmetric).
+- **HW PASS:** a stock restore on Nokia XG-040G-MD (AN7581) through the TUI on Windows, build `4f2b474`:
+  30/30 IBU chunks and BL2 written and verified, the stock firmware booted; the same backup used to stop
+  on the false CRC error fixed in `245a3ed`.
+- Result screen: a full-width banner, "√ DONE · <operation> — completed successfully" (green),
+  "× FAILED" (bordeaux) or "! INCOMPLETE" (sand), with the same result at the right of the top bar; after
+  a success the overall bar shows 100 % ("all done and verified"), not the last step announced.
+- **Expert 8 / TUI Expert → Return/update vanilla U-Boot:** over the UART writes the pinned vanilla
+  OpenWrt U-Boot t67 from the UrsusFlasher 0.2.67 kit (MD `0aac2e6b…`, MF `18b1650e…`, equal to the
+  UrsusBoot provenance) into the UBI volume `fip`, instead of UrsusBoot or an older vanilla. The same
+  path as the UrsusBoot install on UBI: the volume read over the UART into a backup, static volume,
+  room check, TFTP, `INSTALL VANILLA UBOOT`, write and CRC. The stock layout is refused with nothing
+  written. The vanilla files are checked by `validatePinned` and `--selftest`.
+- **The UART terminal's line mode no longer draws `] ` over the router's prompt** (on hardware:
+  "] ot@OpenWrt:~#"). The terminal keeps the device's unfinished line and draws the input after it;
+  after Enter the device's echo shows the line, with no duplicate. A screen-emulator test reproduces the
+  old bug.
+- UART terminal commands without the menu: F2/F3 XMODEM send/receive, F4 line/raw, F10 quit, shown in
+  the key bar and on the entry plate. While a fullscreen program runs on the router the F-keys go to
+  it. Ctrl+S / Ctrl+R stay free (XOFF and shell search). On Windows the F-keys become xterm sequences.
+- Russian item names are nouns now ("Восстановление…", "Установка UrsusBoot", "Возврат/обновление
+  vanilla U-Boot", …) in the TUI, the console and MENU, and so are the steps in confirmations.
+- The bear's size depends on the window only: big when it fits on every tab and with every
+  description, otherwise small; it no longer grows when the Expert tab opens.
+- Numbering: `0.2.0-test18` → **`0.2.1-test.18`**. The releases page sorts by semver, where `test9` is
+  "newer" than `test17` (text compares character by character), so test9 sat on top. `0.2.1-…` is newer
+  than any `0.2.0-…`, and the number after the dot is numeric: `test.19` … `test.100` sort in order.
 ---
 
 ## 0.2.0-test17 (2026-09-24 12:39–12:49)

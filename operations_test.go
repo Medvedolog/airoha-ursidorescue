@@ -18,7 +18,10 @@ func TestCatalogueRiskClasses(t *testing.T) {
 		"stock-restore": app.Erase, "fip-repair": app.Write, "physical-restore": app.Erase,
 		"itb-boot": app.NonPersistent, "diagnostics": app.ReadOnly, "support-bundle": app.ReadOnly,
 		"ram-uboot": app.NonPersistent, "ubi-volume": app.Write, "raw-mtd": app.Write,
-		"terminal": app.Manual, "shell": app.Manual,
+		"terminal": app.Manual, "shell": app.Manual, "ws-console": app.Manual,
+		"ursusboot-install": app.Write, "vanilla-uboot": app.Write,
+		"bl2-rescue": app.Erase, "bootchain-rescue": app.Erase,
+		"mf-total-rescue-uart": app.Erase, "mf-total-rescue-tftp": app.Erase,
 	}
 	for k, r := range want {
 		op, ok := operationCatalog[k]
@@ -28,6 +31,26 @@ func TestCatalogueRiskClasses(t *testing.T) {
 	}
 	if len(operationCatalog) != len(want) {
 		t.Errorf("catalogue has %d entries, test knows %d", len(operationCatalog), len(want))
+	}
+}
+
+func TestUARTNoiseRetryPolicy(t *testing.T) {
+	for _, cmd := range []string{
+		"version", "mtd list", "mtd bad bl2", "mtd read bl2 0x90000000 0 0x20000",
+		"ubi info layout", "ubi read 0x92000000 fip 0x1000", "crc32 0x92000000 0x1000",
+		"md.l 0x90000000 0x10", "printenv", "bdinfo", "mw.b 0x92000000 0 0x1000",
+	} {
+		if !ubootNoiseRetrySafe(cmd) {
+			t.Errorf("safe command must be retryable after UART noise: %q", cmd)
+		}
+	}
+	for _, cmd := range []string{
+		"mtd erase bl2", "mtd erase ubi", "mtd write bl2 0x90000000 0 0x20000",
+		"ubi write 0x90000000 fip 0x7b000", "saveenv", "reset",
+	} {
+		if ubootNoiseRetrySafe(cmd) {
+			t.Errorf("persistent/destructive command must never auto-replay: %q", cmd)
+		}
 	}
 }
 

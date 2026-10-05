@@ -23,17 +23,24 @@ type operation struct {
 var unstoppable = map[string]bool{"terminal": true, "shell": true}
 
 var operationCatalog = map[string]operation{
-	"stock-restore":    {app.Erase, (*App).stockRestoreWizard},
-	"fip-repair":       {app.Write, (*App).fipRepairWizard},
-	"physical-restore": {app.Erase, (*App).physicalRestoreWizard},
-	"itb-boot":         {app.NonPersistent, (*App).bootRecoveryWizard},
-	"diagnostics":      {app.ReadOnly, (*App).diagnosticsWizard},
-	"support-bundle":   {app.ReadOnly, (*App).supportBundleOperation},
-	"ram-uboot":        {app.NonPersistent, (*App).ramUBootShell},
-	"ubi-volume":       {app.Write, (*App).expertUBIVolume},
-	"raw-mtd":          {app.Write, (*App).expertRawMTD},
-	"terminal":         {app.Manual, (*App).runTerminal},
-	"shell":            {app.Manual, (*App).uartShell},
+	"stock-restore":        {app.Erase, (*App).stockRestoreWizard},
+	"fip-repair":           {app.Write, (*App).fipRepairWizard},
+	"physical-restore":     {app.Erase, (*App).physicalRestoreWizard},
+	"itb-boot":             {app.NonPersistent, (*App).bootRecoveryWizard},
+	"diagnostics":          {app.ReadOnly, (*App).diagnosticsWizard},
+	"support-bundle":       {app.ReadOnly, (*App).supportBundleOperation},
+	"ram-uboot":            {app.NonPersistent, (*App).ramUBootShell},
+	"ubi-volume":           {app.Write, (*App).expertUBIVolume},
+	"raw-mtd":              {app.Write, (*App).expertRawMTD},
+	"ursusboot-install":    {app.Write, (*App).ursusBootInstallWizard},
+	"vanilla-uboot":        {app.Write, (*App).vanillaUBootWizard},
+	"bl2-rescue":           {app.Erase, (*App).bl2RescueWizard},
+	"bootchain-rescue":     {app.Erase, (*App).bootChainRescueWizard},
+	"mf-total-rescue-uart": {app.Erase, (*App).mfTotalRescueUART},
+	"mf-total-rescue-tftp": {app.Erase, (*App).mfTotalRescueTFTP},
+	"terminal":             {app.Manual, (*App).runTerminal},
+	"ws-console":           {app.Manual, (*App).runUrsusWSConsole},
+	"shell":                {app.Manual, (*App).uartShell},
 }
 
 // cancelledError is the operator's refusal to confirm, in the UI language.
@@ -60,6 +67,7 @@ func (a *App) RunOperation(kind string) error {
 func (a *App) inSession(sess *app.Session, kind string, risk app.Risk, fn func() error, closeAfter bool) error {
 	opID := sess.NewOperation(kind)
 	a.cancelMu.Lock()
+	a.lastSess, a.lastOp = sess.Dir, opID
 	prevUI, prevSess, prevOp, prevKind := a.ui, a.sess, a.op, a.opKind
 	a.ui = &app.SessionUI{Inner: a.front, Session: sess, Op: opID}
 	a.sess, a.op, a.opKind = sess, opID, kind
@@ -161,7 +169,7 @@ func (a *App) ramUBootShell() error {
 	if e != nil {
 		return e
 	}
-	a.note(L("RAM U-Boot готов. Открываю UART Shell; Ctrl+] вернёт в меню.", "RAM U-Boot is ready. Opening the UART Shell; Ctrl+] returns to the menu."))
+	a.note(L("RAM U-Boot готов. Открываю прозрачную UART-консоль; Ctrl+] вернёт в меню.", "RAM U-Boot is ready. Opening the transparent UART console; Ctrl+] returns to the menu."))
 	e = a.uartShellOn(s)
 	s.Close()
 	a.closeLog()
@@ -194,12 +202,8 @@ func (a *App) openPort() (Serial, error) {
 	owner := a.portOwner()
 	implicit := false
 	if _, ok := owner.Connected(); !ok {
-		name, err := a.choosePort()
-		if err != nil {
+		if err := a.connectChosenPort(owner); err != nil {
 			return nil, err
-		}
-		if err := owner.Connect(name); err != nil {
-			return nil, fmt.Errorf(L("не удалось открыть %s: %w", "open %s: %w"), name, err)
 		}
 		implicit = true
 	}
@@ -214,6 +218,52 @@ func (a *App) openPort() (Serial, error) {
 		return &oneShotPort{Port: p, owner: owner}, nil
 	}
 	return p, nil
+}
+
+// connectChosenPort asks for a port and connects it. A port held by another
+// program is not a failure: the operator is told to close that program and
+// may retry, pick another port or cancel.
+func (a *App) connectChosenPort(owner *app.PortOwner) error {
+	name, err := a.choosePort()
+	for err == nil {
+		err = owner.Connect(name)
+		if err == nil {
+			a.rememberPort(name)
+			return nil
+		}
+		if !errors.Is(err, errPortInUse) && a.portOverride == "" && name == a.rememberedPort() {
+			// The port chosen before is gone (adapter unplugged): ask again.
+			a.status("!", fmt.Sprintf(L("%s недоступен (%v) — выберите порт", "%s is not available (%v); choose a port"), name, err), app.LevelWarn)
+			a.rememberPort("")
+			name, err = a.askPort()
+			continue
+		}
+		if !errors.Is(err, errPortInUse) || a.portOverride != "" {
+			return fmt.Errorf(L("не удалось открыть %s: %w", "open %s: %w"), name, err)
+		}
+		// The question says which port and what to do; the letters in the
+		// prompt are for the console, the TUI shows buttons instead.
+		v, _ := a.ui.Ask(app.AskRequest{Kind: app.AskText,
+			Title: err.Error() + ".\n" + L("Закройте эту программу и нажмите «Повторить» — или выберите другой порт.",
+				"Close that program and press Retry, or choose another port."),
+			Prompt: L("Повторить (r), другой порт (p) или отмена (n)? [r]: ", "Retry (r), another port (p) or cancel (n)? [r]: "),
+			Quick: []app.Choice{
+				{Key: "r", Label: L("Повторить", "Retry")},
+				{Key: "p", Label: L("Другой порт", "Another port")},
+				{Key: "n", Label: L("Отмена", "Cancel")},
+			},
+			Default: "r"})
+		v = strings.TrimSpace(v)
+		switch strings.ToLower(v) {
+		case "", "r", "к":
+			err = nil // the same port again
+		case "p", "з":
+			name, err = a.askPort()
+		default:
+			return cancelledError{L("выбор порта отменён", "port choice cancelled")}
+		}
+	}
+	return err
 }
 
 // oneShotPort is a lease on a port connected just for one operation.
@@ -244,6 +294,14 @@ var cancelNotes = map[string]func() string{
 		return L("до «mtd erase ubi» — сразу; во время стирания и записи частей — после текущей части и её проверки; от стирания BL2 до его проверки — недоступна",
 			"before \"mtd erase ubi\": at once; while erasing and writing chunks: after the current chunk and its readback; from erasing BL2 until it is verified: unavailable")
 	},
+	"vanilla-uboot": func() string {
+		return L("до записи (в том числе во время чтения по UART) — сразу; запись тома fip и её проверка не прерываются",
+			"before writing (the UART read included): at once; writing the fip volume and its readback are not interrupted")
+	},
+	"ursusboot-install": func() string {
+		return L("до записи (в том числе во время чтения по UART) — сразу; запись и её проверка не прерываются",
+			"before writing (the UART read included): at once; the write and its readback are not interrupted")
+	},
 	"fip-repair": func() string {
 		return L("до записи — сразу; запись тома fip и её проверка не прерываются",
 			"before writing: at once; writing the fip volume and its readback are not interrupted")
@@ -251,6 +309,22 @@ var cancelNotes = map[string]func() string{
 	"ubi-volume": func() string {
 		return L("до записи — сразу; запись тома и её проверка не прерываются",
 			"before writing: at once; writing the volume and its readback are not interrupted")
+	},
+	"bl2-rescue": func() string {
+		return L("до стирания BL2 — сразу; от стирания BL2 до завершения проверки остановка недоступна",
+			"before erasing BL2: at once; from BL2 erase until verification completes, stopping is unavailable")
+	},
+	"bootchain-rescue": func() string {
+		return L("до записи FIP — сразу; после начала записи FIP цепочка доводится до проверки FIP и затем BL2 последним",
+			"before the FIP write: at once; after FIP writing starts, the chain is completed through FIP verification and BL2 last")
+	},
+	"mf-total-rescue-uart": func() string {
+		return L("до mtd erase ubi — сразу; после стирания UBI операция доводит fresh UBI/FIP и BL2 до полной проверки",
+			"before mtd erase ubi: at once; after UBI erase the operation completes fresh UBI/FIP and BL2 through full verification")
+	},
+	"mf-total-rescue-tftp": func() string {
+		return L("до mtd erase ubi — сразу; после стирания UBI операция доводит fresh UBI/FIP и BL2 до полной проверки",
+			"before mtd erase ubi: at once; after UBI erase the operation completes fresh UBI/FIP and BL2 through full verification")
 	},
 	"raw-mtd": func() string {
 		return L("до записи — сразу; запись и её проверка не прерываются",
@@ -302,6 +376,14 @@ func (a *App) cancelMode() app.CancelMode {
 	a.cancelMu.Lock()
 	defer a.cancelMu.Unlock()
 	return a.cancel.Mode
+}
+
+// LastOperation is the session directory and ID of the latest operation, so a
+// front end can say which logs to attach. Safe from any goroutine.
+func (a *App) LastOperation() (sessionDir, op string) {
+	a.cancelMu.Lock()
+	defer a.cancelMu.Unlock()
+	return a.lastSess, a.lastOp
 }
 
 // Busy reports whether an operation is running. Safe from any goroutine.
@@ -356,4 +438,18 @@ func (a *App) stopBeforeCommand(command string) error {
 		return stopError(L("до команды ", "before the command ") + command)
 	}
 	return nil
+}
+
+// rememberPort keeps the operator's port for the next operation and the top
+// bar; "" forgets it.
+func (a *App) rememberPort(name string) {
+	a.portMu.Lock()
+	a.lastPort = name
+	a.portMu.Unlock()
+}
+
+func (a *App) rememberedPort() string {
+	a.portMu.Lock()
+	defer a.portMu.Unlock()
+	return a.lastPort
 }

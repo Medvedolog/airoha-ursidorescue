@@ -58,3 +58,6 @@ func consoleRows() int {
 func consoleReadInput(buf []byte) (int, error) {
 	return os.Stdin.Read(buf)
 }
+
+// systemLang: Linux has no separate UI language; the locale variables decide.
+func systemLang() string { return "" }

@@ -92,6 +92,11 @@ func TestPrompt(t *testing.T) {
 		[]byte("foo > bar"),
 		[]byte("AN7583> still printing"),
 		[]byte("echo U-Boot> not-a-prompt"),
+		// A serial read cut right after crc32's arrow (seen on hardware:
+		// the value came in the next read and the readback was misjudged).
+		[]byte("crc32 0x90000000 0x800000\r\ncrc32 for 90000000 ... 907fffff ==>"),
+		[]byte("crc32 for 90000000 ... 907fffff ==> "),
+		[]byte("bootcmd=run a=>"),
 	}
 	for _, in := range bad {
 		if promptPresent(in) {
@@ -109,6 +114,30 @@ func TestGoodSpans(t *testing.T) {
 	s := goodSpans(0, 0x80000, []uint64{0x20000})
 	if len(s) != 2 || s[0][0] != 0 || s[0][1] != 0x20000 || s[1][0] != 0x40000 || s[1][1] != 0x40000 {
 		t.Fatalf("%v", s)
+	}
+}
+
+func TestStockBBTSummary(t *testing.T) {
+	xs := []uint64{
+		0x00020000,                     // critical in restored span
+		stockBadSafeUBIStart,           // safe skip
+		stockBadSafeUBIEnd - eraseSize, // safe skip
+		stockIBUSize,                   // outside restored span
+	}
+	s := summarizeStockBadBlocks(xs)
+	if s.Total != 4 || s.Restore != 3 || s.SafeSkips != 2 || s.Outside != 1 || s.Critical != 1 {
+		t.Fatalf("summary=%+v", s)
+	}
+}
+
+func TestCountNewBadBlocks(t *testing.T) {
+	before := []uint64{0x20000, 0x40000}
+	after := []uint64{0x20000, 0x40000, 0x80000}
+	if got := countNewBadBlocks(before, after); got != 1 {
+		t.Fatalf("new=%d", got)
+	}
+	if got := countNewBadBlocks(after, before); got != 0 {
+		t.Fatalf("removed blocks must not count as new: %d", got)
 	}
 }
 func TestVendorIsInformationalParser(t *testing.T) {

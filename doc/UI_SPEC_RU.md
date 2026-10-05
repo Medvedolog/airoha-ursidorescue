@@ -211,7 +211,10 @@ ursidorescue <CLI command> ...
 исключение из принципа нулевых зависимостей: pure-Go, без cgo, версии закреплены в `go.mod` / `go.sum`.
 
 Структура та же, что в §4. Обязательная проверка на **80×24**: приоритет у текущей операции, предупреждений и
-ввода; вторичные панели сворачиваются или прокручиваются. Палитра UrsusBoot; `NO_COLOR` и `TERM=dumb`
+ввода; вторичные панели сворачиваются или прокручиваются. В TUI в режиме ожидания (меню, операция не идёт) лог
+может сжиматься до 3 строк, чтобы меню и описание пункта помещались целиком; во время операции и в диалогах
+действует правило §4 (≈35 %, не меньше 5 строк). В длинных диалогах строка ответа закреплена внизу, текст над ней
+прокручивается. Палитра UrsusBoot; `NO_COLOR` и `TERM=dumb`
 соблюдаются.
 
 ### 5.4. CLI / console
@@ -436,7 +439,7 @@ Persistent UrsusBoot Web → Persistent UrsusBoot UART → RAM RECOVERY_SAFE →
 |---|---|---|---|
 | Оживить «кирпич»: BootROM → RAM U-Boot | `acquireRAMUBoot` (Эксперт 2) | NON_PERSISTENT | нет |
 | Вернуть сток из `mtd16` / бэкапа MedveFlasher | `stockRestoreWizard` | ERASE + WRITE | фраза `RESTORE STOCK BACKUP` |
-| Починить загрузку (UBI-том `fip`) | `fipRepairWizard` | WRITE | фраза `WRITE FIP` |
+| Восстановить FIP, если UBI цел (UBI-том `fip`) | `fipRepairWizard` | WRITE | фраза `WRITE FIP` |
 | Залить весь NAND (256 МиБ) | `physicalRestoreWizard` | ERASE + WRITE | фраза `RESTORE PHYSICAL NAND` |
 | Загрузить ITB в RAM | `bootRecoveryWizard` | NON_PERSISTENT | кнопка (сейчас фраза `BOOT RAM ITB` → упрощается) |
 | Диагностика | `diagnosticsWizard` | READ_ONLY | нет |
@@ -464,7 +467,7 @@ Recovery
 
 [ Оживить «кирпич» (RAM U-Boot) ]
 [ Вернуть сток ]
-[ Починить загрузку (FIP) ]
+[ Восстановить FIP (UBI цел) ]
 [ Залить весь NAND ]
 [ Загрузить ITB в RAM ]
 [ Эксперт ▸ ]
@@ -538,7 +541,7 @@ UI-уровни: INFO / WARNING / DANGER / BLOCKED. Красные предуп�
 
 ```text
 Устройство:   Nokia XG-040G-MF · Airoha AN7583
-Операция:     Починить загрузку (FIP)
+Операция:     Восстановить FIP (UBI цел)
 Цель:         UBI-том "fip" на разделе ubi (0x00020000–0x10000000)
 Длина:        324 908 байт
 Файл:         recovery-safe-u-boot.fip · SHA256 7b56…d782
@@ -806,6 +809,12 @@ ui/web/  ui/tui/   интерфейсы; hardware-логики здесь нет
 ### Этап 2 — TUI
 Bubble Tea + Lip Gloss; выбор порта, connect/disconnect; статус; лог UART; навигация Recovery/Probe; полный
 probe; прогресс и подтверждения по §13; 80×24; Linux x86_64 и ARM64; корректная работа по SSH.
+
+*Статус:* реализован (`tui.go`, `tui_model.go`, `tui_menu.go`); раскладка 80×24 покрыта тестами; HW и
+SSH — на проверке. Пока нет Web-GUI, TUI — режим по умолчанию на всех платформах; текстовое меню — `--console`
+и автоматический запасной вариант, если TUI не может работать (не терминал, `TERM=dumb`, ошибка). Когда
+появится Web-GUI, автовыбор §5.5 вернёт Windows desktop к нему. Операции с собственным терминалом (UART-терминал, Shell,
+RAM U-Boot) временно получают консоль целиком через `tea.Exec`.
 
 ### Этап 2б — Детектор «кто на том конце» (§9a)
 Только чтение: BootROM / persistent UrsusBoot (UART, Web) / RAM RECOVERY_SAFE / чужой U-Boot / Linux,

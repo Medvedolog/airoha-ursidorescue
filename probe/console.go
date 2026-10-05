@@ -29,7 +29,7 @@ var (
 	ubootPromptRE = regexp.MustCompile(`^(?:[A-Za-z0-9_.-]{1,32} ?>|=>)$`)
 	otherBootRE   = regexp.MustCompile(`(?i)^(?:bldr|tcboot|cfe|redboot|brom)\s*>$`)
 	shellPromptRE = regexp.MustCompile(`^(?:\S.{0,80})?[#$]$`)
-	loginRE       = regexp.MustCompile(`(?i)\blogin:$`)
+	loginRE       = regexp.MustCompile(`(?i)(?:\blogin|\buser(?:\s?name)?)\s*:$`)
 	passwordRE    = regexp.MustCompile(`(?i)password:$`)
 )
 

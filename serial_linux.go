@@ -20,7 +20,16 @@ type linuxSerial struct {
 func openSerial(name string) (Serial, error) {
 	fd, err := syscall.Open(name, syscall.O_RDWR|syscall.O_NOCTTY|syscall.O_NONBLOCK, 0)
 	if err != nil {
+		if err == syscall.EBUSY {
+			return nil, portInUse(name)
+		}
 		return nil, err
+	}
+	// Linux lets two programs open one tty; an exclusive advisory lock (the
+	// one picocom and similar tools take) tells us another one is using it.
+	if err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err == syscall.EWOULDBLOCK {
+		syscall.Close(fd)
+		return nil, portInUse(name)
 	}
 	var tio syscall.Termios
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), uintptr(syscall.TCGETS), uintptr(unsafe.Pointer(&tio)))

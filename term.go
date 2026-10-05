@@ -129,6 +129,11 @@ const (
 	winVKD      = 0x44
 	winVKZ      = 0x5a
 	winVKOEM6   = 0xdd
+	winVKF2     = 0x71
+	winVKF3     = 0x72
+	winVKF4     = 0x73
+	winVKF5     = 0x74
+	winVKF10    = 0x79
 
 	winRightCtrlPressed = 0x0004
 	winLeftCtrlPressed  = 0x0008
@@ -176,6 +181,16 @@ func translateWindowsConsoleKey(vk uint16, ch rune, controlState uint32, repeat 
 			one = []byte("\x1b[F")
 		case winVKDelete:
 			one = []byte("\x1b[3~")
+		case winVKF2: // F-keys as xterm sends them: the terminal's own
+			one = []byte("\x1bOQ") // commands, or the device's while a
+		case winVKF3: // fullscreen program runs there
+			one = []byte("\x1bOR")
+		case winVKF4:
+			one = []byte("\x1bOS")
+		case winVKF5:
+			one = []byte("\x1b[15~")
+		case winVKF10:
+			one = []byte("\x1b[21~")
 		}
 	}
 	if len(one) == 0 {
