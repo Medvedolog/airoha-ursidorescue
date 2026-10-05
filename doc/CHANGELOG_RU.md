@@ -46,8 +46,47 @@
 | 0.2.0-test16 | `8f72817` | да | stock LAN assist: UART-вход и UID 0 |
 | 0.2.0-test17 | `6008769` | да | Telnet-only passive plan, перечитывание поздних паролей, auth hardening |
 | 0.2.1-test.18 | ветка | ещё нет | application layer и СТОП, TUI по умолчанию, установка UrsusBoot по UART, рамка UART, исправление ложной ошибки CRC |
+| 0.2.1-test.19 | `3167b36` | нет | MD rescue без чтения сломанного UBI/FIP |
+| 0.2.1-test.21 | `7c4190d` | нет | аварийное восстановление BL2 на MD |
+| 0.2.1-test.22 | `77a2dfd` | нет | отдельные BL2 и BL2+FIP rescue для MD/MF |
+| 0.2.1-test.23-uart-noise | `c1391a8` | нет | глобальная устойчивость к шумному UART, destructive-команды не повторяются |
+| 0.2.1-test.24-mf-total-rescue | ветка `dev/mf-total-ubi-rescue` | **да** | MF TOTAL rescue: fresh UBI + fip ID4 + UrsusBoot FIP + BL2, UART-only или TFTP |
 
 ---
+
+## 0.2.1-test.24-mf-total-rescue — 05.10.2026
+
+Статус: **CI PASS / HW PARTIAL; MF TOTAL HW PENDING**.
+
+Этот pre-release собирает в один релиз все dev-изменения после test18:
+
+- **MF TOTAL rescue при полностью потерянной UBI** — два отдельных Expert-пути:
+  - **UART-only**: BootROM → RAM U-Boot → FIP/BL2 через `loadx` + XMODEM, без Ethernet/TFTP;
+  - **TFTP**: FIP и BL2 заранее грузятся в разные области RAM по Ethernet, после начала erase сеть не нужна.
+- Полный destructive-порядок для MF/AN7583: стабильная BBT → оба payload в RAM и проверка →
+  один `y/N` → `mtd erase ubi` → fresh UBI → static `fip` **ID 4**, размер `0x100000` →
+  запись/CRC-readback UrsusBoot FIP → **BL2 последним** → CRC-readback BL2.
+- Старый UBI/FIP в TOTAL-режиме не читается и не считается источником истины. Это путь именно для
+  кирпича, где UBI metadata/FIP утрачены или недостоверны.
+- **MD/MF rescue разделён на отдельные операции**: восстановление только BL2 и восстановление полной
+  boot chain BL2 + FIP. Обычная установка UrsusBoot остаётся отдельной операцией.
+- **Глобальная устойчивость к шумному UART**: read-only/RAM-команды можно безопасно повторять;
+  flash-changing команды после потерянного/битого ответа **никогда не переигрываются автоматически**,
+  результат доказывает независимый readback.
+- XMODEM для шумной линии усилен: до 16 попыток на блок, ACK имеет приоритет над мусором, отмена только
+  по `CAN CAN`, EOT не спамится после полностью подтверждённого payload.
+- **UrsusBoot Ethernet/WebSocket console**: нативный RFC6455-клиент без сторонних WS-зависимостей,
+  F2 загрузка в RAM, F3 диагностика/выгрузка RAM через TFTP PUT, F5 read-only presets, двойной Ctrl-C
+  guard на пустом `UrsusBoot>`.
+- Для stock restore добавлено явное резюме bad blocks и безопасно пропущенных eraseblock.
+- MF rescue FIP теперь строится только из закреплённого профиля/проверенных компонентов, без догадок по
+  выравниванию.
+- Документация RU/EN, меню и operator guide обновлены под test24.
+- Финальный CI на release-ветке: formatting, vet/tests, Windows x64, Linux x86_64/arm64, selftest,
+  packaging и artifact upload — PASS.
+
+Проверка на реальном железе для нового MF TOTAL пути ещё не выполнена; прежние подтверждённые HW
+результаты test18 сохраняют статус **HW PARTIAL**.
 
 ## 0.2.1-test.18 — 25.09.2026 (ветка `claude/gracious-hypatia-ditksb`, pre-release ещё нет)
 
