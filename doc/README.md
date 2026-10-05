@@ -1,6 +1,6 @@
 # UrsidoRescue — документация / documentation
 
-Версия: **0.2.1-test.18** · статус: simulation candidate / HW PARTIAL (см. [../STATUS.md](../STATUS.md))
+Версия: **0.2.1-test.24-mf-total-rescue** · статус: CI PASS / HW PARTIAL; MF TOTAL HW PENDING (см. [../STATUS.md](../STATUS.md))
 
 ## Русский
 
