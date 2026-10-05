@@ -38,9 +38,9 @@ UrsidoRescue сделан именно для этого момента. Он д
 Вторая его работа — **разведка**. На Airoha-устройстве, которое ещё никто не портировал, он строго
 в режиме чтения собирает всё, что нужно для нового порта UrsusBoot, и упаковывает в один архив.
 
-## Текущий dev-кандидат
+## Крайний pre-release
 
-**0.2.1-test.25-md-mf-total-rescue** делает TOTAL disaster recovery симметричным для Nokia XG-040G-MD / AN7581 и XG-040G-MF / AN7583. Оба профиля используют один fresh-UBI transaction engine с выбором UART-only или TFTP. Опубликованным релизом пока остаётся test24 до завершения CI/release-проверки test25; TOTAL flash-paths имеют статус **HW PENDING**.
+**0.2.1-test.25-md-mf-total-rescue** делает TOTAL disaster recovery симметричным для Nokia XG-040G-MD / AN7581 и XG-040G-MF / AN7583. Оба профиля используют один fresh-UBI transaction engine с выбором UART-only или TFTP. CI проходит на Windows x64 и Linux x86_64/arm64; MD/MF TOTAL flash-paths пока имеют статус **HW PENDING**.
 
 ## Что умеет медвежонок-спасатель
 
