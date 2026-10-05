@@ -8,7 +8,7 @@
 
 **Brings bricked Airoha routers back over UART, even when only the BootROM is left alive**
 
-[![Pre-release](https://img.shields.io/github/v/release/Medvedolog/airoha-ursidorescue?include_prereleases&label=pre-release&color=c8873a)](https://github.com/Medvedolog/airoha-ursidorescue/releases)
+[![Release](https://img.shields.io/github/v/release/Medvedolog/airoha-ursidorescue?label=release&color=c8873a)](https://github.com/Medvedolog/airoha-ursidorescue/releases/latest)
 [![Build](https://img.shields.io/github/actions/workflow/status/Medvedolog/airoha-ursidorescue/build.yml?branch=main&label=build)](https://github.com/Medvedolog/airoha-ursidorescue/actions/workflows/build.yml)
 ![Go](https://img.shields.io/badge/Go-1.24%20·%20zero%20deps-00add8?logo=go&logoColor=white)
 ![Platforms](https://img.shields.io/badge/Windows%20·%20Linux%20x64%20·%20arm64-single%20binary-6f4b2f)
@@ -37,7 +37,7 @@ longer reach the router, the bear cub still can.
 Its second job is **exploration**. On an Airoha device nobody has ported yet, it collects everything
 a new UrsusBoot port needs, strictly read-only, and packs it into one bundle.
 
-## Latest pre-release
+## Latest release
 
 **0.2.1-test.25-md-mf-total-rescue** makes TOTAL disaster recovery symmetric for both Nokia XG-040G-MD / AN7581 and XG-040G-MF / AN7583. Both profiles use the same fresh-UBI transaction engine with UART-only or TFTP payload transport. CI passes on Windows x64 and Linux x86_64/arm64; the MD/MF TOTAL flash paths remain **HW PENDING**.
 
@@ -60,6 +60,31 @@ a new UrsusBoot port needs, strictly read-only, and packs it into one bundle.
 
 Everything needed is inside one static binary per platform: its own serial driver, XMODEM, TFTP
 server and DTB parser. No Python, no pip, no extra tools, no internet required.
+
+## TOTAL disaster recovery
+
+Use **boot-chain rescue** when UBI still attaches and the existing `fip` volume is present. Use
+**TOTAL rescue** only when UBI metadata or `fip` can no longer be trusted: it intentionally erases
+the whole `ubi` MTD and rebuilds the minimum bootable layout.
+
+| Profile | Rescue FIP | Final step |
+|---|---|---|
+| MD / AN7581 | pinned complete MD UrsusBoot FIP | boot UrsusBoot Recovery and install the matching **MD UBI sysupgrade** |
+| MF / AN7583 | pinned vanilla MF FIP with the verified UrsusBoot BL33 replacement | boot UrsusBoot Recovery and install the matching **MF UBI sysupgrade** |
+
+Both profiles offer the same two transports:
+
+- **UART-only:** BootROM, RAM U-Boot, FIP and BL2 all travel over UART/XMODEM; Ethernet is not required.
+- **TFTP:** FIP and BL2 are preloaded into separate RAM ranges over Ethernet before flash erase starts; the destructive phase no longer depends on the network.
+
+The flash transaction is identical for MD and MF: stable BBT → verify both RAM payloads → one
+`y/N` → erase `ubi` → create fresh UBI → create static `fip` volume **ID 4**, size
+`0x100000` → write/read back FIP → write/read back **BL2 last**. Persistent flash-changing
+commands are never replayed automatically just because a UART completion response was damaged or lost.
+
+> [!CAUTION]
+> TOTAL rescue destroys the previous OpenWrt volumes and settings under `ubi`. It does not recreate
+> device identity/calibration data from nowhere; keep a factory backup whenever one exists.
 
 ## Principles
 
