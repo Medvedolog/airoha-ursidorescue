@@ -36,8 +36,8 @@ var operationCatalog = map[string]operation{
 	"vanilla-uboot":        {app.Write, (*App).vanillaUBootWizard},
 	"bl2-rescue":           {app.Erase, (*App).bl2RescueWizard},
 	"bootchain-rescue":     {app.Erase, (*App).bootChainRescueWizard},
-	"mf-total-rescue-uart": {app.Erase, (*App).mfTotalRescueUART},
-	"mf-total-rescue-tftp": {app.Erase, (*App).mfTotalRescueTFTP},
+	"total-rescue-uart":    {app.Erase, (*App).totalRescueUART},
+	"total-rescue-tftp":    {app.Erase, (*App).totalRescueTFTP},
 	"terminal":             {app.Manual, (*App).runTerminal},
 	"ws-console":           {app.Manual, (*App).runUrsusWSConsole},
 	"shell":                {app.Manual, (*App).uartShell},
@@ -318,11 +318,11 @@ var cancelNotes = map[string]func() string{
 		return L("до записи FIP — сразу; после начала записи FIP цепочка доводится до проверки FIP и затем BL2 последним",
 			"before the FIP write: at once; after FIP writing starts, the chain is completed through FIP verification and BL2 last")
 	},
-	"mf-total-rescue-uart": func() string {
+	"total-rescue-uart": func() string {
 		return L("до mtd erase ubi — сразу; после стирания UBI операция доводит fresh UBI/FIP и BL2 до полной проверки",
 			"before mtd erase ubi: at once; after UBI erase the operation completes fresh UBI/FIP and BL2 through full verification")
 	},
-	"mf-total-rescue-tftp": func() string {
+	"total-rescue-tftp": func() string {
 		return L("до mtd erase ubi — сразу; после стирания UBI операция доводит fresh UBI/FIP и BL2 до полной проверки",
 			"before mtd erase ubi: at once; after UBI erase the operation completes fresh UBI/FIP and BL2 through full verification")
 	},
