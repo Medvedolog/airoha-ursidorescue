@@ -51,13 +51,13 @@
 | 0.2.1-test.22 | `77a2dfd` | нет | отдельные BL2 и BL2+FIP rescue для MD/MF |
 | 0.2.1-test.23-uart-noise | `c1391a8` | нет | глобальная устойчивость к шумному UART, destructive-команды не повторяются |
 | 0.2.1-test.24-mf-total-rescue | ветка `dev/mf-total-ubi-rescue` | **да** | MF TOTAL rescue: fresh UBI + fip ID4 + UrsusBoot FIP + BL2, UART-only или TFTP |
-| 0.2.1-test.25-md-mf-total-rescue | ветка `dev/md-mf-total-rescue` | **да** | TOTAL rescue симметрично для MD/MF: fresh UBI + профильный FIP + BL2, UART-only или TFTP |
+| 0.2.1-test.25-md-mf-total-rescue | `6686a1d` | **release** | TOTAL rescue симметрично для MD/MF: fresh UBI + профильный FIP + BL2, UART-only или TFTP |
 
 ---
 
 ## 0.2.1-test.25-md-mf-total-rescue — 05.10.2026
 
-Статус: **CI PASS / HW PARTIAL; MD/MF TOTAL HW PENDING**.
+Статус: **RELEASE / CI PASS / HW PARTIAL; MD/MF TOTAL HW PENDING**.
 
 - TOTAL disaster recovery больше не MF-only: один общий движок работает для **MD/AN7581** и **MF/AN7583**.
 - В Expert остаются два симметричных транспортных режима:
@@ -77,6 +77,7 @@
 - После PASS оператор загружается в UrsusBoot Recovery и устанавливает соответствующий **MD или MF UBI sysupgrade**.
 - CI PASS: formatting, vet/tests, Windows x64, Linux x86_64/arm64, selftest, packaging и artifact upload.
 - Hardware acceptance для обоих TOTAL-путей пока **PENDING**.
+- GitHub Release: test25 опубликован как обычный release, не pre-release; ZIP и SHA256 остаются теми же проверенными артефактами test25.
 
 ## 0.2.1-test.24-mf-total-rescue — 05.10.2026
 
