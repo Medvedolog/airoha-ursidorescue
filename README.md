@@ -37,9 +37,9 @@ longer reach the router, the bear cub still can.
 Its second job is **exploration**. On an Airoha device nobody has ported yet, it collects everything
 a new UrsusBoot port needs, strictly read-only, and packs it into one bundle.
 
-## Current development candidate
+## Latest pre-release
 
-**0.2.1-test.25-md-mf-total-rescue** makes TOTAL disaster recovery symmetric for both Nokia XG-040G-MD / AN7581 and XG-040G-MF / AN7583. Both profiles now use the same fresh-UBI transaction engine with UART-only or TFTP payload transport. The published test24 remains the latest release until test25 completes CI/release validation; TOTAL flash paths are **HW PENDING**.
+**0.2.1-test.25-md-mf-total-rescue** makes TOTAL disaster recovery symmetric for both Nokia XG-040G-MD / AN7581 and XG-040G-MF / AN7583. Both profiles use the same fresh-UBI transaction engine with UART-only or TFTP payload transport. CI passes on Windows x64 and Linux x86_64/arm64; the MD/MF TOTAL flash paths remain **HW PENDING**.
 
 ## What the rescue bear can do
 
