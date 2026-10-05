@@ -6,29 +6,30 @@ import (
 	"fmt"
 	"hash/crc32"
 	"os"
+	"strings"
 	"time"
 
 	"ursidorescue/app"
 )
 
 const (
-	mfRescueFIPVolumeSize = 0x00100000
-	mfRescueBL2Addr       = 0x91000000
+	totalRescueFIPVolumeSize = 0x00100000
+	totalRescueBL2Addr       = 0x91000000
 )
 
-type mfRescueTransport string
+type totalRescueTransport string
 
 const (
-	mfRescueUART mfRescueTransport = "uart-xmodem"
-	mfRescueTFTP mfRescueTransport = "tftp"
+	totalRescueUARTTransport totalRescueTransport = "uart-xmodem"
+	totalRescueTFTPTransport totalRescueTransport = "tftp"
 )
 
-func (a *App) mfTotalRescueUART() error {
-	return a.mfTotalRescue(mfRescueUART)
+func (a *App) totalRescueUART() error {
+	return a.totalRescue(totalRescueUARTTransport)
 }
 
-func (a *App) mfTotalRescueTFTP() error {
-	return a.mfTotalRescue(mfRescueTFTP)
+func (a *App) totalRescueTFTP() error {
+	return a.totalRescue(totalRescueTFTPTransport)
 }
 
 func (a *App) stableBadBlocks(s Serial, part string, size uint64) ([]uint64, error) {
@@ -146,11 +147,11 @@ func (a *App) xmodemLoadRAM(s Serial, path, label string, addr uint64) error {
 	return nil
 }
 
-func (a *App) mfLoadRescuePayload(s Serial, transport mfRescueTransport, path, remote, label string, addr uint64) error {
+func (a *App) loadTotalRescuePayload(s Serial, transport totalRescueTransport, path, remote, label string, addr uint64) error {
 	switch transport {
-	case mfRescueUART:
+	case totalRescueUARTTransport:
 		return a.xmodemLoadRAM(s, path, label, addr)
-	case mfRescueTFTP:
+	case totalRescueTFTPTransport:
 		_, err := a.tftpLoad(s, path, remote, addr)
 		return err
 	default:
@@ -181,21 +182,31 @@ func validateFreshFIPVolume(vols []ubiVol, payloadSize uint64) error {
 	return nil
 }
 
-func (a *App) mfTotalRescue(transport mfRescueTransport) error {
-	if transport == mfRescueTFTP {
+func (a *App) totalRescue(transport totalRescueTransport) error {
+	if transport == totalRescueTFTPTransport {
 		a.showNetworkPrerequisites()
 	} else {
 		a.status("UART", L("Аварийный режим без сети: BootROM, RAM U-Boot, FIP и BL2 передаются только по UART/XMODEM", "Network-free rescue: BootROM, RAM U-Boot, FIP and BL2 use UART/XMODEM only"), app.LevelInfo)
 	}
 
-	expected := profiles["mf"]
+	expected, err := chooseProfileInteractive(a)
+	if err != nil {
+		return err
+	}
+	if expected.ID != "md" && expected.ID != "mf" {
+		return fmt.Errorf("TOTAL rescue: unsupported profile %q", expected.ID)
+	}
+
 	s, p, _, err := a.acquireRAMUBoot(expected)
 	if err != nil {
 		return err
 	}
 	defer func() { s.Close(); a.closeLog() }()
-	if p.ID != "mf" || p.SoC != "AN7583" {
-		return fmt.Errorf(L("полное восстановление пустой UBI разрешено только для MF/AN7583, обнаружен %s/%s", "empty-UBI total rescue is MF/AN7583-only; detected %s/%s"), p.ID, p.SoC)
+	if p.ID != expected.ID || p.SoC != expected.SoC {
+		return fmt.Errorf(L(
+			"TOTAL rescue: ожидался %s/%s, обнаружен %s/%s",
+			"TOTAL rescue: expected %s/%s, detected %s/%s"),
+			expected.ID, expected.SoC, p.ID, p.SoC)
 	}
 
 	bl2, preSHA, bl2CRC, err := a.rescueProfileBL2(p)
@@ -206,16 +217,16 @@ func (a *App) mfTotalRescue(transport mfRescueTransport) error {
 	if err != nil {
 		return err
 	}
-	if uint64(len(fip)) > mfRescueFIPVolumeSize {
-		return fmt.Errorf("MF rescue FIP 0x%x exceeds canonical fip volume 0x%x", len(fip), mfRescueFIPVolumeSize)
+	if uint64(len(fip)) > totalRescueFIPVolumeSize {
+		return fmt.Errorf("%s rescue FIP 0x%x exceeds canonical fip volume 0x%x", p.ID, len(fip), totalRescueFIPVolumeSize)
 	}
 	a.reportInstall(rep)
 
-	bl2Path, err := a.saveInstallFile("mf-total-rescue-bl2.bin", L("Аварийный BL2:", "Rescue BL2:"), bl2)
+	bl2Path, err := a.saveInstallFile(p.ID+"-total-rescue-bl2.bin", L("Аварийный BL2:", "Rescue BL2:"), bl2)
 	if err != nil {
 		return err
 	}
-	fipPath, err := a.saveInstallFile("mf-total-rescue-fip.bin", L("Аварийный FIP:", "Rescue FIP:"), fip)
+	fipPath, err := a.saveInstallFile(p.ID+"-total-rescue-fip.bin", L("Аварийный FIP:", "Rescue FIP:"), fip)
 	if err != nil {
 		return err
 	}
@@ -231,12 +242,13 @@ func (a *App) mfTotalRescue(transport mfRescueTransport) error {
 	if err != nil {
 		return err
 	}
-	a.status("BBT", fmt.Sprintf(L("ubi до erase: bad=%d; UBI будет учитывать их при создании заново", "ubi before erase: bad=%d; fresh UBI will account for them"), len(ubiBadBefore)), app.LevelInfo)
+	a.status("BBT", fmt.Sprintf(L("ubi до erase: bad=%d; fresh UBI учтёт их при создании", "ubi before erase: bad=%d; fresh UBI will account for them"), len(ubiBadBefore)), app.LevelInfo)
 
-	if err = a.mfLoadRescuePayload(s, transport, fipPath, "ursido-mf-total-fip.bin", "MF UrsusBoot FIP", loadAddr); err != nil {
+	label := strings.ToUpper(p.ID)
+	if err = a.loadTotalRescuePayload(s, transport, fipPath, "ursido-"+p.ID+"-total-fip.bin", label+" UrsusBoot FIP", loadAddr); err != nil {
 		return err
 	}
-	if err = a.mfLoadRescuePayload(s, transport, bl2Path, "ursido-mf-total-bl2.bin", "MF BL2", mfRescueBL2Addr); err != nil {
+	if err = a.loadTotalRescuePayload(s, transport, bl2Path, "ursido-"+p.ID+"-total-bl2.bin", label+" BL2", totalRescueBL2Addr); err != nil {
 		return err
 	}
 	// Both payloads are in distinct RAM ranges before the destructive phase,
@@ -244,14 +256,14 @@ func (a *App) mfTotalRescue(transport mfRescueTransport) error {
 	if err = a.verifyRAM(s, fipPath, loadAddr); err != nil {
 		return err
 	}
-	if err = a.verifyRAM(s, bl2Path, mfRescueBL2Addr); err != nil {
+	if err = a.verifyRAM(s, bl2Path, totalRescueBL2Addr); err != nil {
 		return err
 	}
 
 	title := fmt.Sprintf(L(
-		"\nПОЛНОЕ АВАРИЙНОЕ ВОССТАНОВЛЕНИЕ MF / AN7583 — UBI МОЖЕТ БЫТЬ ПОЛНОСТЬЮ УТЕРЯНА.\nТранспорт payload: %s.\n1) СТЕРЕТЬ ВЕСЬ MTD ubi (все существующие тома/настройки/OpenWrt будут уничтожены);\n2) создать чистую UBI и static volume fip ID 4 размером 0x100000;\n3) записать и проверить UrsusBoot FIP;\n4) ПОСЛЕДНИМ записать и проверить BL2.\nПосле reset: UrsusBoot Recovery -> MF UBI sysupgrade.\nPreloader SHA256: %s\nFIP SHA256: %s",
-		"\nFULL MF / AN7583 DISASTER RECOVERY — UBI MAY BE COMPLETELY LOST.\nPayload transport: %s.\n1) ERASE the entire ubi MTD (all existing volumes/settings/OpenWrt are destroyed);\n2) create a fresh UBI and static fip volume ID 4, size 0x100000;\n3) write and verify the UrsusBoot FIP;\n4) write and verify BL2 LAST.\nAfter reset: UrsusBoot Recovery -> MF UBI sysupgrade.\nPreloader SHA256: %s\nFIP SHA256: %s"),
-		transport, preSHA, shaHex(fip))
+		"\nПОЛНОЕ АВАРИЙНОЕ ВОССТАНОВЛЕНИЕ %s / %s — UBI МОЖЕТ БЫТЬ ПОЛНОСТЬЮ УТЕРЯНА.\nТранспорт payload: %s.\n1) СТЕРЕТЬ ВЕСЬ MTD ubi (все существующие тома/настройки/OpenWrt будут уничтожены);\n2) создать чистую UBI и static volume fip ID 4 размером 0x100000;\n3) записать и проверить UrsusBoot FIP;\n4) ПОСЛЕДНИМ записать и проверить BL2.\nПосле reset: UrsusBoot Recovery -> %s UBI sysupgrade.\nPreloader SHA256: %s\nFIP SHA256: %s",
+		"\nFULL %s / %s DISASTER RECOVERY — UBI MAY BE COMPLETELY LOST.\nPayload transport: %s.\n1) ERASE the entire ubi MTD (all existing volumes/settings/OpenWrt are destroyed);\n2) create a fresh UBI and static fip volume ID 4, size 0x100000;\n3) write and verify the UrsusBoot FIP;\n4) write and verify BL2 LAST.\nAfter reset: UrsusBoot Recovery -> %s UBI sysupgrade.\nPreloader SHA256: %s\nFIP SHA256: %s"),
+		label, p.SoC, transport, label, preSHA, shaHex(fip))
 	if err = a.rescueConfirm(title); err != nil {
 		return err
 	}
@@ -282,7 +294,7 @@ func (a *App) mfTotalRescue(transport mfRescueTransport) error {
 		return fmt.Errorf(L("свежая UBI не подключилась после erase: %w", "fresh UBI did not attach after erase: %w"), err)
 	}
 
-	if err = a.ubootPersistentOnce(s, fmt.Sprintf("ubi create fip 0x%x static 4", mfRescueFIPVolumeSize), 2*time.Minute); err != nil {
+	if err = a.ubootPersistentOnce(s, fmt.Sprintf("ubi create fip 0x%x static 4", totalRescueFIPVolumeSize), 2*time.Minute); err != nil {
 		return err
 	}
 	layout, err := a.ubootCommand(s, "ubi info layout", 60*time.Second)
@@ -302,7 +314,7 @@ func (a *App) mfTotalRescue(transport mfRescueTransport) error {
 	if err = a.ubootPersistentOnce(s, "mtd erase bl2", 2*time.Minute); err != nil {
 		return err
 	}
-	if err = a.ubootPersistentOnce(s, fmt.Sprintf("mtd write bl2 0x%x 0x0 0x%x", mfRescueBL2Addr, bl2Size), 3*time.Minute); err != nil {
+	if err = a.ubootPersistentOnce(s, fmt.Sprintf("mtd write bl2 0x%x 0x0 0x%x", totalRescueBL2Addr, bl2Size), 3*time.Minute); err != nil {
 		return err
 	}
 	if err = a.readbackCRC(s, "bl2", 0, bl2Size, verifyAddr, bl2CRC); err != nil {
@@ -311,10 +323,12 @@ func (a *App) mfTotalRescue(transport mfRescueTransport) error {
 
 	a.cancelNow()
 	a.event(fmt.Sprintf(L(
-		"MF total rescue PASS: fresh UBI + fip ID4 + BL2; FIP SHA256=%s; transport=%s",
-		"MF total rescue PASS: fresh UBI + fip ID4 + BL2; FIP SHA256=%s; transport=%s"),
-		shaHex(fip), transport))
-	a.status("NEXT", L("Перезагрузите в UrsusBoot Recovery и установите MF UBI sysupgrade; старые OpenWrt volumes намеренно удалены", "Reboot into UrsusBoot Recovery and install the MF UBI sysupgrade; old OpenWrt volumes were intentionally removed"), app.LevelOK)
+		"%s total rescue PASS: fresh UBI + fip ID4 + BL2; FIP SHA256=%s; transport=%s",
+		"%s total rescue PASS: fresh UBI + fip ID4 + BL2; FIP SHA256=%s; transport=%s"),
+		label, shaHex(fip), transport))
+	a.status("NEXT", fmt.Sprintf(L(
+		"Перезагрузите в UrsusBoot Recovery и установите %s UBI sysupgrade; старые OpenWrt volumes намеренно удалены",
+		"Reboot into UrsusBoot Recovery and install the %s UBI sysupgrade; old OpenWrt volumes were intentionally removed"), label), app.LevelOK)
 	a.noteln(L("Нажмите Enter для reset или N, чтобы остаться в RAM U-Boot.", "Press Enter to reset or N to stay in the RAM U-Boot."))
 	if a.askResetOrStay() {
 		_ = sendLine(s, "reset")

@@ -26,7 +26,7 @@ ubi0: name            fip
 	}
 }
 
-func TestFreshMFRescueFIPContract(t *testing.T) {
+func TestFreshTotalRescueFIPContract(t *testing.T) {
 	good := []ubiVol{{ID: 4, Name: "fip", Type: 4, ReservedPEBs: 9, UsableLEB: 126976}}
 	if err := validateFreshFIPVolume(good, 326231); err != nil {
 		t.Fatal(err)
@@ -61,5 +61,26 @@ func TestMissingBadBlocks(t *testing.T) {
 	got := missingBadBlocks(before, after)
 	if len(got) != 1 || got[0] != 0x20000 {
 		t.Fatalf("missing=%v", got)
+	}
+}
+
+func TestTotalRescueCandidatesFitCanonicalFIPVolume(t *testing.T) {
+	a := &App{root: "."}
+	for _, id := range []string{"md", "mf"} {
+		p := profiles[id]
+		fip, _, err := a.rescueProfileFIP(p)
+		if err != nil {
+			t.Fatalf("%s rescue FIP: %v", id, err)
+		}
+		if len(fip) == 0 || uint64(len(fip)) > totalRescueFIPVolumeSize {
+			t.Fatalf("%s rescue FIP size=0x%x, max=0x%x", id, len(fip), totalRescueFIPVolumeSize)
+		}
+		bl2, _, _, err := a.rescueProfileBL2(p)
+		if err != nil {
+			t.Fatalf("%s rescue BL2: %v", id, err)
+		}
+		if len(bl2) != bl2Size {
+			t.Fatalf("%s rescue BL2 size=0x%x", id, len(bl2))
+		}
 	}
 }

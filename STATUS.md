@@ -1,3 +1,20 @@
+# UrsidoRescue 0.2.1-test.25-md-mf-total-rescue
+
+Status: **CI PASS / HW PARTIAL; MD/MF TOTAL HW PENDING.** Existing hardware evidence from test18 remains valid. Test25 generalizes the fresh-UBI TOTAL path from MF-only to one shared MD/MF engine; hardware acceptance is still pending for both profiles.
+
+## 0.2.1-test.25-md-mf-total-rescue
+
+- Replaces the MF-only TOTAL operations with two shared Expert operations:
+  - TOTAL rescue MD/MF — UART-only;
+  - TOTAL rescue MD/MF — TFTP.
+- The operator selects MD/AN7581 or MF/AN7583 before RAM U-Boot acquisition. The detected profile must match before any destructive command.
+- Both profiles use the same destructive contract: stable BL2/UBI BBT -> preload and verify both profile payloads -> one y/N -> erase the whole ubi MTD -> create fresh UBI -> create static fip volume ID 4 (0x100000) -> write/readback the profile UrsusBoot FIP -> write/readback BL2 last.
+- MD uses its pinned complete UrsusBoot FIP; MF builds its pinned FIP from the verified vanilla FIP + UrsusBoot BL33. Neither TOTAL path reads or trusts the old UBI/FIP.
+- UART-only and TFTP paths are transport-symmetric. Both payloads are in separate RAM ranges before the first persistent erase.
+- Old `mf-total-rescue-*` operation IDs are removed; there is one shared implementation to prevent MD/MF behaviour drift.
+- TOTAL rescue intentionally destroys all old volumes/settings under the ubi MTD. After PASS, boot UrsusBoot Recovery and install the matching MD or MF UBI sysupgrade.
+- Release-candidate CI PASS: formatting, vet/tests, Windows x64, Linux x86_64/arm64, selftest, package and artifact upload.
+
 # UrsidoRescue 0.2.1-test.24-mf-total-rescue
 
 Status: **CI PASS / HW PARTIAL; MF TOTAL HW PENDING.** Existing hardware evidence from test18 remains valid. The new MF TOTAL fresh-UBI recovery path has passed CI, unit tests, cross-builds and selftest but has not yet been executed end-to-end on a real MF.

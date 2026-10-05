@@ -51,8 +51,31 @@ Releases by CI.
 | 0.2.1-test.22 | `77a2dfd` | no | separate BL2 and BL2+FIP rescue for MD/MF |
 | 0.2.1-test.23-uart-noise | `c1391a8` | no | global noisy-UART hardening; destructive commands are never replayed |
 | 0.2.1-test.24-mf-total-rescue | branch `dev/mf-total-ubi-rescue` | **yes** | MF TOTAL rescue: fresh UBI + fip ID4 + UrsusBoot FIP + BL2, UART-only or TFTP |
+| 0.2.1-test.25-md-mf-total-rescue | branch `dev/md-mf-total-rescue` | **yes** | symmetric MD/MF TOTAL rescue: fresh UBI + profile FIP + BL2, UART-only or TFTP |
 
 ---
+
+## 0.2.1-test.25-md-mf-total-rescue — 2026-10-05
+
+Status: **CI PASS / HW PARTIAL; MD/MF TOTAL HW PENDING**.
+
+- TOTAL disaster recovery is no longer MF-only: one shared engine handles **MD/AN7581** and **MF/AN7583**.
+- Expert mode keeps two symmetric transport choices:
+  - **TOTAL rescue MD/MF — UART only**: BootROM → RAM U-Boot → profile FIP/BL2 through `loadx` + XMODEM;
+  - **TOTAL rescue MD/MF — TFTP**: profile FIP/BL2 are preloaded into separate RAM ranges over Ethernet.
+- The operator selects the profile before RAM U-Boot acquisition; detected model/SoC must match before any destructive command.
+- Both profiles use the same fail-closed transaction:
+  stable BBT → preload/verify both payloads → one `y/N` → `mtd erase ubi` →
+  fresh UBI → static `fip` **ID 4**, size `0x100000` → FIP write/CRC readback →
+  **BL2 last** → BL2 CRC readback.
+- **MD** uses its pinned complete UrsusBoot FIP; **MF** uses the verified pinned vanilla FIP with the
+  profile UrsusBoot BL33 replacement. TOTAL mode never reads or trusts the old UBI/FIP.
+- Old `mf-total-rescue-*` operation IDs are removed; shared `total-rescue-uart` and
+  `total-rescue-tftp` prevent MD/MF behaviour drift.
+- UART-only and TFTP use the same flash transaction; only pre-erase RAM payload transport differs.
+- After PASS, boot UrsusBoot Recovery and install the matching **MD or MF UBI sysupgrade**.
+- CI PASS: formatting, vet/tests, Windows x64, Linux x86_64/arm64, selftest, packaging and artifact upload.
+- Hardware acceptance for both TOTAL paths remains **PENDING**.
 
 ## 0.2.1-test.24-mf-total-rescue — 2026-10-05
 

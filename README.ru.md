@@ -40,7 +40,7 @@ UrsidoRescue сделан именно для этого момента. Он д
 
 ## Крайний pre-release
 
-**0.2.1-test.24-mf-total-rescue** добавляет аварийный путь для худшего случая на MF, когда старой UBI-разметке и тому `fip` уже нельзя доверять. В этот же релиз входят отдельные BL2/boot-chain rescue для MD/MF, глобальная устойчивость к шумному UART и Ethernet/WebSocket-консоль UrsusBoot. CI проходит на Windows x64 и Linux x86_64/arm64; новый MF TOTAL flash-path пока имеет статус **HW PENDING**.
+**0.2.1-test.25-md-mf-total-rescue** делает TOTAL disaster recovery симметричным для Nokia XG-040G-MD / AN7581 и XG-040G-MF / AN7583. Оба профиля используют один fresh-UBI transaction engine с выбором UART-only или TFTP. CI проходит на Windows x64 и Linux x86_64/arm64; MD/MF TOTAL flash-paths пока имеют статус **HW PENDING**.
 
 ## Что умеет медвежонок-спасатель
 
@@ -50,7 +50,7 @@ UrsidoRescue сделан именно для этого момента. Он д
 | 🏭 **Вернуть сток** | Восстановить заводскую прошивку Nokia из бэкапа `mtd16` / MedveFlasher, BL2 — последним |
 | 🔧 **Восстановить FIP** | Заменить UBI-том `fip` OpenWrt, когда UBI цел, но система не стартует |
 | 🧯 **Восстановить boot chain** | Починить только BL2 или BL2 + FIP на MD/MF: FIP проверяется первым, BL2 пишется последним |
-| 🚨 **Полностью поднять MF с потерянной UBI** | Создать UBI с нуля, static `fip` ID 4, записать UrsusBoot FIP и затем BL2; на выбор UART-only или TFTP |
+| 🚨 **Полностью поднять MD/MF с потерянной UBI** | Создать UBI с нуля, static `fip` ID 4, записать профильный UrsusBoot FIP и затем BL2; на выбор UART-only или TFTP |
 | 🌐 **Консоль UrsusBoot по Ethernet** | Нативный WebSocket-терминал, загрузка/выгрузка RAM и диагностика без UART, если UrsusBoot уже запущен |
 | 💾 **Залить весь NAND** | Записать полный сырой образ 256 МиБ с проверкой каждой части |
 | 🚀 **Загрузить из RAM** | Запустить OpenWrt initramfs / recovery ITB, не трогая flash |

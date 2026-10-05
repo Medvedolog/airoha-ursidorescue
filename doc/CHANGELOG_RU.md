@@ -51,8 +51,32 @@
 | 0.2.1-test.22 | `77a2dfd` | нет | отдельные BL2 и BL2+FIP rescue для MD/MF |
 | 0.2.1-test.23-uart-noise | `c1391a8` | нет | глобальная устойчивость к шумному UART, destructive-команды не повторяются |
 | 0.2.1-test.24-mf-total-rescue | ветка `dev/mf-total-ubi-rescue` | **да** | MF TOTAL rescue: fresh UBI + fip ID4 + UrsusBoot FIP + BL2, UART-only или TFTP |
+| 0.2.1-test.25-md-mf-total-rescue | ветка `dev/md-mf-total-rescue` | **да** | TOTAL rescue симметрично для MD/MF: fresh UBI + профильный FIP + BL2, UART-only или TFTP |
 
 ---
+
+## 0.2.1-test.25-md-mf-total-rescue — 05.10.2026
+
+Статус: **CI PASS / HW PARTIAL; MD/MF TOTAL HW PENDING**.
+
+- TOTAL disaster recovery больше не MF-only: один общий движок работает для **MD/AN7581** и **MF/AN7583**.
+- В Expert остаются два симметричных транспортных режима:
+  - **TOTAL rescue MD/MF — только UART**: BootROM → RAM U-Boot → профильные FIP/BL2 через `loadx` + XMODEM;
+  - **TOTAL rescue MD/MF — TFTP**: профильные FIP/BL2 заранее грузятся в разные области RAM по Ethernet.
+- Профиль выбирается до загрузки RAM U-Boot; обнаруженная модель/SoC обязана совпасть с выбранной до любой destructive-команды.
+- Для обоих профилей один и тот же fail-closed порядок:
+  стабильная BBT → оба payload в RAM и проверка → один `y/N` → `mtd erase ubi` →
+  fresh UBI → static `fip` **ID 4**, размер `0x100000` → запись/CRC-readback FIP →
+  **BL2 последним** → CRC-readback BL2.
+- **MD** использует закреплённый полный UrsusBoot FIP; **MF** использует проверенный pinned vanilla FIP
+  с профильной заменой BL33. Старый UBI/FIP в TOTAL-режиме не читается и не считается источником истины.
+- Старые operation ID `mf-total-rescue-*` удалены; используются общие `total-rescue-uart` и
+  `total-rescue-tftp`, чтобы MD/MF больше не расходились по логике.
+- UART-only и TFTP проходят один и тот же flash transaction; различается только доставка payload в RAM
+  до первого erase.
+- После PASS оператор загружается в UrsusBoot Recovery и устанавливает соответствующий **MD или MF UBI sysupgrade**.
+- CI PASS: formatting, vet/tests, Windows x64, Linux x86_64/arm64, selftest, packaging и artifact upload.
+- Hardware acceptance для обоих TOTAL-путей пока **PENDING**.
 
 ## 0.2.1-test.24-mf-total-rescue — 05.10.2026
 
