@@ -37,9 +37,9 @@ longer reach the router, the bear cub still can.
 Its second job is **exploration**. On an Airoha device nobody has ported yet, it collects everything
 a new UrsusBoot port needs, strictly read-only, and packs it into one bundle.
 
-## Latest pre-release
+## Current development candidate
 
-**0.2.1-test.24-mf-total-rescue** adds the worst-case MF recovery path for a router whose UBI metadata and `fip` volume can no longer be trusted. It also includes the MD/MF BL2 and boot-chain rescue tools, global noisy-UART hardening, and the UrsusBoot Ethernet/WebSocket console. CI passes on Windows x64 and Linux x86_64/arm64; the new MF TOTAL flash path is still **HW PENDING**.
+**0.2.1-test.25-md-mf-total-rescue** makes TOTAL disaster recovery symmetric for both Nokia XG-040G-MD / AN7581 and XG-040G-MF / AN7583. Both profiles now use the same fresh-UBI transaction engine with UART-only or TFTP payload transport. The published test24 remains the latest release until test25 completes CI/release validation; TOTAL flash paths are **HW PENDING**.
 
 ## What the rescue bear can do
 
@@ -49,7 +49,7 @@ a new UrsusBoot port needs, strictly read-only, and packs it into one bundle.
 | 🏭 **Return to stock** | Restore factory Nokia firmware from an `mtd16` / MedveFlasher backup, BL2 written last |
 | 🔧 **Restore the FIP** | Replace the OpenWrt `fip` UBI volume when UBI is intact but the system will not start |
 | 🧯 **Recover the boot chain** | Repair BL2 only or BL2 + FIP on MD/MF, with FIP verified first and BL2 written last |
-| 🚨 **MF total disaster recovery** | Recreate a lost UBI from scratch, create static `fip` ID 4, write UrsusBoot FIP, then BL2 last; UART-only or TFTP |
+| 🚨 **MD/MF total disaster recovery** | Recreate a lost UBI from scratch, create static `fip` ID 4, write the profile UrsusBoot FIP, then BL2 last; UART-only or TFTP |
 | 🌐 **UrsusBoot Ethernet console** | Native WebSocket terminal with RAM upload/export and diagnostics, no UART required when UrsusBoot is already running |
 | 💾 **Restore all of NAND** | Write a full 256 MiB raw image with readback of every chunk |
 | 🚀 **Boot from RAM** | Start an OpenWrt initramfs / recovery ITB without touching flash |
