@@ -37,15 +37,26 @@ jobs:
         with:
           name: UrsidoRescue-${{ steps.pkg.outputs.version }}
           path: dist/UrsidoRescue-${{ steps.pkg.outputs.version }}
-      - name: Publish pre-release
-        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main') || (github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish prerelease]'))
+      - name: Publish or promote release
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main') || (github.event_name == 'push' && github.ref == 'refs/heads/main' && (contains(github.event.head_commit.message, '[publish prerelease]') || contains(github.event.head_commit.message, '[promote release]')))
         env:
           GH_TOKEN: ${{ github.token }}
+          PROMOTE_RELEASE: ${{ contains(github.event.head_commit.message, '[promote release]') }}
         run: |
           V=${{ steps.pkg.outputs.version }}
           TAG="v$V"
           if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "$TAG" ]; then
             echo "tag $GITHUB_REF_NAME does not match VERSION $V"; exit 1
+          fi
+          if [ "$PROMOTE_RELEASE" = "true" ]; then
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release edit "$TAG" --prerelease=false --latest --notes-file STATUS.md
+            else
+              gh release create "$TAG" \
+                "dist/UrsidoRescue-$V.zip" "dist/UrsidoRescue-$V.zip.sha256" \
+                --title "UrsidoRescue $V" --notes-file STATUS.md --target "$GITHUB_SHA" --latest
+            fi
+            exit 0
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "release $TAG already exists"; exit 1
